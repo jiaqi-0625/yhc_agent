@@ -9,7 +9,7 @@
 ## 分层
 
 ```text
-apps/api             HTTP/API 边界、本地作品存储、黄金样例与人工审批命令
+apps/api             HTTP/API 边界、本地作品存储、作品摘要/复制、黄金样例与人工审批命令
 packages/agent       Pi Agent 装配、系统提示词、策略钩子、审计与脱敏
 packages/tools       车型快照、宣传表述校验和策略草稿白名单工具
 packages/domain      工作流状态机、revision 冲突和工具策略

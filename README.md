@@ -66,13 +66,15 @@ Local API:
 npm run dev:api
 ```
 
+The development command watches source files and automatically restarts the local API after changes. Use `npm run start:api` when a non-watching process is preferred.
+
 After the server starts, open the local acceptance page:
 
 ```text
 http://127.0.0.1:3100/
 ```
 
-The page creates and restores a local session and also runs the golden-sample business flow: create a vehicle snapshot, generate a strategy, edit or lock items, regenerate unlocked items, submit for approval, and make an explicit human decision. It uses the credential-free Mock provider unless you explicitly configure another provider.
+The page creates and restores a local session and also runs the golden-sample business flow: create a vehicle snapshot, generate a strategy, edit or lock items, regenerate unlocked items, submit for approval, and make an explicit human decision. The work list supports creating and switching among multiple works, restores the selected work after refresh, and can create a fresh work from an approved vehicle snapshot. It uses the credential-free Mock provider unless you explicitly configure another provider.
 
 Default endpoints:
 
@@ -90,6 +92,7 @@ Default endpoints:
 - `PATCH http://127.0.0.1:3100/v1/works/{id}/strategy`
 - `POST http://127.0.0.1:3100/v1/works/{id}/strategy/approval-request`
 - `POST http://127.0.0.1:3100/v1/works/{id}/strategy/decision`
+- `POST http://127.0.0.1:3100/v1/works/{id}/copy`
 
 Set `PORT` to use a different port.
 

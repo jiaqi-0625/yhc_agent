@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark" />
     <title>萤火虫广告 Agent</title>
-    <link rel="stylesheet" href="/app.css?build=strategy-v1" />
+    <link rel="stylesheet" href="/app.css?build=workspace-v2" />
   </head>
   <body>
     <div class="shell">
@@ -52,6 +52,16 @@
             </dl>
           </section>
 
+          <section class="work-library">
+            <div class="sidebar-section-heading">
+              <p class="eyebrow">作品列表</p>
+              <button id="new-work" class="icon-button" type="button" aria-label="新建广告作品">＋</button>
+            </div>
+            <div id="work-list" class="work-list" aria-live="polite">
+              <p class="work-list-empty">正在加载作品…</p>
+            </div>
+          </section>
+
           <div class="sidebar-actions">
             <button id="new-session" class="button secondary" type="button">新建会话</button>
             <button id="reset-session" class="button ghost" type="button">清空当前会话</button>
@@ -72,7 +82,9 @@
                 <p>使用内置黄金样例验证业务状态、版本、锁定和审批边界，不消耗模型额度。</p>
               </div>
               <div class="stage-strip" aria-label="流程阶段">
-                <span class="active">1 车型快照</span><span>2 策略草稿</span><span>3 人工审批</span>
+                <span data-stage="snapshot">1 车型快照</span>
+                <span data-stage="strategy">2 策略草稿</span>
+                <span data-stage="approval">3 人工审批</span>
               </div>
             </header>
 
@@ -88,6 +100,14 @@
             </section>
 
             <div id="active-work" hidden>
+              <section id="workflow-state-card" class="workflow-state-card">
+                <div>
+                  <strong id="workflow-state-title">作品已就绪</strong>
+                  <p id="workflow-state-description">继续完成当前阶段。</p>
+                </div>
+                <button id="state-new-work" class="button secondary" type="button">新建独立作品</button>
+              </section>
+
               <section class="work-card snapshot-card">
                 <div>
                   <p class="eyebrow">不可变车型快照</p>
@@ -122,6 +142,7 @@
                   <button id="request-approval" class="primary-action" type="button">提交人工审批</button>
                   <button id="reject-strategy" class="button danger" type="button" hidden>驳回</button>
                   <button id="approve-strategy" class="primary-action" type="button" hidden>人工通过</button>
+                  <button id="copy-work" class="primary-action" type="button" hidden>基于此车型新建作品</button>
                 </div>
                 <p id="approval-note" class="approval-note"></p>
               </section>
@@ -154,6 +175,6 @@
         </div>
       </div>
     </div>
-    <script src="/app.js?build=strategy-v1" defer></script>
+    <script src="/app.js?build=workspace-v2" defer></script>
   </body>
 </html>

@@ -11,7 +11,8 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:api": "tsx apps/api/src/server.ts",
+    "dev:api": "tsx watch apps/api/src/server.ts",
+    "start:api": "tsx apps/api/src/server.ts",
     "dev:cli": "tsx apps/cli/src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"packages/**/test/*.test.ts\" \"apps/**/test/*.test.ts\"",

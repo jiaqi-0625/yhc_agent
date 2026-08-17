@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { LocalAgentRuntime } from "@firefly/agent";
 import { RevisionConflictError } from "@firefly/domain";
 import {
+  CopyWorkRequestSchema,
   CreateWorkRequestSchema,
   GenerateStrategyRequestSchema,
   StrategyApprovalRequestSchema,
@@ -76,12 +77,15 @@ function sessionRoute(pathname: string): { sessionId: string; action?: string } 
 }
 
 function workRoute(pathname: string): { workId: string; action?: string } | undefined {
-  const match = pathname.match(/^\/v1\/works\/([^/]+)(?:\/strategy(?:\/([^/]+))?)?$/u);
+  const match = pathname.match(/^\/v1\/works\/([^/]+)(?:\/([^/]+)(?:\/([^/]+))?)?$/u);
   if (!match?.[1]) return undefined;
+  const resource = match[2];
+  const nestedAction = match[3];
   return {
     workId: decodeURIComponent(match[1]),
-    ...(match[2] === undefined && pathname.endsWith("/strategy") ? { action: "strategy" } : {}),
-    ...(match[2] === undefined ? {} : { action: match[2] }),
+    ...(resource === undefined
+      ? {}
+      : { action: resource === "strategy" ? (nestedAction ?? "strategy") : resource }),
   };
 }
 
@@ -165,6 +169,11 @@ async function handleRequest(
   const work = workRoute(url.pathname);
   if (work && request.method === "GET" && work.action === undefined) {
     sendJson(response, 200, await business.getWork(work.workId));
+    return;
+  }
+  if (work && request.method === "POST" && work.action === "copy") {
+    const body = validateBody<{ expectedRevision: number }>(CopyWorkRequestSchema, await readJson(request));
+    sendJson(response, 201, await business.copyApprovedWork(work.workId, body.expectedRevision));
     return;
   }
   if (work && request.method === "POST" && work.action === "generate") {

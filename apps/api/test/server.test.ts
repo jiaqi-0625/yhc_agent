@@ -72,7 +72,11 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(pageResponse.status, 200);
   assert.match(pageResponse.headers.get("content-type") ?? "", /^text\/html/u);
   assert.match(pageResponse.headers.get("content-security-policy") ?? "", /default-src 'self'/u);
-  assert.match(await pageResponse.text(), /萤火虫广告 Agent/u);
+  const page = await pageResponse.text();
+  assert.match(page, /萤火虫广告 Agent/u);
+  assert.match(page, /作品列表/u);
+  assert.match(page, /新建广告作品/u);
+  assert.match(page, /基于此车型新建作品/u);
 
   const [styleResponse, scriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
@@ -82,6 +86,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
+  assert.match(await scriptResponse.text(), /firefly\.workId/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {

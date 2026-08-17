@@ -131,6 +131,45 @@ test("strategy vertical slice preserves human locks and requires a human approva
   assert.equal(approved.work.status, "strategy_approved");
   assert.equal(approved.approvals[0].actorId, "reviewer_local");
   assert.equal(approved.approvals[0].decision, "approved");
+
+  const listResponse = await fetch(`${baseUrl}/v1/works`);
+  assert.equal(listResponse.status, 200);
+  const listed = await json(listResponse);
+  assert.equal(listed.works.length, 1);
+  assert.equal(listed.works[0].work.id, created.work.id);
+  assert.equal(listed.works[0].vehicle.series, "萤火 E5");
+  assert.equal(listed.works[0].strategy.status, "approved");
+  assert.equal("vehicleSnapshot" in listed.works[0], false);
+
+  const copyResponse = await fetch(`${baseUrl}/v1/works/${created.work.id}/copy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: approved.work.revision }),
+  });
+  assert.equal(copyResponse.status, 201);
+  const copied = await json(copyResponse);
+  assert.notEqual(copied.work.id, created.work.id);
+  assert.equal(copied.work.status, "created");
+  assert.equal(copied.work.revision, 1);
+  assert.equal(copied.vehicleSnapshot.id, approved.vehicleSnapshot.id);
+  assert.equal(copied.strategyVersionCount, 0);
+
+  const copiedList = await json(await fetch(`${baseUrl}/v1/works`));
+  assert.equal(copiedList.works.length, 2);
+  assert.equal(copiedList.works[0].work.id, copied.work.id);
+});
+
+test("copying is rejected for a work that has not passed strategy approval", async (context) => {
+  const { server, baseUrl } = await startBusinessApi();
+  context.after(() => server.close());
+  const created = await createWork(baseUrl);
+  const response = await fetch(`${baseUrl}/v1/works/${created.work.id}/copy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: created.work.revision }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await json(response)).code, "AIC-WORKFLOW-WORK_COPY_DENIED");
 });
 
 test("business work is restored independently from the Agent transcript", async (context) => {

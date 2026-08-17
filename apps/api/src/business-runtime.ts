@@ -40,6 +40,22 @@ export interface LocalWorkView {
   approvals: StrategyApproval[];
 }
 
+export interface LocalWorkSummary {
+  work: Work;
+  vehicle: {
+    brand: string;
+    series: string;
+    trim: string;
+    modelYear: number;
+  };
+  strategy?: {
+    version: number;
+    status: Strategy["status"];
+    audience: string;
+    theme: string;
+  };
+}
+
 function activeStrategy(record: LocalWorkRecord): Strategy | undefined {
   return record.strategyVersions.at(-1);
 }
@@ -63,11 +79,32 @@ export class LocalBusinessRuntime {
     this.#vehicles = vehicles;
   }
 
-  async listWorks(): Promise<LocalWorkView[]> {
+  async listWorks(): Promise<LocalWorkSummary[]> {
     const records = await this.store.list();
     return records
       .sort((left, right) => right.work.updatedAt.localeCompare(left.work.updatedAt))
-      .map((record) => this.#view(record));
+      .map((record) => {
+        const strategy = activeStrategy(record);
+        return {
+          work: structuredClone(record.work),
+          vehicle: {
+            brand: record.vehicleSnapshot.brand,
+            series: record.vehicleSnapshot.series,
+            trim: record.vehicleSnapshot.trim,
+            modelYear: record.vehicleSnapshot.modelYear,
+          },
+          ...(strategy === undefined
+            ? {}
+            : {
+                strategy: {
+                  version: strategy.version,
+                  status: strategy.status,
+                  audience: strategy.audience,
+                  theme: strategy.theme,
+                },
+              }),
+        };
+      });
   }
 
   async getWork(workId: string): Promise<LocalWorkView> {
@@ -113,6 +150,37 @@ export class LocalBusinessRuntime {
       schemaVersion: 1,
       work,
       vehicleSnapshot: snapshot,
+      strategyVersions: [],
+      approvals: [],
+    };
+    await this.store.save(record);
+    return this.#view(record);
+  }
+
+  async copyApprovedWork(workId: string, expectedRevision: number): Promise<LocalWorkView> {
+    const source = await this.#record(workId);
+    assertRevision(expectedRevision, source.work.revision);
+    if (source.work.status !== "strategy_approved") {
+      throw new BusinessRuntimeError(
+        "AIC-WORKFLOW-WORK_COPY_DENIED",
+        "只有已通过策略审批的作品才能作为新作品的车型来源。",
+        409,
+      );
+    }
+    const now = new Date().toISOString();
+    const id = `work_${randomUUID()}`;
+    const record: LocalWorkRecord = {
+      schemaVersion: 1,
+      work: {
+        id,
+        projectId: source.work.projectId,
+        status: "created",
+        revision: 1,
+        vehicleSnapshotId: source.vehicleSnapshot.id,
+        createdAt: now,
+        updatedAt: now,
+      },
+      vehicleSnapshot: structuredClone(source.vehicleSnapshot),
       strategyVersions: [],
       approvals: [],
     };
