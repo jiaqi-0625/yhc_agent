@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>萤火虫广告 Agent</title>
+    <link rel="stylesheet" href="/app.css?build=strategy-v1" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <div>
+            <strong>萤火虫广告 Agent</strong>
+            <span>Pi 本地框架</span>
+          </div>
+        </div>
+        <div id="service-status" class="status" aria-live="polite">
+          <span class="status-dot"></span>
+          <span>正在连接</span>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <aside class="sidebar">
+          <section>
+            <p class="eyebrow">当前运行环境</p>
+            <dl class="facts">
+              <div><dt>Provider</dt><dd id="provider">—</dd></div>
+              <div><dt>Model</dt><dd id="model">—</dd></div>
+              <div><dt>Session</dt><dd id="session-id">—</dd></div>
+            </dl>
+          </section>
+
+          <section class="boundary-card">
+            <p class="eyebrow">安全边界</p>
+            <ul>
+              <li>业务工具按作品受控装配</li>
+              <li>不能发布广告</li>
+              <li>不能替代人工审批</li>
+              <li>未开放通用系统工具</li>
+            </ul>
+          </section>
+
+          <section>
+            <p class="eyebrow">当前作品</p>
+            <dl class="facts">
+              <div><dt>Status</dt><dd id="work-status">尚未创建</dd></div>
+              <div><dt>Revision</dt><dd id="work-revision">—</dd></div>
+            </dl>
+          </section>
+
+          <div class="sidebar-actions">
+            <button id="new-session" class="button secondary" type="button">新建会话</button>
+            <button id="reset-session" class="button ghost" type="button">清空当前会话</button>
+          </div>
+        </aside>
+
+        <div class="main-area">
+          <nav class="view-tabs" aria-label="工作区视图">
+            <button class="active" type="button" data-view="workflow">策略竖切</button>
+            <button type="button" data-view="chat">Agent 会话</button>
+          </nav>
+
+          <main id="workflow-view" class="workflow-panel view">
+            <header class="workflow-header">
+              <div>
+                <p class="eyebrow">FIRST BUSINESS VERTICAL</p>
+                <h1>车型快照 → 卖点策略 → 人工审批</h1>
+                <p>使用内置黄金样例验证业务状态、版本、锁定和审批边界，不消耗模型额度。</p>
+              </div>
+              <div class="stage-strip" aria-label="流程阶段">
+                <span class="active">1 车型快照</span><span>2 策略草稿</span><span>3 人工审批</span>
+              </div>
+            </header>
+
+            <div id="workflow-error" class="error-banner" role="alert" hidden></div>
+
+            <section id="create-work-card" class="work-card empty-state">
+              <span class="card-icon" aria-hidden="true">◆</span>
+              <div>
+                <h2>创建黄金样例作品</h2>
+                <p>内置虚构车型“萤火 E5 长续航示例版”，包含带来源的固定卖点、扩展卖点和禁用表达。</p>
+              </div>
+              <button id="create-work" class="primary-action" type="button">创建车型快照</button>
+            </section>
+
+            <div id="active-work" hidden>
+              <section class="work-card snapshot-card">
+                <div>
+                  <p class="eyebrow">不可变车型快照</p>
+                  <h2 id="vehicle-name">—</h2>
+                  <p id="snapshot-id" class="mono">—</p>
+                </div>
+                <div id="vehicle-facts" class="fact-pills"></div>
+              </section>
+
+              <section id="strategy-setup" class="work-card strategy-setup">
+                <div>
+                  <p class="eyebrow">策略输入</p>
+                  <h2>生成卖点策略草稿</h2>
+                </div>
+                <label>目标人群<input id="strategy-audience" value="有孩家庭用户" maxlength="120" /></label>
+                <label>传播主题<input id="strategy-theme" value="周末家庭出行" maxlength="120" /></label>
+                <button id="generate-strategy" class="primary-action" type="button">生成策略草稿</button>
+              </section>
+
+              <section id="strategy-editor" class="strategy-editor" hidden>
+                <div class="section-heading">
+                  <div>
+                    <p class="eyebrow">当前策略版本</p>
+                    <h2>卖点策略 <span id="strategy-version" class="version-tag">—</span></h2>
+                  </div>
+                  <div id="validation-state" class="validation-state">等待校验</div>
+                </div>
+                <div id="strategy-items" class="strategy-items"></div>
+                <div class="editor-actions">
+                  <button id="save-strategy" class="button secondary" type="button">保存人工修改</button>
+                  <button id="regenerate-strategy" class="button secondary" type="button">重新生成未锁定项</button>
+                  <button id="request-approval" class="primary-action" type="button">提交人工审批</button>
+                  <button id="reject-strategy" class="button danger" type="button" hidden>驳回</button>
+                  <button id="approve-strategy" class="primary-action" type="button" hidden>人工通过</button>
+                </div>
+                <p id="approval-note" class="approval-note"></p>
+              </section>
+            </div>
+          </main>
+
+        <main id="chat-view" class="chat-panel view" hidden>
+          <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
+            <section id="welcome" class="welcome">
+              <div class="welcome-icon" aria-hidden="true">✦</div>
+              <p class="eyebrow">LOCAL FRAMEWORK</p>
+              <h1>本地 Agent 已准备好</h1>
+              <p>这里用于验收 Pi Agent 的会话、上下文恢复和模型连接。默认 Mock 模型不会产生费用。</p>
+              <div class="suggestions">
+                <button type="button" data-prompt="介绍一下当前 Agent 框架的能力边界">查看能力边界</button>
+                <button type="button" data-prompt="为汽车信息流广告生成流程列出三个规划步骤">测试多轮对话</button>
+              </div>
+            </section>
+          </div>
+
+          <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+          <form id="composer" class="composer">
+            <label class="sr-only" for="prompt">发送消息</label>
+            <textarea id="prompt" rows="1" maxlength="12000" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
+            <button id="send" class="send-button" type="submit" aria-label="发送消息">发送</button>
+          </form>
+          <p class="footnote">会话与业务产物分开持久化；当前聊天 Agent 默认不加载业务工具。</p>
+        </main>
+        </div>
+      </div>
+    </div>
+    <script src="/app.js?build=strategy-v1" defer></script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+{
+  "name": "@firefly/agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@earendil-works/pi-agent-core": "0.84.1",
+    "@earendil-works/pi-ai": "0.84.1",
+    "@firefly/domain": "0.1.0",
+    "@firefly/schemas": "0.1.0",
+    "@firefly/tools": "0.1.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "firefly-ad-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "tsx apps/api/src/server.ts",
+    "dev:cli": "tsx apps/cli/src/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test \"packages/**/test/*.test.ts\" \"apps/**/test/*.test.ts\"",
+    "security:check": "node scripts/security-check.mjs",
+    "audit:prod": "npm audit --registry=https://registry.npmjs.org --omit=dev --audit-level=high",
+    "check": "npm run typecheck && npm test && npm run security:check"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "tsx": "4.22.1",
+    "typescript": "5.9.3"
+  }
+}
