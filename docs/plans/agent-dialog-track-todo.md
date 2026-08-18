@@ -117,7 +117,8 @@
 
 ## 工作区契约通知
 
-- 2026-08-18：WS-002 已在 `agent/workspace-v2-foundation` 提交为 `4302ac8`，尚未提交 PR 或合并。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
+- 2026-08-18：WS-002 已基于最新 `origin/main` 重写为 `5b21d7e`，准备统一推送到 `main`。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
+- 2026-08-18：WS-003 已基于最新 `origin/main` 重写为 `e664b30`，准备统一推送到 `main`。任务上下文后续应只引用 `assetSnapshotId`，资产详情从 `TaskAssetSnapshot` 读取；公司资产和本地上传统一使用 `AssetReference`，不得把 Provider 私有字段或下载地址加入上下文契约。
 
 ## 更新记录
 
@@ -125,3 +126,5 @@
 |---|---|---|
 | 2026-08-18 | Codex | 根据已确认的 Workspace V2 规格建立初始对话区开发清单 |
 | 2026-08-18 | Codex | 收到 WS-002 共享核心实体契约通知；AG-003 继续依赖其评审和合并结果 |
+| 2026-08-18 | Codex | 收到 WS-003 资产契约通知；AG-105/AG-301 使用任务资产快照引用，不复制资产 Provider 私有结构 |
+| 2026-08-18 | Codex | 将重复的 `docs/tracks` 账本路径收敛为兼容入口；本文件是唯一实时对话区账本 |

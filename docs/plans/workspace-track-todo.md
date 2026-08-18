@@ -3,7 +3,7 @@
 > 负责人：工作区负责人
 > 推荐分支：`agent/workspace-v2-foundation`
 > 当前状态：进行中
-> 当前任务：WS-002 定义 `Brand`、`Vehicle`、`BatchProject`、`VideoTask` Schema
+> 当前任务：WS-003 定义资产引用、任务资产快照和临时资产 Schema
 > 最近更新：2026-08-18
 > 关联 PR：无
 
@@ -52,7 +52,7 @@
 |---|---|---|---|---|
 | WS-001 | 盘点现有 `Project`、`Work`、车型快照和本地存储结构 | 无 | 进行中 | 形成迁移映射，列出兼容字段和废弃字段 |
 | WS-002 | 定义 `Brand`、`Vehicle`、`BatchProject`、`VideoTask` Schema | WS-001 | 进行中 | TypeBox Schema、类型导出和 Schema 测试通过 |
-| WS-003 | 定义资产引用、任务资产快照和临时资产 Schema | WS-002 | 待开始 | 覆盖车型、人物、场景、风格和本地上传元数据 |
+| WS-003 | 定义资产引用、任务资产快照和临时资产 Schema | WS-002 | 进行中 | 覆盖车型、人物、场景、风格和本地上传元数据 |
 | WS-004 | 定义阶段产物、不可变版本、回退和失效 Schema | WS-002 | 待开始 | 能表达版本依赖与下游失效原因 |
 | WS-005 | 与对话区共同冻结 `TaskContext` 和 `AgentActionCard` 契约 | WS-002, WS-003 | 待开始 | 双方测试 fixture 使用同一版本 Schema |
 | WS-006 | 将 Web 和 API 单体文件拆出工作区/Agent 模块边界 | WS-005 | 待开始 | 两条线可修改不同文件，现有功能无回归 |
@@ -122,8 +122,9 @@
 
 ## 任务备注
 
-- WS-001：实际分支 `agent/workspace-v2-foundation`；提交 `407b321`；已形成 [`ws-001-migration-inventory.md`](./ws-001-migration-inventory.md)，`npm run check` 通过（43/43 测试），待评审与合并流程。
-- WS-002：实际分支 `agent/workspace-v2-foundation`；提交 `4302ac8`；已定义四个 Workspace V2 核心实体、类型导出和边界测试，`npm run check` 通过（47/47 测试）；共享契约通知已同步到对话区账本，待评审与合并流程。
+- WS-001：集成目标 `main`；提交 `b589528`；已形成 [`ws-001-migration-inventory.md`](./ws-001-migration-inventory.md)，`npm run check` 通过（43/43 测试），待评审与合并流程。
+- WS-002：集成目标 `main`；提交 `5b21d7e`；已定义四个 Workspace V2 核心实体、类型导出和边界测试，`npm run check` 通过（47/47 测试）；共享契约通知已同步到对话区账本，待评审与合并流程。
+- WS-003：集成目标 `main`；提交 `e664b30`；已定义资产引用、项目资产池、任务资产快照和临时资产元数据，`npm run check` 通过（50/50 测试）；共享契约通知已同步到对话区账本，准备统一推送到 `main`。
 
 ## 更新记录
 
@@ -135,4 +136,6 @@
 | 2026-08-18 | Codex | WS-001 基线检查通过：typecheck、43 项测试和安全扫描均成功 |
 | 2026-08-18 | Codex | 切换当前任务到 WS-002，开始定义 Workspace V2 核心实体 Schema |
 | 2026-08-18 | Codex | WS-002 本地验收通过：四个核心实体 Schema、类型导出、边界测试及全仓 47 项测试均成功 |
-| 2026-08-18 | Codex | 首次提交完成：WS-001 `407b321`、WS-002 `4302ac8`，提交身份已统一为 `jiaqi-0625` |
+| 2026-08-18 | Codex | 提交身份统一为 `jiaqi-0625`，并基于最新 `origin/main` 重写：WS-001 `b589528`、WS-002 `5b21d7e` |
+| 2026-08-18 | Codex | WS-003 本地验收通过：车型、人物、场景、视觉风格、本地上传、项目资产池和任务快照 Schema 完成，全仓 50 项测试成功 |
+| 2026-08-18 | Codex | WS-003 资产契约已基于最新 `origin/main` 重写为 `e664b30`；准备统一推送到 `main` |
