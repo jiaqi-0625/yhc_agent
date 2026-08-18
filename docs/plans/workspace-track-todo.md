@@ -54,7 +54,7 @@
 | WS-002 | 定义 `Brand`、`Vehicle`、`BatchProject`、`VideoTask` Schema | WS-001 | 已完成 | TypeBox Schema、类型导出和 Schema 测试通过 |
 | WS-003 | 定义资产引用、任务资产快照和临时资产 Schema | WS-002 | 已完成 | 覆盖车型、人物、场景、风格和本地上传元数据 |
 | WS-004 | 定义阶段产物、不可变版本、回退和失效 Schema | WS-002 | 已完成 | 能表达版本依赖与下游失效原因 |
-| WS-005 | 与对话区共同冻结 `TaskContext` 和 `AgentActionCard` 契约 | WS-002, WS-003 | 待开始 | 双方测试 fixture 使用同一版本 Schema |
+| WS-005 | 与对话区共同冻结 `TaskContext` 和 `AgentActionCard` 契约 | WS-002, WS-003 | 已完成 | 双方测试 fixture 使用同一版本 Schema |
 | WS-006 | 将 Web 和 API 单体文件拆出工作区/Agent 模块边界 | WS-005 | 待开始 | 两条线可修改不同文件，现有功能无回归 |
 
 ## 里程碑 1：领域状态与策略
@@ -126,6 +126,7 @@
 - WS-002：已进入 `origin/main`；提交 `5b21d7e`；四个 Workspace V2 核心实体、类型导出和边界测试验收通过。
 - WS-003：已进入 `origin/main`；提交 `e664b30`；资产引用、资产池、任务快照和临时资产元数据验收通过。
 - WS-004：功能提交 `86414a1` 随本次账本提交进入 `origin/main`；阶段内容引用、不可变版本、人工确认、回退记录和依赖失效契约验收通过，`npm run check` 通过（58/58 测试）。
+- WS-005：功能提交 `a8e13b2`；冻结服务端解析的只读 `TaskContext`、统一提案型 `AgentActionCard`、成本提示与三类版本化 payload；旧 `StrategyActionProposal` 保留为已弃用兼容契约。工作区 Schema 测试和对话区工具测试共享同一 fixture，全仓检查通过（62/62 测试）。
 
 ## 更新记录
 
@@ -144,3 +145,5 @@
 | 2026-08-18 | Codex | 切换当前任务到 WS-004，在 `agent/workspace-v2-versioning` 开始阶段版本契约设计 |
 | 2026-08-18 | Codex | WS-004 本地验收通过：不可变版本不含更新字段，回退显式记录目标版本，下游失效可定位依赖和传播原因；全仓 58 项测试成功 |
 | 2026-08-18 | Codex | 根据用户长期授权，将仓库流程固定为从最新 `origin/main` 开始、检查后直接非强制快进推送 `main`；WS-001～WS-004 按新标准完成 |
+| 2026-08-18 | Codex | 开始 WS-005；对话区现有 `StrategyActionProposal` 作为兼容输入，统一契约由共享 Schema 和双方 fixture 冻结 |
+| 2026-08-18 | Codex | WS-005 本地验收完成：共享 `TaskContext`/`AgentActionCard` v1 契约、跨包 fixture 和越权字段拒绝测试落地；功能提交 `a8e13b2`，全仓检查 62/62 通过，随本次账本提交进入 `origin/main` |

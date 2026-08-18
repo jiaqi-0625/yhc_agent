@@ -120,6 +120,8 @@
 - 2026-08-18：WS-002 已通过 `5b21d7e` 进入 `main`。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
 - 2026-08-18：WS-003 已通过 `e664b30` 进入 `main`。任务上下文后续应只引用 `assetSnapshotId`，资产详情从 `TaskAssetSnapshot` 读取；公司资产和本地上传统一使用 `AssetReference`，不得把 Provider 私有字段或下载地址加入上下文契约。
 - 2026-08-18：WS-004 通过 `86414a1` 随本次账本提交进入 `origin/main`。对话区只展示 `StageArtifactVersion`、`StageConfirmation`、`StageRollbackRecord` 和 `StageArtifactInvalidation` 的只读摘要；回退操作卡片使用 `RollbackStageRequest`，下游失效由服务端计算，Agent 不得提交确认记录或伪造失效列表。
+- 2026-08-18：工作区已开始 WS-005。冻结原则为 `TaskContext` 只包含服务端解析的只读任务摘要，`AgentActionCard` 只携带任务、动作、expectedRevision、摘要、成本提示和版本化 payload；现有 `StrategyActionProposal` 兼容迁入统一卡片，不建立平行契约。
+- 2026-08-18：WS-005 通过功能提交 `a8e13b2` 完成契约冻结。对话区后续直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和 `packages/schemas/test/fixtures/workspace-v2.ts`；卡片仅为人工执行提案，服务端仍须重算身份、权限、任务归属、revision 和实际成本。旧 `StrategyActionProposal` 仅用于当前纵向链路兼容。
 
 ## 更新记录
 
@@ -132,3 +134,5 @@
 | 2026-08-18 | Codex | WS-002/WS-003 共享契约已随 `main` 集成完成；全仓检查 53/53 通过 |
 | 2026-08-18 | Codex | 收到 WS-004 版本契约通知；操作卡片只请求回退目标，确认和失效记录保持服务端权威 |
 | 2026-08-18 | Codex | 根据用户长期授权，将开发流程固定为从最新 `origin/main` 开始并在检查后直接推送 `main`；不再默认创建功能分支或 PR |
+| 2026-08-18 | Codex | 与工作区启动 WS-005 契约冻结；AG-003 后续直接复用共享 Schema 和 fixture |
+| 2026-08-18 | Codex | 收到 WS-005 完成通知：共享 Agent 契约及跨包 fixture 已由 `a8e13b2` 冻结，全仓检查 62/62 通过；AG-003～AG-005 不再定义平行类型 |
