@@ -64,6 +64,7 @@ export function generateDeterministicStrategy(input: StrategyGenerationInput): S
 }
 
 export interface StrategyWorkflowPort {
+  readonly videoTaskId: string;
   currentRevision(): Promise<number>;
   generate(request: GenerateStrategyRequest): Promise<{ strategy: Strategy; validation: StrategyValidationResult }>;
   validate(): Promise<StrategyValidationResult>;

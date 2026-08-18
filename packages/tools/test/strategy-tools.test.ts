@@ -6,6 +6,7 @@ import { createStrategyTools, type StrategyWorkflowPort } from "../src/index.ts"
 test("strategy Agent tools return versioned proposals without mutating workflow state", async () => {
   let mutationCalls = 0;
   const service: StrategyWorkflowPort = {
+    videoTaskId: "video_task_strategy_001",
     async currentRevision() { return 3; },
     async generate() {
       mutationCalls += 1;
@@ -34,12 +35,16 @@ test("strategy Agent tools return versioned proposals without mutating workflow 
   });
   assert.deepEqual(generationResult.details, {
     schemaVersion: 1,
-    kind: "action_proposal",
+    kind: "agent_action_card",
+    id: "card_generate_strategy_video_task_strategy_001_3",
+    idempotencyKey: "generate_strategy_video_task_strategy_001_3",
+    videoTaskId: "video_task_strategy_001",
     action: "generate_strategy",
     label: "生成卖点策略草稿",
     summary: "面向“年轻家庭”生成“周末露营”策略，点击后才会写入作品。",
     expectedRevision: 3,
-    payload: { expectedRevision: 3, audience: "年轻家庭", theme: "周末露营" },
+    estimatedCostCredits: 0,
+    payload: { audience: "年轻家庭", theme: "周末露营" },
   });
 
   const approval = tools.find((tool) => tool.name === "propose_strategy_approval");

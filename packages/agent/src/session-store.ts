@@ -1,9 +1,11 @@
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { TaskContextSchema, type TaskContext } from "@firefly/schemas";
+import { Value } from "typebox/value";
 
-export interface PersistedLocalSession {
+export interface PersistedLocalSessionV1 {
   schemaVersion: 1;
   id: string;
   workId?: string;
@@ -14,6 +16,19 @@ export interface PersistedLocalSession {
   messages: AgentMessage[];
 }
 
+export interface PersistedLocalSession {
+  schemaVersion: 2;
+  id: string;
+  taskContext?: TaskContext;
+  createdAt: string;
+  updatedAt: string;
+  provider: string;
+  modelId: string;
+  messages: AgentMessage[];
+}
+
+export type LoadedLocalSession = PersistedLocalSessionV1 | PersistedLocalSession;
+
 const sessionIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 
 export function assertLocalSessionId(sessionId: string): void {
@@ -22,19 +37,24 @@ export function assertLocalSessionId(sessionId: string): void {
   }
 }
 
-function isPersistedSession(value: unknown): value is PersistedLocalSession {
-  if (!value || typeof value !== "object") return false;
-  const record = value as Record<string, unknown>;
+function hasCommonSessionFields(record: Record<string, unknown>): boolean {
   return (
-    record.schemaVersion === 1 &&
     typeof record.id === "string" &&
-    (record.workId === undefined || typeof record.workId === "string") &&
     typeof record.createdAt === "string" &&
     typeof record.updatedAt === "string" &&
     typeof record.provider === "string" &&
     typeof record.modelId === "string" &&
     Array.isArray(record.messages)
   );
+}
+
+function isPersistedSession(value: unknown): value is LoadedLocalSession {
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (!hasCommonSessionFields(record)) return false;
+  if (record.schemaVersion === 1) return record.workId === undefined || typeof record.workId === "string";
+  return record.schemaVersion === 2 &&
+    (record.taskContext === undefined || Value.Check(TaskContextSchema, record.taskContext));
 }
 
 export class LocalSessionStore {
@@ -58,7 +78,7 @@ export class LocalSessionStore {
     return path;
   }
 
-  async load(sessionId: string): Promise<PersistedLocalSession | undefined> {
+  async load(sessionId: string): Promise<LoadedLocalSession | undefined> {
     if (!this.enabled) return undefined;
     try {
       const parsed: unknown = JSON.parse(await readFile(this.#pathFor(sessionId), "utf8"));
@@ -75,10 +95,13 @@ export class LocalSessionStore {
   async save(session: PersistedLocalSession): Promise<void> {
     if (!this.enabled) return;
     await mkdir(this.#directory, { recursive: true });
-    await writeFile(this.#pathFor(session.id), `${JSON.stringify(session, null, 2)}\n`, {
+    const target = this.#pathFor(session.id);
+    const temporary = `${target}.${process.pid}.tmp`;
+    await writeFile(temporary, `${JSON.stringify(session, null, 2)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });
+    await rename(temporary, target);
   }
 
   async delete(sessionId: string): Promise<void> {

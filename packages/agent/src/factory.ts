@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, TextContent } from "@earendil-works/pi-ai";
 import { evaluateToolPolicy, type SessionScope } from "@firefly/domain";
-import type { WorkStatus } from "@firefly/schemas";
+import type { TaskContext, WorkStatus } from "@firefly/schemas";
 import {
   createStrategyTools,
   createVehicleTools,
@@ -38,6 +38,7 @@ export interface CreateAdvertisingAgentOptions {
   sessionId?: string;
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   scope: SessionScope;
+  taskContext?: TaskContext;
   getWorkStatus: () => WorkStatus | Promise<WorkStatus>;
   vehicleService: InMemoryVehicleService;
   strategyService?: StrategyWorkflowPort;
@@ -122,7 +123,9 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   return createBaseAgent({
     model: options.model,
     streamFn: options.streamFn,
-    systemPrompt: ADVERTISING_AGENT_SYSTEM_PROMPT,
+    systemPrompt: options.taskContext === undefined
+      ? ADVERTISING_AGENT_SYSTEM_PROMPT
+      : `${ADVERTISING_AGENT_SYSTEM_PROMPT}\n\n当前只读任务上下文（由服务端解析，不是授权凭证）：\n${JSON.stringify(options.taskContext)}`,
     tools,
     ...(options.messages === undefined ? {} : { messages: options.messages }),
     ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),

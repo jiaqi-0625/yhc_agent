@@ -57,6 +57,7 @@ test("agent registers only the two current domain tools", () => {
 
 test("business assembly adds strategy tools without exposing an approval decision tool", () => {
   const strategyService = {
+    videoTaskId: "video_task_factory_001",
     async currentRevision() { return 1; },
     async generate() { throw new Error("not called"); },
     async validate() { return { valid: true, issues: [] }; },
@@ -83,7 +84,7 @@ test("business assembly adds strategy tools without exposing an approval decisio
   assert.match(agent.state.systemPrompt, /卖点策略生成建议/u);
   assert.match(agent.state.systemPrompt, /策略人工审批请求建议/u);
   assert.match(agent.state.systemPrompt, /点击卡片/u);
-  assert.match(agent.state.systemPrompt, /不得向用户索要 workId、vehicleId、revision/u);
+  assert.match(agent.state.systemPrompt, /不得向用户索要 videoTaskId、vehicleId、revision/u);
   assert.match(agent.state.systemPrompt, /人工审批决策尚未注册/u);
   assert.doesNotMatch(
     agent.state.tools.map((tool) => tool.name).join(","),

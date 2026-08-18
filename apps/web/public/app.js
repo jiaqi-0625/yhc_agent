@@ -1,8 +1,13 @@
 "use strict";
 
+import { createAgentPanelLayoutController, streamAgentMessage } from "./agent-panel.js?build=studio-v7-task-agent-a11y2";
+
 const state = {
   sessionId: null,
-  sessionWorkId: null,
+  sessionVideoTaskId: null,
+  taskContext: null,
+  activeAbortController: null,
+  lastPrompt: "",
   busy: false,
   work: null,
   workSummaries: [],
@@ -25,6 +30,11 @@ const elements = {
   error: document.querySelector("#error-banner"),
   newSession: document.querySelector("#new-session"),
   resetSession: document.querySelector("#reset-session"),
+  retryMessage: document.querySelector("#retry-message"),
+  cancelGeneration: document.querySelector("#cancel-generation"),
+  collapseAgent: document.querySelector("#collapse-agent"),
+  agentResizer: document.querySelector("#agent-resizer"),
+  chatView: document.querySelector("#chat-view"),
   workStatus: document.querySelector("#work-status"),
   workRevision: document.querySelector("#work-revision"),
   workList: document.querySelector("#work-list"),
@@ -63,7 +73,16 @@ const elements = {
   studioWorkDescription: document.querySelector("#studio-work-description"),
   studioStatus: document.querySelector("#studio-status"),
   agentContextName: document.querySelector("#agent-context-name"),
+  agentContextStage: document.querySelector("#agent-context-stage"),
+  agentContextRevision: document.querySelector("#agent-context-revision"),
 };
+
+createAgentPanelLayoutController({
+  shell: elements.workspaceShell,
+  panel: elements.chatView,
+  resizer: elements.agentResizer,
+  collapseButton: elements.collapseAgent,
+});
 
 const statusLabels = {
   created: "已创建车型快照",
@@ -122,8 +141,11 @@ function setBusy(busy) {
   state.busy = busy;
   elements.prompt.disabled = busy || !state.modelReady;
   elements.send.disabled = busy || !state.modelReady;
+  elements.send.hidden = busy;
+  elements.cancelGeneration.hidden = !busy;
   elements.newSession.disabled = busy;
   elements.resetSession.disabled = busy;
+  elements.retryMessage.disabled = busy;
 }
 
 function setWorkflowBusy(busy) {
@@ -574,6 +596,15 @@ const toolLabels = {
   propose_strategy_approval: "建议提交人工审批",
 };
 
+const taskStageLabels = {
+  strategy: "营销策略",
+  asset_matching: "资产匹配",
+  script: "脚本",
+  storyboard: "分镜",
+  video_preview: "视频预览",
+  delivery: "交付",
+};
+
 function elapsedSeconds(startedAt) {
   return Math.max(1, Math.round((performance.now() - startedAt) / 1000));
 }
@@ -714,7 +745,7 @@ function extractActionProposal(value) {
     return candidate
       && typeof candidate === "object"
       && candidate.schemaVersion === 1
-      && candidate.kind === "action_proposal"
+      && (candidate.kind === "agent_action_card" || candidate.kind === "action_proposal")
       && (candidate.action === "generate_strategy" || candidate.action === "request_strategy_approval")
       && Number.isInteger(candidate.expectedRevision)
       && candidate.payload
@@ -724,10 +755,18 @@ function extractActionProposal(value) {
 
 function proposalEndpoint(proposal) {
   if (!state.work) return null;
+  if (proposal.videoTaskId && proposal.videoTaskId !== state.work.work.id) return null;
   const workId = encodeURIComponent(state.work.work.id);
   return proposal.action === "generate_strategy"
     ? "/v1/works/" + workId + "/strategy/generate"
     : "/v1/works/" + workId + "/strategy/approval-request";
+}
+
+function proposalRequestBody(proposal) {
+  return {
+    ...proposal.payload,
+    expectedRevision: proposal.expectedRevision,
+  };
 }
 
 function proposalResultText(proposal, view) {
@@ -745,6 +784,14 @@ async function executeActionProposal(card, proposal) {
   const result = card.querySelector(".agent-action-result");
   const endpoint = proposalEndpoint(proposal);
   if (!button || !status || !result || !endpoint || !state.work) return;
+  if (proposal.videoTaskId && proposal.videoTaskId !== state.work.work.id) {
+    status.textContent = "任务不匹配";
+    result.textContent = "该操作卡片属于其他视频任务，不能在当前任务执行。";
+    result.hidden = false;
+    button.disabled = true;
+    card.classList.add("stale");
+    return;
+  }
   if (state.work.work.revision !== proposal.expectedRevision) {
     status.textContent = "已失效";
     result.textContent = "作品已更新到 revision " + state.work.work.revision + "，请让 Agent 基于最新状态重新建议。";
@@ -760,7 +807,7 @@ async function executeActionProposal(card, proposal) {
     const view = await api(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(proposal.payload),
+      body: JSON.stringify(proposalRequestBody(proposal)),
     });
     renderWork(view);
     await refreshWorkList();
@@ -788,6 +835,8 @@ function appendActionProposal(turn, proposal) {
   card.className = "agent-action-card";
   card.dataset.action = proposal.action;
   card.dataset.expectedRevision = String(proposal.expectedRevision);
+  card.dataset.videoTaskId = proposal.videoTaskId || "";
+  card.dataset.idempotencyKey = proposal.idempotencyKey || "";
   const header = document.createElement("div");
   header.className = "agent-action-header";
   const copy = document.createElement("div");
@@ -804,7 +853,9 @@ function appendActionProposal(turn, proposal) {
   summary.textContent = proposal.summary;
   const meta = document.createElement("p");
   meta.className = "agent-action-meta";
-  meta.textContent = "基于作品 revision " + proposal.expectedRevision + "；点击前不会写入任何产物。";
+  meta.textContent = "绑定当前任务 · revision " + proposal.expectedRevision
+    + (proposal.estimatedCostCredits === undefined ? "" : " · 预计 " + proposal.estimatedCostCredits + " credits")
+    + "；点击前不会写入任何产物。";
   const result = document.createElement("p");
   result.className = "agent-action-result";
   result.hidden = true;
@@ -827,12 +878,15 @@ function refreshActionProposalAvailability() {
     if (!button || !status || !result) return;
     const expectedRevision = Number(card.dataset.expectedRevision);
     const currentRevision = state.work?.work.revision;
-    const stale = currentRevision === undefined || currentRevision !== expectedRevision;
+    const taskMismatch = Boolean(card.dataset.videoTaskId) && card.dataset.videoTaskId !== state.work?.work.id;
+    const stale = taskMismatch || currentRevision === undefined || currentRevision !== expectedRevision;
     button.disabled = stale || state.workflowBusy;
     card.classList.toggle("stale", stale);
     if (stale) {
       status.textContent = "已失效";
-      result.textContent = currentRevision === undefined
+      result.textContent = taskMismatch
+        ? "该卡片属于其他视频任务，请切回对应任务或重新获取建议。"
+        : currentRevision === undefined
         ? "当前未绑定作品。"
         : "作品当前为 revision " + currentRevision + "，请重新获取操作建议。";
       result.hidden = false;
@@ -851,7 +905,11 @@ function finishToolEvent(turn, event, resumeThinking) {
     : /(?:not found|未找到)/iu.test(outputText)
       ? "未找到"
       : "失败";
-  tool.status.textContent = event.isError
+  tool.status.textContent = event.status === "blocked"
+    ? "被策略阻止"
+    : event.status === "cancelled"
+      ? "已取消"
+    : event.isError
     ? errorStatus
     : event.historical
       ? "已完成 · 历史"
@@ -880,6 +938,29 @@ function finishAgentTurn(turn, text) {
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
+function updateStreamingAnswer(turn, liveAnswer, text) {
+  let current = liveAnswer;
+  if (!current) {
+    finishThinkingEvent(turn);
+    const content = appendTimelineEvent(turn, "answer-event active");
+    const answer = document.createElement("div");
+    answer.className = "timeline-answer streaming-answer";
+    content.appendChild(answer);
+    current = { content, answer };
+  }
+  current.answer.textContent = text;
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+  return current;
+}
+
+function completeStreamingAnswer(liveAnswer, text) {
+  if (!liveAnswer) return false;
+  liveAnswer.content.parentElement.classList.remove("active");
+  liveAnswer.answer.classList.remove("streaming-answer");
+  renderMarkdown(liveAnswer.answer, text || "Agent 未返回文本内容。");
+  return true;
+}
+
 function failAgentTurn(turn, message) {
   finishThinkingEvent(turn);
   const content = appendTimelineEvent(turn, "failure-event failed");
@@ -887,49 +968,6 @@ function failAgentTurn(turn, message) {
   failure.className = "timeline-failure";
   failure.textContent = message;
   content.appendChild(failure);
-}
-
-async function streamAgentMessage(path, message, onRuntimeEvent) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "text/event-stream" },
-    body: JSON.stringify({ message: message }),
-  });
-  if (!response.ok || !response.body) {
-    let errorMessage = "请求失败（HTTP " + response.status + "）";
-    try {
-      const body = await response.json();
-      if (body && typeof body.message === "string") errorMessage = body.message;
-    } catch {}
-    throw new Error(errorMessage);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completion;
-  while (true) {
-    const chunk = await reader.read();
-    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done }).replace(/\r\n/g, "\n");
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    frames.forEach(function (frame) {
-      let eventName = "message";
-      const data = [];
-      frame.split("\n").forEach(function (line) {
-        if (line.startsWith("event:")) eventName = line.slice(6).trim();
-        if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-      });
-      if (data.length === 0) return;
-      const payload = JSON.parse(data.join("\n"));
-      if (eventName === "runtime") onRuntimeEvent(payload);
-      if (eventName === "complete") completion = payload;
-      if (eventName === "error") throw new Error(payload.message || "Agent 流式请求失败。");
-    });
-    if (chunk.done) break;
-  }
-  if (!completion) throw new Error("Agent 流在完成前意外结束。");
-  return completion;
 }
 
 function clearMessages() {
@@ -988,31 +1026,44 @@ function restoreTranscriptTimeline(messages) {
 
 function updateSession(summary) {
   state.sessionId = summary.id;
-  state.sessionWorkId = summary.workId || null;
+  state.sessionVideoTaskId = summary.videoTaskId || null;
+  state.taskContext = summary.taskContext || null;
   localStorage.setItem("firefly.sessionId", summary.id);
   elements.sessionId.textContent = summary.id;
-  elements.sessionWork.textContent = summary.workId ? shortWorkId(summary.workId) : "未绑定";
-  elements.sessionWork.title = summary.workId || "";
+  elements.sessionWork.textContent = summary.videoTaskId ? shortWorkId(summary.videoTaskId) : "未绑定";
+  elements.sessionWork.title = summary.videoTaskId || "";
+  if (summary.taskContext) {
+    const context = summary.taskContext;
+    elements.agentContextName.textContent = context.display.brandName + " · " + context.display.vehicleName + " · " + context.display.videoTaskName;
+    elements.agentContextName.title = context.display.batchProjectName + " / " + context.display.videoTaskName;
+    elements.agentContextStage.textContent = taskStageLabels[context.currentStage] || context.currentStage;
+    elements.agentContextRevision.textContent = "r" + context.taskRevision;
+  } else {
+    elements.agentContextName.textContent = "尚未绑定任务";
+    elements.agentContextName.title = "";
+    elements.agentContextStage.textContent = "未开始";
+    elements.agentContextRevision.textContent = "—";
+  }
   const toolNames = Array.isArray(summary.toolNames) ? summary.toolNames : [];
   elements.agentTools.textContent = summary.domainToolsLoaded ? toolNames.length + " 个已加载" : "未加载";
   elements.agentTools.title = toolNames.join("、");
 }
 
-async function createSession(workId) {
-  const selectedWorkId = workId === undefined ? state.work?.work.id : workId;
+async function createSession(videoTaskId) {
+  const selectedVideoTaskId = videoTaskId === undefined ? state.work?.work.id : videoTaskId;
   const body = await api("/v1/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(selectedWorkId ? { workId: selectedWorkId } : {}),
+    body: JSON.stringify(selectedVideoTaskId ? { videoTaskId: selectedVideoTaskId } : {}),
   });
   updateSession(body.session);
   clearMessages();
 }
 
 async function ensureSessionForCurrentWork() {
-  const workId = state.work?.work.id || null;
-  if (state.sessionId && state.sessionWorkId === workId) return;
-  await createSession(workId || undefined);
+  const videoTaskId = state.work?.work.id || null;
+  if (state.sessionId && state.sessionVideoTaskId === videoTaskId) return;
+  await createSession(videoTaskId || undefined);
 }
 
 async function restoreSession() {
@@ -1023,9 +1074,9 @@ async function restoreSession() {
   }
   try {
     const session = await api("/v1/sessions/" + encodeURIComponent(saved));
-    const selectedWorkId = state.work?.work.id || null;
-    if ((session.session.workId || null) !== selectedWorkId) {
-      await createSession(selectedWorkId || undefined);
+    const selectedVideoTaskId = state.work?.work.id || null;
+    if ((session.session.videoTaskId || null) !== selectedVideoTaskId) {
+      await createSession(selectedVideoTaskId || undefined);
       return;
     }
     updateSession(session.session);
@@ -1040,7 +1091,7 @@ async function restoreSession() {
 async function initialize() {
   try {
     const meta = await api("/v1/meta");
-    if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("work_bound_agent")) {
+    if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("task_context_v1")) {
       throw new Error("当前后端进程版本过旧，请重启 npm run dev:api 后刷新页面。");
     }
     elements.provider.textContent = meta.model.provider;
@@ -1066,27 +1117,54 @@ async function initialize() {
 async function sendMessage(text) {
   const message = text.trim();
   if (!message || state.busy || !state.sessionId) return;
+  state.lastPrompt = message;
+  elements.retryMessage.hidden = true;
   clearError();
   setBusy(true);
   appendMessage("user", message, false);
   elements.prompt.value = "";
   elements.prompt.style.height = "auto";
   const turn = createAgentTurn();
+  const controller = new AbortController();
+  state.activeAbortController = controller;
+  let streamedText = "";
+  let liveAnswer = null;
   try {
     const result = await streamAgentMessage(
       "/v1/sessions/" + encodeURIComponent(state.sessionId) + "/messages-stream",
       message,
-      function (event) {
-        if (event.type === "tool_start") addToolEvent(turn, event);
-        if (event.type === "tool_end") finishToolEvent(turn, event);
+      {
+        signal: controller.signal,
+        onEvent: function (event) {
+          if (event.type === "thinking_status" && event.status === "completed") finishThinkingEvent(turn);
+          if (event.type === "text_delta") {
+            streamedText += event.delta;
+            liveAnswer = updateStreamingAnswer(turn, liveAnswer, streamedText);
+          }
+          if (event.type === "tool_status" && event.status === "running") addToolEvent(turn, event);
+          if (event.type === "tool_status" && event.status !== "running") {
+            finishToolEvent(turn, {
+              ...event,
+              isError: event.status !== "succeeded",
+            });
+          }
+          if (event.type === "action_card") appendActionProposal(turn, event.card);
+        },
       },
     );
-    finishAgentTurn(turn, result.assistantText);
+    if (!completeStreamingAnswer(liveAnswer, result.assistantText)) finishAgentTurn(turn, result.assistantText);
     updateSession(result.session);
   } catch (error) {
-    failAgentTurn(turn, error instanceof Error ? error.message : "Agent 请求失败。");
-    showError(error);
+    const cancelled = error instanceof DOMException && error.name === "AbortError";
+    const messageText = cancelled ? "已取消当前生成。" : error instanceof Error ? error.message : "Agent 请求失败。";
+    failAgentTurn(turn, messageText);
+    if (!cancelled) {
+      showError(error);
+      elements.retryMessage.hidden = false;
+    }
   } finally {
+    state.activeAbortController = null;
+    elements.cancelGeneration.disabled = false;
     setBusy(false);
     elements.prompt.focus();
   }
@@ -1107,6 +1185,23 @@ elements.prompt.addEventListener("keydown", function (event) {
 elements.prompt.addEventListener("input", function () {
   elements.prompt.style.height = "auto";
   elements.prompt.style.height = Math.min(elements.prompt.scrollHeight, 180) + "px";
+});
+
+elements.cancelGeneration.addEventListener("click", async function () {
+  if (!state.busy || !state.sessionId || !state.activeAbortController) return;
+  elements.cancelGeneration.disabled = true;
+  try {
+    await api("/v1/sessions/" + encodeURIComponent(state.sessionId) + "/abort", { method: "POST" });
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.activeAbortController.abort();
+  }
+});
+
+elements.retryMessage.addEventListener("click", function () {
+  if (!state.lastPrompt || state.busy) return;
+  void sendMessage(state.lastPrompt);
 });
 
 document.querySelectorAll("[data-prompt]").forEach(function (button) {

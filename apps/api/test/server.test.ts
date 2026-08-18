@@ -48,6 +48,7 @@ test("health and metadata endpoints expose the current bounded vertical slice", 
     "strategy_draft",
     "human_strategy_approval",
     "work_bound_agent",
+    "task_context_v1",
   ]);
   assert.deepEqual(meta.domainTools, [
     "get_vehicle_snapshot",
@@ -79,17 +80,24 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /studio-v6-action-proposals/u);
+  assert.match(page, /studio-v7-task-agent/u);
 
-  const [styleResponse, scriptResponse] = await Promise.all([
+  const [styleResponse, scriptResponse, panelStyleResponse, panelScriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
     fetch(`${baseUrl}/app.js`),
+    fetch(`${baseUrl}/agent-panel.css`),
+    fetch(`${baseUrl}/agent-panel.js`),
   ]);
   assert.equal(styleResponse.status, 200);
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
+  assert.equal(panelStyleResponse.status, 200);
+  assert.match(panelStyleResponse.headers.get("content-type") ?? "", /^text\/css/u);
+  assert.equal(panelScriptResponse.status, 200);
+  assert.match(panelScriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
   const script = await scriptResponse.text();
+  const panelScript = await panelScriptResponse.text();
   assert.match(script, /firefly\.workId/u);
   assert.match(script, /messages-stream/u);
   assert.match(script, /读取车型事实快照/u);
@@ -99,6 +107,10 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /思考完成 · 历史记录/u);
   assert.match(script, /function executeActionProposal/u);
   assert.match(script, /确认生成策略/u);
+  assert.match(script, /videoTaskId/u);
+  assert.match(script, /cancel-generation/u);
+  assert.match(panelScript, /streamAgentMessage/u);
+  assert.match(panelScript, /createAgentPanelLayoutController/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {
@@ -169,8 +181,10 @@ test("streaming message endpoint emits lifecycle events and a completion payload
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/event-stream/u);
   const stream = await response.text();
-  assert.match(stream, /event: runtime\ndata: \{"type":"agent_start","occurredAt":"[^"]+"\}/u);
+  assert.match(stream, /id: event_[^\n]+\nevent: agent\ndata: \{[^\n]+"sequence":1,[^\n]+"type":"run_started"/u);
   assert.match(stream, /"type":"text_delta"/u);
+  assert.match(stream, /"type":"message_completed"/u);
+  assert.match(stream, /"type":"run_completed"/u);
   assert.match(stream, /event: complete/u);
   assert.match(stream, /"assistantText":"本地 Mock Agent 已收到：流式测试/u);
   assert.doesNotMatch(stream, /"events":/u);

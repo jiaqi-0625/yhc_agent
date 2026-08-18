@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -19,6 +19,7 @@ import {
   type LocalAgentConfig,
   type LocalModelRuntime,
 } from "../src/index.ts";
+import { MOCK_TASK_CONTEXT } from "./task-context-fixture.ts";
 
 test("timeline payloads are redacted and bounded before leaving the runtime", () => {
   assert.deepEqual(
@@ -107,8 +108,10 @@ test("mock runtime persists and restores a multi-turn Pi transcript", async (con
   const first = await firstRuntime.prompt("session_persistence_test", "第一轮");
   assert.match(first.assistantText, /第一轮/u);
   assert.equal(first.session.messageCount, 2);
-  assert.ok(first.events.some((event) => event.type === "agent_start"));
+  assert.ok(first.events.some((event) => event.type === "run_started"));
   assert.ok(first.events.some((event) => event.type === "text_delta"));
+  assert.deepEqual(first.events.map((event) => event.sequence), first.events.map((_event, index) => index + 1));
+  assert.equal(first.lastEventId, first.events.at(-1)?.eventId);
 
   const secondRuntime = new LocalAgentRuntime(config);
   const restored = await secondRuntime.getSession("session_persistence_test");
@@ -120,7 +123,7 @@ test("mock runtime persists and restores a multi-turn Pi transcript", async (con
   assert.equal(reset.messageCount, 0);
 });
 
-test("work-bound sessions restore the same work through the injected Agent factory", async (context) => {
+test("task-bound sessions restore the same task context through the injected Agent factory", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-bound-agent-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const config: LocalAgentConfig = {
@@ -131,14 +134,14 @@ test("work-bound sessions restore the same work through the injected Agent facto
     persistSessions: true,
     dataDirectory: directory,
   };
-  const assembledWorkIds: string[] = [];
+  const assembledTaskIds: string[] = [];
   const createRuntime = () =>
     new LocalAgentRuntime(
       config,
       createLocalModelRuntime(config),
       new LocalSessionStore(directory, true),
       (factoryContext) => {
-        assembledWorkIds.push(factoryContext.workId);
+        assembledTaskIds.push(factoryContext.taskContext.videoTaskId);
         return createBaseAgent({
           model: factoryContext.model,
           streamFn: factoryContext.streamFn,
@@ -150,14 +153,68 @@ test("work-bound sessions restore the same work through the injected Agent facto
     );
 
   const firstRuntime = createRuntime();
-  const created = await firstRuntime.createSession("session_work_restore", { workId: "work_bound_001" });
-  assert.equal(created.workId, "work_bound_001");
+  const created = await firstRuntime.createSession("session_task_restore", { taskContext: MOCK_TASK_CONTEXT });
+  assert.equal(created.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
   await firstRuntime.prompt(created.id, "保存绑定");
 
   const restored = await createRuntime().getSession(created.id);
-  assert.equal(restored?.workId, "work_bound_001");
+  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
+  assert.deepEqual(restored?.taskContext, MOCK_TASK_CONTEXT);
   assert.equal(restored?.messageCount, 2);
-  assert.deepEqual(assembledWorkIds, ["work_bound_001", "work_bound_001"]);
+  assert.deepEqual(assembledTaskIds, [MOCK_TASK_CONTEXT.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId]);
+});
+
+test("legacy work-bound sessions resolve once and persist back as task-context v2", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-legacy-agent-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  await writeFile(join(directory, "session_legacy.json"), JSON.stringify({
+    schemaVersion: 1,
+    id: "session_legacy",
+    workId: MOCK_TASK_CONTEXT.videoTaskId,
+    createdAt: "2026-08-18T00:00:00.000Z",
+    updatedAt: "2026-08-18T00:00:00.000Z",
+    provider: "mock",
+    modelId: "mock-local",
+    messages: [],
+  }));
+  const resolvedLegacyIds: string[] = [];
+  const runtime = new LocalAgentRuntime(
+    config,
+    createLocalModelRuntime(config),
+    new LocalSessionStore(directory, true),
+    (factoryContext) => createBaseAgent({
+      model: factoryContext.model,
+      streamFn: factoryContext.streamFn,
+      systemPrompt: "Legacy migration test Agent",
+      messages: factoryContext.messages,
+      sessionId: factoryContext.sessionId,
+    }),
+    (workId) => {
+      resolvedLegacyIds.push(workId);
+      return MOCK_TASK_CONTEXT;
+    },
+  );
+
+  const restored = await runtime.getSession("session_legacy");
+  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
+  assert.deepEqual(resolvedLegacyIds, [MOCK_TASK_CONTEXT.videoTaskId]);
+  await runtime.resetSession("session_legacy");
+  const persisted = JSON.parse(await readFile(join(directory, "session_legacy.json"), "utf8")) as {
+    schemaVersion: number;
+    taskContext?: unknown;
+    workId?: string;
+  };
+  assert.equal(persisted.schemaVersion, 2);
+  assert.deepEqual(persisted.taskContext, MOCK_TASK_CONTEXT);
+  assert.equal(persisted.workId, undefined);
 });
 
 test("session identifiers cannot escape the configured directory", async () => {

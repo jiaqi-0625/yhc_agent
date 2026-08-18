@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
 import {
+  AgentActionCardSchema,
+  AgentStreamEventSchema,
   AssetReferenceSchema,
   BatchProjectSchema,
   BrandSchema,
   ClaimSchema,
   ProjectAssetPoolSchema,
   StrategyActionProposalSchema,
+  TaskContextSchema,
   TaskAssetSnapshotSchema,
   TemporaryAssetSchema,
   VehicleSchema,
@@ -15,12 +18,15 @@ import {
   VideoTaskSchema,
   WorkSchema,
   type BatchProject,
+  type AgentActionCard,
+  type AgentStreamEvent,
   type Brand,
   type Claim,
   type CompanyReusableAssetReference,
   type CompanyVehicleAssetReference,
   type ProjectAssetPool,
   type TaskAssetSnapshot,
+  type TaskContext,
   type TemporaryAsset,
   type TemporaryAssetReference,
   type Vehicle,
@@ -110,6 +116,32 @@ const videoTask = {
   platformTags: ["douyin", "xiaohongshu"],
   ...auditFields,
 } satisfies VideoTask;
+
+const taskContext = {
+  schemaVersion: 1,
+  videoTaskId: videoTask.id,
+  batchProjectId: batchProject.id,
+  brandId: brand.id,
+  vehicleId: vehicle.id,
+  taskStatus: videoTask.status,
+  currentStage: videoTask.currentStage,
+  taskRevision: videoTask.revision,
+  vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+  assetSnapshotId: "asset_snapshot_family_weekend_v1",
+  display: {
+    brandName: brand.name,
+    vehicleName: `${vehicle.series} ${vehicle.trim}`,
+    batchProjectName: batchProject.name,
+    videoTaskName: videoTask.name,
+  },
+  brief: {
+    audience: videoTask.audience,
+    theme: videoTask.theme,
+    durationSeconds: videoTask.durationSeconds,
+    platformTags: videoTask.platformTags,
+    hasScriptInput: videoTask.scriptInput !== undefined,
+  },
+} satisfies TaskContext;
 
 const checksumSha256 = "a".repeat(64);
 
@@ -238,6 +270,14 @@ test("workspace v2 video task owns its operator and task-level production inputs
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, aspectRatio: "9:16" }), false);
 });
 
+test("task context exposes task facts without client-controlled identity or permission fields", () => {
+  assert.equal(Value.Check(TaskContextSchema, taskContext), true);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, actorId: "account_attacker" }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, role: "content_admin" }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, budgetRemaining: 999999 }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, assetDownloadUrl: "https://provider.invalid" }), false);
+});
+
 test("asset references distinguish vehicle-bound, reusable, and project-local sources", () => {
   for (const reference of projectAssetPool.assets) {
     assert.equal(Value.Check(AssetReferenceSchema, reference), true);
@@ -337,4 +377,43 @@ test("strategy action proposals are versioned and reject untrusted fields", () =
   };
   assert.equal(Value.Check(StrategyActionProposalSchema, proposal), true);
   assert.equal(Value.Check(StrategyActionProposalSchema, { ...proposal, approved: true }), false);
+});
+
+test("agent action cards bind a task and revision without carrying approval authority", () => {
+  const card = {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    id: "card_generate_strategy_001",
+    idempotencyKey: "command_generate_strategy_001",
+    videoTaskId: videoTask.id,
+    expectedRevision: videoTask.revision,
+    action: "generate_strategy",
+    label: "生成卖点策略草稿",
+    summary: "面向家庭用户生成周末出行策略",
+    estimatedCostCredits: 0,
+    payload: { audience: videoTask.audience, theme: videoTask.theme },
+  } satisfies AgentActionCard;
+  assert.equal(Value.Check(AgentActionCardSchema, card), true);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...card, approved: true }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...card, actorId: videoTask.ownerAccountId }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...card, videoTaskId: "bad/task" }), false);
+});
+
+test("agent stream events require stable ids, ordering, and task-bound action cards", () => {
+  const event = {
+    schemaVersion: 1,
+    eventId: "event_session_001_1",
+    sequence: 1,
+    sessionId: "session_001",
+    runId: "run_001",
+    videoTaskId: videoTask.id,
+    occurredAt: auditFields.createdAt,
+    type: "text_delta",
+    messageId: "message_001",
+    delta: "正在生成策略",
+  } satisfies AgentStreamEvent;
+  assert.equal(Value.Check(AgentStreamEventSchema, event), true);
+  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, sequence: 0 }), false);
+  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, eventId: "event/unsafe" }), false);
+  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, hiddenThinking: "private chain" }), false);
 });

@@ -117,6 +117,7 @@ export class LocalBusinessRuntime {
 
   bindStrategyWorkflow(workId: string): StrategyWorkflowPort {
     return {
+      videoTaskId: workId,
       currentRevision: async () => (await this.getWork(workId)).work.revision,
       generate: async (request) => {
         const view = await this.generateStrategy(workId, request);

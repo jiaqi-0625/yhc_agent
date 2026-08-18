@@ -182,6 +182,42 @@ export const VideoTaskSchema = Type.Object(
 );
 export type VideoTask = Static<typeof VideoTaskSchema>;
 
+export const TaskContextSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    videoTaskId: Identifier,
+    batchProjectId: Identifier,
+    brandId: Identifier,
+    vehicleId: Identifier,
+    taskStatus: VideoTaskStatusSchema,
+    currentStage: VideoTaskStageSchema,
+    taskRevision: Type.Integer({ minimum: 1 }),
+    vehicleSnapshotId: Type.Optional(Identifier),
+    assetSnapshotId: Type.Optional(Identifier),
+    display: Type.Object(
+      {
+        brandName: Type.String({ minLength: 1, maxLength: 120 }),
+        vehicleName: Type.String({ minLength: 1, maxLength: 240 }),
+        batchProjectName: Type.String({ minLength: 1, maxLength: 240 }),
+        videoTaskName: Type.String({ minLength: 1, maxLength: 160 }),
+      },
+      { additionalProperties: false },
+    ),
+    brief: Type.Object(
+      {
+        audience: Type.String({ minLength: 1, maxLength: 500 }),
+        theme: Type.String({ minLength: 1, maxLength: 500 }),
+        durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+        platformTags: Type.Array(Identifier, { maxItems: 20, uniqueItems: true }),
+        hasScriptInput: Type.Boolean(),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type TaskContext = Static<typeof TaskContextSchema>;
+
 export const AssetCategorySchema = Type.Union([
   Type.Literal("vehicle"),
   Type.Literal("person"),
@@ -520,6 +556,169 @@ export const StrategyActionProposalSchema = Type.Union([
   ),
 ]);
 export type StrategyActionProposal = Static<typeof StrategyActionProposalSchema>;
+
+const AgentActionCardBaseFields = {
+  schemaVersion: Type.Literal(1),
+  kind: Type.Literal("agent_action_card"),
+  id: Identifier,
+  idempotencyKey: Identifier,
+  videoTaskId: Identifier,
+  expectedRevision: Type.Integer({ minimum: 1 }),
+  label: Type.String({ minLength: 1, maxLength: 120 }),
+  summary: Type.String({ minLength: 1, maxLength: 1000 }),
+  estimatedCostCredits: Type.Optional(Type.Integer({ minimum: 0 })),
+};
+
+export const AgentActionCardSchema = Type.Union([
+  Type.Object(
+    {
+      ...AgentActionCardBaseFields,
+      action: Type.Literal("generate_strategy"),
+      payload: Type.Object(
+        {
+          audience: Type.String({ minLength: 1, maxLength: 500 }),
+          theme: Type.String({ minLength: 1, maxLength: 500 }),
+        },
+        { additionalProperties: false },
+      ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentActionCardBaseFields,
+      action: Type.Literal("request_strategy_approval"),
+      payload: Type.Object({}, { additionalProperties: false }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type AgentActionCard = Static<typeof AgentActionCardSchema>;
+
+const AgentStreamEventBaseFields = {
+  schemaVersion: Type.Literal(1),
+  eventId: Identifier,
+  sequence: Type.Integer({ minimum: 1 }),
+  sessionId: Identifier,
+  runId: Identifier,
+  videoTaskId: Type.Optional(Identifier),
+  occurredAt: IsoDateTime,
+};
+
+export const AgentStreamEventSchema = Type.Union([
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("run_started"),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("thinking_status"),
+      status: Type.Union([Type.Literal("started"), Type.Literal("completed")]),
+      summary: Type.String({ minLength: 1, maxLength: 500 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("message_started"),
+      messageId: Identifier,
+      role: Type.Literal("assistant"),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("text_delta"),
+      messageId: Identifier,
+      delta: Type.String({ minLength: 1 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("message_completed"),
+      messageId: Identifier,
+      text: Type.String(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("tool_status"),
+      toolCallId: Identifier,
+      toolName: Identifier,
+      status: Type.Union([
+        Type.Literal("running"),
+        Type.Literal("succeeded"),
+        Type.Literal("failed"),
+        Type.Literal("blocked"),
+        Type.Literal("cancelled"),
+      ]),
+      input: Type.Optional(Type.Unknown()),
+      output: Type.Optional(Type.Unknown()),
+      durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("plan_updated"),
+      steps: Type.Array(
+        Type.Object(
+          {
+            id: Identifier,
+            label: Type.String({ minLength: 1, maxLength: 240 }),
+            status: Type.Union([
+              Type.Literal("pending"),
+              Type.Literal("in_progress"),
+              Type.Literal("completed"),
+            ]),
+          },
+          { additionalProperties: false },
+        ),
+        { maxItems: 50 },
+      ),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("action_card"),
+      card: AgentActionCardSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("run_error"),
+      code: Type.String({ pattern: "^AIC-[A-Z]+-[A-Z0-9_-]+$" }),
+      message: NonEmptyString,
+      retryable: Type.Boolean(),
+      charged: Type.Boolean(),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentStreamEventBaseFields,
+      type: Type.Literal("run_completed"),
+      stopReason: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type AgentStreamEvent = Static<typeof AgentStreamEventSchema>;
 
 export const ValidateStrategyRequestSchema = Type.Object({}, { additionalProperties: false });
 export type ValidateStrategyRequest = Static<typeof ValidateStrategyRequestSchema>;

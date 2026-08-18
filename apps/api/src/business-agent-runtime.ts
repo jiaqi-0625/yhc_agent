@@ -10,6 +10,7 @@ import type { SessionScope } from "@firefly/domain";
 
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
+import { resolveLocalTaskContext } from "./task-context.ts";
 
 const LOCAL_AGENT_SCOPE: SessionScope = {
   ...LOCAL_SCOPE,
@@ -24,17 +25,23 @@ export function createBusinessAgentRuntime(
 ): LocalAgentRuntime {
   const modelRuntime = createLocalModelRuntime(config);
   const store = new LocalSessionStore(config.dataDirectory, config.persistSessions);
-  return new LocalAgentRuntime(config, modelRuntime, store, (context) =>
-    createAdvertisingAgent({
-      model: context.model,
-      streamFn: context.streamFn,
-      messages: context.messages,
-      sessionId: context.sessionId,
-      ...(context.getApiKey === undefined ? {} : { getApiKey: context.getApiKey }),
-      scope: LOCAL_AGENT_SCOPE,
-      getWorkStatus: async () => (await business.getWork(context.workId)).work.status,
-      vehicleService: business.vehicleService,
-      strategyService: business.bindStrategyWorkflow(context.workId),
-    }),
+  return new LocalAgentRuntime(
+    config,
+    modelRuntime,
+    store,
+    (context) =>
+      createAdvertisingAgent({
+        model: context.model,
+        streamFn: context.streamFn,
+        messages: context.messages,
+        sessionId: context.sessionId,
+        ...(context.getApiKey === undefined ? {} : { getApiKey: context.getApiKey }),
+        scope: LOCAL_AGENT_SCOPE,
+        taskContext: context.taskContext,
+        getWorkStatus: async () => (await business.getWork(context.taskContext.videoTaskId)).work.status,
+        vehicleService: business.vehicleService,
+        strategyService: business.bindStrategyWorkflow(context.taskContext.videoTaskId),
+      }),
+    (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),
   );
 }

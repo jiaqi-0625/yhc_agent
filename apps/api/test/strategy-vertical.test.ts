@@ -202,18 +202,21 @@ test("work-bound Agent sessions load only the advertising domain tools", async (
   const missingResponse = await fetch(`${baseUrl}/v1/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ workId: "work_missing" }),
+    body: JSON.stringify({ videoTaskId: "work_missing" }),
   });
   assert.equal(missingResponse.status, 404);
 
   const createResponse = await fetch(`${baseUrl}/v1/sessions`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id: "session_business_agent", workId: created.work.id }),
+    body: JSON.stringify({ id: "session_business_agent", videoTaskId: created.work.id }),
   });
   assert.equal(createResponse.status, 201);
   const sessionBody = await json(createResponse);
-  assert.equal(sessionBody.session.workId, created.work.id);
+  assert.equal(sessionBody.session.videoTaskId, created.work.id);
+  assert.equal(sessionBody.session.taskContext.videoTaskId, created.work.id);
+  assert.equal("actorId" in sessionBody.session.taskContext, false);
+  assert.equal("budgetRemaining" in sessionBody.session.taskContext, false);
   assert.equal(sessionBody.session.domainToolsLoaded, true);
   assert.deepEqual(sessionBody.session.toolNames, [
     "get_vehicle_snapshot",

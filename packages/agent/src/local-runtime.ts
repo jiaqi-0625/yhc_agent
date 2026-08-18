@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { type Agent, type AgentEvent, type AgentMessage, type StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
+import type { AgentStreamEvent, TaskContext } from "@firefly/schemas";
 
 import { createBaseAgent } from "./base-agent.ts";
 import { redactSensitive } from "./factory.ts";
@@ -18,7 +19,8 @@ import { LOCAL_FRAMEWORK_SYSTEM_PROMPT } from "./system-prompt.ts";
 
 export interface LocalSessionSummary {
   id: string;
-  workId?: string;
+  videoTaskId?: string;
+  taskContext?: TaskContext;
   createdAt: string;
   updatedAt: string;
   provider: string;
@@ -29,51 +31,33 @@ export interface LocalSessionSummary {
   toolNames: string[];
 }
 
-export interface LocalWorkAgentFactoryContext {
+export interface LocalTaskAgentFactoryContext {
   model: Model<Api>;
   streamFn: StreamFn;
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   messages: readonly AgentMessage[];
   sessionId: string;
-  workId: string;
+  taskContext: TaskContext;
 }
 
-export type LocalWorkAgentFactory = (context: LocalWorkAgentFactoryContext) => Agent;
+export type LocalTaskAgentFactory = (context: LocalTaskAgentFactoryContext) => Agent;
+export type LegacyTaskContextResolver = (workId: string) => TaskContext | Promise<TaskContext>;
 
-export type LocalRuntimeEvent =
-  | {
-      type: "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_end";
-      occurredAt: string;
-    }
-  | { type: "text_delta"; delta: string; occurredAt: string }
-  | {
-      type: "tool_start";
-      toolName: string;
-      toolCallId: string;
-      input?: unknown;
-      occurredAt: string;
-    }
-  | {
-      type: "tool_end";
-      toolName: string;
-      toolCallId: string;
-      output?: unknown;
-      isError: boolean;
-      durationMs?: number;
-      occurredAt: string;
-    };
+export type LocalRuntimeEvent = AgentStreamEvent;
 
 export interface LocalPromptResult {
   session: LocalSessionSummary;
   assistantText: string;
   usage?: Usage;
   stopReason?: AssistantMessage["stopReason"];
+  runId: string;
+  lastEventId: string;
   events: LocalRuntimeEvent[];
 }
 
 interface ActiveLocalSession {
   agent: Agent;
-  workId?: string;
+  taskContext?: TaskContext;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,42 +111,48 @@ export function toPublicTranscript(messages: readonly AgentMessage[]): readonly 
   });
 }
 
-function normalizeEvent(event: AgentEvent, toolStartedAt: Map<string, number>): LocalRuntimeEvent | undefined {
-  const occurredAt = new Date().toISOString();
+interface StreamEventContext {
+  base: () => Pick<AgentStreamEvent, "schemaVersion" | "eventId" | "sequence" | "sessionId" | "runId" | "videoTaskId" | "occurredAt">;
+  messageId: string;
+}
+
+function normalizeEvent(
+  event: AgentEvent,
+  toolStartedAt: Map<string, number>,
+  context: StreamEventContext,
+): LocalRuntimeEvent | undefined {
   if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-    return { type: "text_delta", delta: event.assistantMessageEvent.delta, occurredAt };
-  }
-  if (
-    event.type === "agent_start" ||
-    event.type === "agent_end" ||
-    event.type === "turn_start" ||
-    event.type === "turn_end" ||
-    event.type === "message_start" ||
-    event.type === "message_end"
-  ) {
-    return { type: event.type, occurredAt };
+    return {
+      ...context.base(),
+      type: "text_delta",
+      messageId: context.messageId,
+      delta: event.assistantMessageEvent.delta,
+    };
   }
   if (event.type === "tool_execution_start") {
     toolStartedAt.set(event.toolCallId, Date.now());
     return {
-      type: "tool_start",
+      ...context.base(),
+      type: "tool_status",
       toolName: event.toolName,
       toolCallId: event.toolCallId,
+      status: "running",
       input: toTimelinePayload(event.args),
-      occurredAt,
     };
   }
   if (event.type === "tool_execution_end") {
     const startedAt = toolStartedAt.get(event.toolCallId);
     toolStartedAt.delete(event.toolCallId);
+    const output = toTimelinePayload(event.result);
+    const blocked = event.isError && /AIC-(?:AUTH|WORKFLOW)-/u.test(JSON.stringify(output));
     return {
-      type: "tool_end",
+      ...context.base(),
+      type: "tool_status",
       toolName: event.toolName,
       toolCallId: event.toolCallId,
-      output: toTimelinePayload(event.result),
-      isError: event.isError,
+      status: event.isError ? (blocked ? "blocked" : "failed") : "succeeded",
+      output,
       ...(startedAt === undefined ? {} : { durationMs: Date.now() - startedAt }),
-      occurredAt,
     };
   }
   return undefined;
@@ -172,17 +162,20 @@ export class LocalAgentRuntime {
   readonly #sessions = new Map<string, ActiveLocalSession>();
   readonly #modelRuntime: LocalModelRuntime;
   readonly #store: LocalSessionStore;
-  readonly #workAgentFactory: LocalWorkAgentFactory | undefined;
+  readonly #taskAgentFactory: LocalTaskAgentFactory | undefined;
+  readonly #legacyTaskContextResolver: LegacyTaskContextResolver | undefined;
 
   constructor(
     readonly config: LocalAgentConfig = loadLocalAgentConfig(),
     modelRuntime: LocalModelRuntime = createLocalModelRuntime(config),
     store: LocalSessionStore = new LocalSessionStore(config.dataDirectory, config.persistSessions),
-    workAgentFactory?: LocalWorkAgentFactory,
+    taskAgentFactory?: LocalTaskAgentFactory,
+    legacyTaskContextResolver?: LegacyTaskContextResolver,
   ) {
     this.#modelRuntime = modelRuntime;
     this.#store = store;
-    this.#workAgentFactory = workAgentFactory;
+    this.#taskAgentFactory = taskAgentFactory;
+    this.#legacyTaskContextResolver = legacyTaskContextResolver;
   }
 
   publicConfig(): PublicLocalAgentConfig {
@@ -190,17 +183,17 @@ export class LocalAgentRuntime {
   }
 
   get domainToolsAvailable(): boolean {
-    return this.#workAgentFactory !== undefined;
+    return this.#taskAgentFactory !== undefined;
   }
 
-  #createAgent(messages: readonly AgentMessage[], sessionId: string, workId?: string): Agent {
-    if (workId !== undefined && this.#workAgentFactory !== undefined) {
-      const agent = this.#workAgentFactory({
+  #createAgent(messages: readonly AgentMessage[], sessionId: string, taskContext?: TaskContext): Agent {
+    if (taskContext !== undefined && this.#taskAgentFactory !== undefined) {
+      const agent = this.#taskAgentFactory({
         model: this.#modelRuntime.model,
         streamFn: this.#modelRuntime.streamFn,
         messages,
         sessionId,
-        workId,
+        taskContext,
         ...(this.#modelRuntime.getApiKey === undefined ? {} : { getApiKey: this.#modelRuntime.getApiKey }),
       });
       agent.state.thinkingLevel = this.config.thinkingLevel;
@@ -220,7 +213,7 @@ export class LocalAgentRuntime {
 
   async createSession(
     sessionId = `session_${randomUUID()}`,
-    options: { workId?: string } = {},
+    options: { taskContext?: TaskContext } = {},
   ): Promise<LocalSessionSummary> {
     assertLocalSessionId(sessionId);
     if (this.#sessions.has(sessionId) || (await this.#store.load(sessionId))) {
@@ -228,8 +221,8 @@ export class LocalAgentRuntime {
     }
     const now = new Date().toISOString();
     const active = {
-      agent: this.#createAgent([], sessionId, options.workId),
-      ...(options.workId === undefined ? {} : { workId: options.workId }),
+      agent: this.#createAgent([], sessionId, options.taskContext),
+      ...(options.taskContext === undefined ? {} : { taskContext: structuredClone(options.taskContext) }),
       createdAt: now,
       updatedAt: now,
     };
@@ -244,14 +237,26 @@ export class LocalAgentRuntime {
     if (existing) return existing;
     const persisted = await this.#store.load(sessionId);
     if (!persisted) return undefined;
+    const taskContext = persisted.schemaVersion === 2
+      ? persisted.taskContext
+      : persisted.workId === undefined
+        ? undefined
+        : await this.#resolveLegacyTaskContext(persisted.workId);
     const active = {
-      agent: this.#createAgent(persisted.messages, sessionId, persisted.workId),
-      ...(persisted.workId === undefined ? {} : { workId: persisted.workId }),
+      agent: this.#createAgent(persisted.messages, sessionId, taskContext),
+      ...(taskContext === undefined ? {} : { taskContext: structuredClone(taskContext) }),
       createdAt: persisted.createdAt,
       updatedAt: persisted.updatedAt,
     };
     this.#sessions.set(sessionId, active);
     return active;
+  }
+
+  async #resolveLegacyTaskContext(workId: string): Promise<TaskContext> {
+    if (!this.#legacyTaskContextResolver) {
+      throw new Error(`Legacy session work '${workId}' cannot be restored without a task context resolver.`);
+    }
+    return this.#legacyTaskContextResolver(workId);
   }
 
   async getSession(sessionId: string): Promise<LocalSessionSummary | undefined> {
@@ -280,12 +285,36 @@ export class LocalAgentRuntime {
 
     const events: LocalRuntimeEvent[] = [];
     const toolStartedAt = new Map<string, number>();
+    const runId = `run_${randomUUID()}`;
+    const messageId = `message_${randomUUID()}`;
+    let sequence = 0;
+    const base = () => {
+      sequence += 1;
+      return {
+        schemaVersion: 1 as const,
+        eventId: `event_${runId}_${sequence}`,
+        sequence,
+        sessionId,
+        runId,
+        ...(active.taskContext === undefined ? {} : { videoTaskId: active.taskContext.videoTaskId }),
+        occurredAt: new Date().toISOString(),
+      };
+    };
+    const emit = (event: LocalRuntimeEvent) => {
+      events.push(event);
+      onEvent?.(event);
+    };
+    emit({ ...base(), type: "run_started" });
+    emit({
+      ...base(),
+      type: "thinking_status",
+      status: "started",
+      summary: "正在分析当前任务上下文并规划受控操作。",
+    });
+    emit({ ...base(), type: "message_started", messageId, role: "assistant" });
     const unsubscribe = active.agent.subscribe((event) => {
-      const normalized = normalizeEvent(event, toolStartedAt);
-      if (normalized) {
-        events.push(normalized);
-        onEvent?.(normalized);
-      }
+      const normalized = normalizeEvent(event, toolStartedAt, { base, messageId });
+      if (normalized) emit(normalized);
     });
     try {
       await active.agent.prompt(message);
@@ -296,11 +325,26 @@ export class LocalAgentRuntime {
     active.updatedAt = new Date().toISOString();
     await this.#persist(sessionId, active);
     const response = lastAssistant(active.agent.state.messages);
+    const responseText = assistantText(response);
+    emit({
+      ...base(),
+      type: "thinking_status",
+      status: "completed",
+      summary: "已完成上下文分析、工具选择与响应生成。",
+    });
+    emit({ ...base(), type: "message_completed", messageId, text: responseText });
+    emit({
+      ...base(),
+      type: "run_completed",
+      ...(response?.stopReason === undefined ? {} : { stopReason: response.stopReason }),
+    });
     return {
       session: this.#summary(sessionId, active),
-      assistantText: assistantText(response),
+      assistantText: responseText,
       ...(response?.usage === undefined ? {} : { usage: response.usage }),
       ...(response?.stopReason === undefined ? {} : { stopReason: response.stopReason }),
+      runId,
+      lastEventId: events.at(-1)?.eventId ?? `event_${runId}_0`,
       events,
     };
   }
@@ -336,7 +380,12 @@ export class LocalAgentRuntime {
   #summary(sessionId: string, active: ActiveLocalSession): LocalSessionSummary {
     return {
       id: sessionId,
-      ...(active.workId === undefined ? {} : { workId: active.workId }),
+      ...(active.taskContext === undefined
+        ? {}
+        : {
+            videoTaskId: active.taskContext.videoTaskId,
+            taskContext: structuredClone(active.taskContext),
+          }),
       createdAt: active.createdAt,
       updatedAt: active.updatedAt,
       provider: this.config.provider,
@@ -350,9 +399,9 @@ export class LocalAgentRuntime {
 
   async #persist(sessionId: string, active: ActiveLocalSession): Promise<void> {
     const record: PersistedLocalSession = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       id: sessionId,
-      ...(active.workId === undefined ? {} : { workId: active.workId }),
+      ...(active.taskContext === undefined ? {} : { taskContext: structuredClone(active.taskContext) }),
       createdAt: active.createdAt,
       updatedAt: active.updatedAt,
       provider: this.config.provider,

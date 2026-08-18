@@ -1,8 +1,8 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import {
+  type AgentActionCard,
   ProposeStrategyApprovalRequestSchema,
   ProposeStrategyGenerationRequestSchema,
-  type StrategyActionProposal,
   ValidateStrategyRequestSchema,
   type ProposeStrategyApprovalRequest,
   type ProposeStrategyGenerationRequest,
@@ -24,13 +24,17 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
       const expectedRevision = await service.currentRevision();
       return textResult({
         schemaVersion: 1,
-        kind: "action_proposal",
+        kind: "agent_action_card",
+        id: `card_generate_strategy_${service.videoTaskId}_${expectedRevision}`,
+        idempotencyKey: `generate_strategy_${service.videoTaskId}_${expectedRevision}`,
+        videoTaskId: service.videoTaskId,
         action: "generate_strategy",
         label: "生成卖点策略草稿",
         summary: `面向“${params.audience}”生成“${params.theme}”策略，点击后才会写入作品。`,
         expectedRevision,
-        payload: { ...params, expectedRevision },
-      } satisfies StrategyActionProposal);
+        estimatedCostCredits: 0,
+        payload: params,
+      } satisfies AgentActionCard);
     },
   };
 
@@ -53,13 +57,17 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
       const expectedRevision = await service.currentRevision();
       return textResult({
         schemaVersion: 1,
-        kind: "action_proposal",
+        kind: "agent_action_card",
+        id: `card_request_strategy_approval_${service.videoTaskId}_${expectedRevision}`,
+        idempotencyKey: `request_strategy_approval_${service.videoTaskId}_${expectedRevision}`,
+        videoTaskId: service.videoTaskId,
         action: "request_strategy_approval",
         label: "提交卖点策略人工审批",
         summary: "校验当前策略后，由负责人点击提交到人工审批。",
         expectedRevision,
-        payload: { expectedRevision },
-      } satisfies StrategyActionProposal);
+        estimatedCostCredits: 0,
+        payload: {},
+      } satisfies AgentActionCard);
     },
   };
 

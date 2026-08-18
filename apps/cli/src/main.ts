@@ -10,8 +10,9 @@ function argumentValue(name: string): string | undefined {
 
 function printEvent(event: LocalRuntimeEvent): void {
   if (event.type === "text_delta") stdout.write(event.delta);
-  if (event.type === "tool_start") stdout.write(`\n[tool:start] ${event.toolName}\n`);
-  if (event.type === "tool_end") stdout.write(`\n[tool:end] ${event.toolName} error=${String(event.isError)}\n`);
+  if (event.type === "tool_status") {
+    stdout.write(`\n[tool:${event.status}] ${event.toolName}\n`);
+  }
 }
 
 const runtime = new LocalAgentRuntime();

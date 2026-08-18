@@ -17,13 +17,16 @@ import { Value } from "typebox/value";
 
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
+import { handleAgentRoute } from "./agent-routes.ts";
 
 const version = "0.1.0";
 const maximumBodyBytes = 64 * 1024;
 const webAssets = new Map<string, { path: string; type: string }>([
   ["/", { path: fileURLToPath(new URL("../../web/public/index.html", import.meta.url)), type: "text/html; charset=utf-8" }],
   ["/app.css", { path: fileURLToPath(new URL("../../web/public/app.css", import.meta.url)), type: "text/css; charset=utf-8" }],
+  ["/agent-panel.css", { path: fileURLToPath(new URL("../../web/public/agent-panel.css", import.meta.url)), type: "text/css; charset=utf-8" }],
   ["/app.js", { path: fileURLToPath(new URL("../../web/public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/agent-panel.js", { path: fileURLToPath(new URL("../../web/public/agent-panel.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
 ]);
 
 async function sendWebAsset(response: ServerResponse, pathname: string): Promise<boolean> {
@@ -51,21 +54,6 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
   response.end(JSON.stringify(body));
 }
 
-function startEventStream(response: ServerResponse): void {
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store, no-transform",
-    connection: "keep-alive",
-    "x-content-type-options": "nosniff",
-  });
-  response.flushHeaders();
-}
-
-function sendEvent(response: ServerResponse, event: string, data: unknown): void {
-  if (response.writableEnded || response.destroyed) return;
-  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -81,15 +69,6 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
     throw new Error("Request body must be a JSON object.");
   }
   return parsed as Record<string, unknown>;
-}
-
-function sessionRoute(pathname: string): { sessionId: string; action?: string } | undefined {
-  const match = pathname.match(/^\/v1\/sessions\/([^/]+)(?:\/([^/]+))?$/u);
-  if (!match?.[1]) return undefined;
-  return {
-    sessionId: decodeURIComponent(match[1]),
-    ...(match[2] === undefined ? {} : { action: match[2] }),
-  };
 }
 
 function workRoute(pathname: string): { workId: string; action?: string } | undefined {
@@ -153,6 +132,7 @@ async function handleRequest(
         "strategy_draft",
         "human_strategy_approval",
         "work_bound_agent",
+        "task_context_v1",
       ],
       domainTools: [
         "get_vehicle_snapshot",
@@ -225,88 +205,7 @@ async function handleRequest(
     return;
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/sessions") {
-    const body = await readJson(request);
-    if (body.id !== undefined && typeof body.id !== "string") throw new Error("Session id must be a string.");
-    if (body.workId !== undefined && typeof body.workId !== "string") throw new Error("Work id must be a string.");
-    const workId = body.workId as string | undefined;
-    if (workId !== undefined) await business.getWork(workId);
-    const session = await runtime.createSession(
-      body.id as string | undefined,
-      workId === undefined ? {} : { workId },
-    );
-    sendJson(response, 201, { session });
-    return;
-  }
-
-  const route = sessionRoute(url.pathname);
-  if (route && request.method === "GET" && route.action === undefined) {
-    const session = await runtime.getSession(route.sessionId);
-    if (!session) throw new Error(`Session '${route.sessionId}' was not found.`);
-    sendJson(response, 200, { session });
-    return;
-  }
-  if (route && request.method === "GET" && route.action === "transcript") {
-    const messages = await runtime.getTranscript(route.sessionId);
-    if (!messages) throw new Error(`Session '${route.sessionId}' was not found.`);
-    sendJson(response, 200, { messages });
-    return;
-  }
-  if (route && request.method === "POST" && route.action === "messages") {
-    const body = await readJson(request);
-    if (typeof body.message !== "string") throw new Error("Message must be a string.");
-    request.once("aborted", () => void runtime.abortSession(route.sessionId));
-    const result = await runtime.prompt(route.sessionId, body.message);
-    sendJson(response, 200, result);
-    return;
-  }
-  if (route && request.method === "POST" && route.action === "messages-stream") {
-    const body = await readJson(request);
-    if (typeof body.message !== "string") throw new Error("Message must be a string.");
-    startEventStream(response);
-    let completed = false;
-    const abort = () => {
-      if (!completed) void runtime.abortSession(route.sessionId);
-    };
-    request.once("aborted", abort);
-    response.once("close", abort);
-    try {
-      const result = await runtime.prompt(route.sessionId, body.message, (event) => {
-        sendEvent(response, "runtime", event);
-      });
-      completed = true;
-      const { events: _events, ...completion } = result;
-      sendEvent(response, "complete", completion);
-    } catch (error) {
-      completed = true;
-      const normalized = error instanceof Error ? error : new Error("Unknown Agent stream error.");
-      sendEvent(response, "error", {
-        code: normalized instanceof LocalAgentCredentialsError ? normalized.code : "AIC-AGENT-STREAM_FAILED",
-        message: normalized.message,
-        retryable: false,
-        charged: false,
-      });
-    } finally {
-      request.off("aborted", abort);
-      response.off("close", abort);
-      if (!response.writableEnded) response.end();
-    }
-    return;
-  }
-  if (route && request.method === "POST" && route.action === "reset") {
-    sendJson(response, 200, { session: await runtime.resetSession(route.sessionId) });
-    return;
-  }
-  if (route && request.method === "POST" && route.action === "abort") {
-    sendJson(response, 202, { aborted: await runtime.abortSession(route.sessionId) });
-    return;
-  }
-  if (route && request.method === "DELETE" && route.action === undefined) {
-    await runtime.deleteSession(route.sessionId);
-    response.writeHead(204, { "cache-control": "no-store" });
-    response.end();
-    return;
-  }
+  if (await handleAgentRoute(request, response, url, runtime, business)) return;
 
   sendJson(response, 404, {
     code: "AIC-API-NOT_FOUND",

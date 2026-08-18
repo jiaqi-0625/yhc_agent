@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>萤火虫广告 Agent · 汽车广告工作台</title>
-    <link rel="stylesheet" href="/app.css?build=studio-v6-action-proposals" />
+    <link rel="stylesheet" href="/app.css?build=studio-v7-task-agent-a11y3" />
+    <link rel="stylesheet" href="/agent-panel.css?build=studio-v7-task-agent-a11y3" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -225,14 +226,20 @@
           </section>
         </main>
 
+        <button id="agent-resizer" class="agent-resizer" type="button" role="separator" aria-label="调整 Agent 面板宽度" aria-orientation="vertical" title="拖动或使用左右方向键调整宽度"></button>
+
         <aside id="chat-view" class="chat-panel" aria-label="Agent 对话区">
           <header class="chat-header">
-            <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫 Agent</strong><span><i class="online-dot"></i>Pi Runtime · 作品已隔离</span></div></div>
-            <button id="new-session" class="icon-button subtle" type="button" aria-label="新建 Agent 会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
+            <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫 Agent</strong><span><i class="online-dot"></i>任务上下文已隔离</span></div></div>
+            <div class="chat-header-actions">
+              <button id="new-session" class="icon-button subtle" type="button" aria-label="新建 Agent 会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
+              <button id="collapse-agent" class="icon-button subtle" type="button" aria-label="折叠 Agent 面板" aria-expanded="true" title="折叠 Agent 面板"><svg class="icon"><use href="#i-chevron" /></svg></button>
+            </div>
           </header>
 
           <div class="agent-context">
-            <span>当前上下文</span><strong id="agent-context-name">尚未绑定项目</strong>
+            <div class="agent-context-copy"><span>当前任务上下文</span><strong id="agent-context-name">尚未绑定任务</strong></div>
+            <div class="agent-context-meta"><span id="agent-context-stage">未开始</span><span id="agent-context-revision">—</span></div>
           </div>
 
           <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
@@ -253,11 +260,12 @@
             <label class="sr-only" for="prompt">发送消息</label>
             <textarea id="prompt" rows="1" maxlength="12000" placeholder="给 Agent 发送消息…"></textarea>
             <button id="send" class="send-button" type="submit" aria-label="发送消息"><svg class="icon"><use href="#i-send" /></svg></button>
+            <button id="cancel-generation" class="send-button cancel-button" type="button" aria-label="取消当前生成" title="取消当前生成" hidden>■</button>
           </form>
-          <footer class="chat-footer"><span>Enter 发送 · Shift + Enter 换行</span><button id="reset-session" type="button">清空会话</button></footer>
+          <footer class="chat-footer"><span>Enter 发送 · Shift + Enter 换行</span><span><button id="retry-message" class="retry-button" type="button" hidden>重试</button> · <button id="reset-session" type="button">清空会话</button></span></footer>
         </aside>
       </div>
     </div>
-    <script src="/app.js?build=studio-v6-action-proposals" defer></script>
+    <script type="module" src="/app.js?build=studio-v7-task-agent-a11y3"></script>
   </body>
 </html>
