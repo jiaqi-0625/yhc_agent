@@ -322,6 +322,179 @@ export const TemporaryAssetSchema = Type.Object(
 );
 export type TemporaryAsset = Static<typeof TemporaryAssetSchema>;
 
+export const StageArtifactContentReferenceSchema = Type.Object(
+  {
+    artifactId: Identifier,
+    schemaName: Identifier,
+    schemaVersion: Type.Integer({ minimum: 1 }),
+    contentHashSha256: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+  },
+  { additionalProperties: false },
+);
+export type StageArtifactContentReference = Static<typeof StageArtifactContentReferenceSchema>;
+
+export const StageArtifactDependencySchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("stage_artifact"),
+      stage: VideoTaskStageSchema,
+      artifactVersionId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("vehicle_snapshot"),
+      vehicleSnapshotId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("asset_snapshot"),
+      assetSnapshotId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type StageArtifactDependency = Static<typeof StageArtifactDependencySchema>;
+
+export const StageArtifactProvenanceSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("human_confirmation"),
+      confirmationId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("migrated_confirmation"),
+      legacyApprovalId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("legacy_inferred"),
+      migrationId: Identifier,
+      note: Type.String({ minLength: 1, maxLength: 2000 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type StageArtifactProvenance = Static<typeof StageArtifactProvenanceSchema>;
+
+export const StageArtifactVersionSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    stage: VideoTaskStageSchema,
+    version: Type.Integer({ minimum: 1 }),
+    content: StageArtifactContentReferenceSchema,
+    dependencies: Type.Array(StageArtifactDependencySchema, { minItems: 1, maxItems: 500 }),
+    provenance: StageArtifactProvenanceSchema,
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type StageArtifactVersion = Static<typeof StageArtifactVersionSchema>;
+
+export const StageConfirmationSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    stage: VideoTaskStageSchema,
+    artifactVersionId: Identifier,
+    decision: Type.Literal("confirmed"),
+    source: Type.Literal("human_action"),
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    actorAccountId: Identifier,
+    comment: Type.Optional(Type.String({ maxLength: 2000 })),
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type StageConfirmation = Static<typeof StageConfirmationSchema>;
+
+export const RollbackStageRequestSchema = Type.Object(
+  {
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    stage: VideoTaskStageSchema,
+    targetArtifactVersionId: Identifier,
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type RollbackStageRequest = Static<typeof RollbackStageRequestSchema>;
+
+export const StageRollbackRecordSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    stage: VideoTaskStageSchema,
+    fromArtifactVersionId: Identifier,
+    toArtifactVersionId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+    requestedBy: Identifier,
+    invalidationIds: Type.Array(Identifier, { maxItems: 500, uniqueItems: true }),
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type StageRollbackRecord = Static<typeof StageRollbackRecordSchema>;
+
+export const StageArtifactInvalidationReasonSchema = Type.Union([
+  Type.Literal("upstream_rollback"),
+  Type.Literal("upstream_invalidation"),
+]);
+export type StageArtifactInvalidationReason = Static<typeof StageArtifactInvalidationReasonSchema>;
+
+export const StageArtifactInvalidationCauseSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("rollback"),
+      reasonCode: Type.Literal("upstream_rollback"),
+      rollbackId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("upstream_invalidation"),
+      reasonCode: Type.Literal("upstream_invalidation"),
+      invalidationId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type StageArtifactInvalidationCause = Static<typeof StageArtifactInvalidationCauseSchema>;
+
+export const StageArtifactInvalidationSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    stage: VideoTaskStageSchema,
+    artifactVersionId: Identifier,
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+    invalidatedDependency: StageArtifactDependencySchema,
+    cause: StageArtifactInvalidationCauseSchema,
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type StageArtifactInvalidation = Static<typeof StageArtifactInvalidationSchema>;
+
 export const VehicleSnapshotSchema = Type.Object(
   {
     id: Identifier,

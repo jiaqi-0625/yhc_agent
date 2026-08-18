@@ -7,6 +7,11 @@ import {
   BrandSchema,
   ClaimSchema,
   ProjectAssetPoolSchema,
+  RollbackStageRequestSchema,
+  StageArtifactInvalidationSchema,
+  StageArtifactVersionSchema,
+  StageConfirmationSchema,
+  StageRollbackRecordSchema,
   StrategyActionProposalSchema,
   TaskAssetSnapshotSchema,
   TemporaryAssetSchema,
@@ -20,6 +25,11 @@ import {
   type CompanyReusableAssetReference,
   type CompanyVehicleAssetReference,
   type ProjectAssetPool,
+  type RollbackStageRequest,
+  type StageArtifactInvalidation,
+  type StageArtifactVersion,
+  type StageConfirmation,
+  type StageRollbackRecord,
   type TaskAssetSnapshot,
   type TemporaryAsset,
   type TemporaryAssetReference,
@@ -203,6 +213,107 @@ const temporaryAsset = {
   ...auditFields,
 } satisfies TemporaryAsset;
 
+const strategyArtifactVersion = {
+  id: "stage_artifact_strategy_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: "strategy",
+  version: 1,
+  content: {
+    artifactId: "strategy_family_weekend_v1",
+    schemaName: "strategy",
+    schemaVersion: 1,
+    contentHashSha256: checksumSha256,
+  },
+  dependencies: [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: taskAssetSnapshot.vehicleSnapshotId },
+    { kind: "asset_snapshot", assetSnapshotId: taskAssetSnapshot.id },
+  ],
+  provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_v1" },
+  createdAt: auditFields.createdAt,
+  createdBy: videoTask.ownerAccountId,
+} satisfies StageArtifactVersion;
+
+const strategyConfirmation = {
+  id: strategyArtifactVersion.provenance.confirmationId,
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: strategyArtifactVersion.stage,
+  artifactVersionId: strategyArtifactVersion.id,
+  decision: "confirmed",
+  source: "human_action",
+  expectedTaskRevision: 4,
+  actorAccountId: videoTask.ownerAccountId,
+  comment: "策略事实与人工锁定项验收通过。",
+  occurredAt: auditFields.createdAt,
+} satisfies StageConfirmation;
+
+const scriptArtifactVersion = {
+  id: "stage_artifact_script_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: "script",
+  version: 1,
+  content: {
+    artifactId: "script_family_weekend_v1",
+    schemaName: "script",
+    schemaVersion: 1,
+    contentHashSha256: "b".repeat(64),
+  },
+  dependencies: [
+    { kind: "stage_artifact", stage: "strategy", artifactVersionId: "stage_artifact_strategy_v2" },
+  ],
+  provenance: { kind: "human_confirmation", confirmationId: "confirmation_script_v1" },
+  createdAt: auditFields.createdAt,
+  createdBy: videoTask.ownerAccountId,
+} satisfies StageArtifactVersion;
+
+const rollbackStageRequest = {
+  expectedTaskRevision: 9,
+  stage: "strategy",
+  targetArtifactVersionId: strategyArtifactVersion.id,
+  reason: "恢复到事实审核通过的策略版本。",
+} satisfies RollbackStageRequest;
+
+const stageRollbackRecord = {
+  id: "rollback_strategy_v2_to_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: rollbackStageRequest.stage,
+  fromArtifactVersionId: "stage_artifact_strategy_v2",
+  toArtifactVersionId: rollbackStageRequest.targetArtifactVersionId,
+  expectedTaskRevision: rollbackStageRequest.expectedTaskRevision,
+  reason: rollbackStageRequest.reason,
+  requestedBy: videoTask.ownerAccountId,
+  invalidationIds: ["invalidation_script_v1"],
+  occurredAt: auditFields.updatedAt,
+} satisfies StageRollbackRecord;
+
+const scriptInvalidation = {
+  id: "invalidation_script_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: scriptArtifactVersion.stage,
+  artifactVersionId: scriptArtifactVersion.id,
+  reason: "脚本依赖的策略 v2 已回退到 v1。",
+  invalidatedDependency: {
+    kind: "stage_artifact",
+    stage: "strategy",
+    artifactVersionId: stageRollbackRecord.fromArtifactVersionId,
+  },
+  cause: {
+    kind: "rollback",
+    reasonCode: "upstream_rollback",
+    rollbackId: stageRollbackRecord.id,
+  },
+  occurredAt: auditFields.updatedAt,
+} satisfies StageArtifactInvalidation;
+
 test("fixed claim requires valid evidence shape", () => {
   assert.equal(Value.Check(ClaimSchema, fixedClaim), true);
   assert.equal(Value.Check(ClaimSchema, { ...fixedClaim, evidence: { sourceName: "" } }), false);
@@ -274,6 +385,81 @@ test("temporary asset metadata records validation, duplicate, source, and usage 
     }),
     true,
   );
+});
+
+test("confirmed stage versions are immutable references with explicit upstream dependencies", () => {
+  assert.equal(Value.Check(StageArtifactVersionSchema, strategyArtifactVersion), true);
+  assert.equal(Value.Check(StageArtifactVersionSchema, scriptArtifactVersion), true);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, version: 0 }), false);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, dependencies: [] }), false);
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      content: { ...strategyArtifactVersion.content, contentHashSha256: "invalid" },
+    }),
+    false,
+  );
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, updatedAt: auditFields.updatedAt }), false);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, rawModelPayload: {} }), false);
+});
+
+test("stage version provenance distinguishes human confirmation from migrations and inference", () => {
+  assert.equal(Value.Check(StageArtifactVersionSchema, strategyArtifactVersion), true);
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "migrated_confirmation", legacyApprovalId: "legacy_approval_001" },
+    }),
+    true,
+  );
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "legacy_inferred", migrationId: "migration_v1", note: "旧流程没有资产确认点。" },
+    }),
+    true,
+  );
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "model_confirmation", confirmationId: "model_001" },
+    }),
+    false,
+  );
+});
+
+test("stage confirmation records only explicit human confirmation actions", () => {
+  assert.equal(Value.Check(StageConfirmationSchema, strategyConfirmation), true);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, source: "agent" }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, decision: "rejected" }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, expectedTaskRevision: 0 }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, approvedByModel: true }), false);
+});
+
+test("rollback records name the restored version and all direct invalidations", () => {
+  assert.equal(Value.Check(RollbackStageRequestSchema, rollbackStageRequest), true);
+  assert.equal(Value.Check(StageRollbackRecordSchema, stageRollbackRecord), true);
+  assert.equal(Value.Check(RollbackStageRequestSchema, { ...rollbackStageRequest, reason: "" }), false);
+  assert.equal(
+    Value.Check(StageRollbackRecordSchema, {
+      ...stageRollbackRecord,
+      invalidationIds: [scriptInvalidation.id, scriptInvalidation.id],
+    }),
+    false,
+  );
+});
+
+test("downstream invalidations identify the broken dependency and propagation cause", () => {
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, scriptInvalidation), true);
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, { ...scriptInvalidation, reason: "" }), false);
+  assert.equal(
+    Value.Check(StageArtifactInvalidationSchema, {
+      ...scriptInvalidation,
+      cause: { ...scriptInvalidation.cause, reasonCode: "upstream_invalidation" },
+    }),
+    false,
+  );
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, { ...scriptInvalidation, invalidatedDependency: {} }), false);
 });
 
 test("vehicle snapshot rejects unknown properties and invalid versions", () => {
