@@ -141,7 +141,7 @@ test("task-bound sessions restore the same task context through the injected Age
       createLocalModelRuntime(config),
       new LocalSessionStore(directory, true),
       (factoryContext) => {
-        assembledTaskIds.push(factoryContext.taskContext.videoTaskId);
+        assembledTaskIds.push(factoryContext.taskContext.videoTask.id);
         return createBaseAgent({
           model: factoryContext.model,
           streamFn: factoryContext.streamFn,
@@ -154,14 +154,14 @@ test("task-bound sessions restore the same task context through the injected Age
 
   const firstRuntime = createRuntime();
   const created = await firstRuntime.createSession("session_task_restore", { taskContext: MOCK_TASK_CONTEXT });
-  assert.equal(created.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
+  assert.equal(created.videoTaskId, MOCK_TASK_CONTEXT.videoTask.id);
   await firstRuntime.prompt(created.id, "保存绑定");
 
   const restored = await createRuntime().getSession(created.id);
-  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
+  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTask.id);
   assert.deepEqual(restored?.taskContext, MOCK_TASK_CONTEXT);
   assert.equal(restored?.messageCount, 2);
-  assert.deepEqual(assembledTaskIds, [MOCK_TASK_CONTEXT.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId]);
+  assert.deepEqual(assembledTaskIds, [MOCK_TASK_CONTEXT.videoTask.id, MOCK_TASK_CONTEXT.videoTask.id]);
 });
 
 test("legacy work-bound sessions resolve once and persist back as task-context v2", async (context) => {
@@ -178,7 +178,7 @@ test("legacy work-bound sessions resolve once and persist back as task-context v
   await writeFile(join(directory, "session_legacy.json"), JSON.stringify({
     schemaVersion: 1,
     id: "session_legacy",
-    workId: MOCK_TASK_CONTEXT.videoTaskId,
+    workId: MOCK_TASK_CONTEXT.videoTask.id,
     createdAt: "2026-08-18T00:00:00.000Z",
     updatedAt: "2026-08-18T00:00:00.000Z",
     provider: "mock",
@@ -204,8 +204,8 @@ test("legacy work-bound sessions resolve once and persist back as task-context v
   );
 
   const restored = await runtime.getSession("session_legacy");
-  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTaskId);
-  assert.deepEqual(resolvedLegacyIds, [MOCK_TASK_CONTEXT.videoTaskId]);
+  assert.equal(restored?.videoTaskId, MOCK_TASK_CONTEXT.videoTask.id);
+  assert.deepEqual(resolvedLegacyIds, [MOCK_TASK_CONTEXT.videoTask.id]);
   await runtime.resetSession("session_legacy");
   const persisted = JSON.parse(await readFile(join(directory, "session_legacy.json"), "utf8")) as {
     schemaVersion: number;

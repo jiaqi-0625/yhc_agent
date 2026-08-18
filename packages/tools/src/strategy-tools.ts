@@ -25,15 +25,13 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
       return textResult({
         schemaVersion: 1,
         kind: "agent_action_card",
-        id: `card_generate_strategy_${service.videoTaskId}_${expectedRevision}`,
-        idempotencyKey: `generate_strategy_${service.videoTaskId}_${expectedRevision}`,
         videoTaskId: service.videoTaskId,
         action: "generate_strategy",
         label: "生成卖点策略草稿",
         summary: `面向“${params.audience}”生成“${params.theme}”策略，点击后才会写入作品。`,
         expectedRevision,
-        estimatedCostCredits: 0,
-        payload: params,
+        cost: { kind: "free" },
+        payload: { schemaVersion: 1, ...params },
       } satisfies AgentActionCard);
     },
   };
@@ -58,15 +56,13 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
       return textResult({
         schemaVersion: 1,
         kind: "agent_action_card",
-        id: `card_request_strategy_approval_${service.videoTaskId}_${expectedRevision}`,
-        idempotencyKey: `request_strategy_approval_${service.videoTaskId}_${expectedRevision}`,
         videoTaskId: service.videoTaskId,
         action: "request_strategy_approval",
         label: "提交卖点策略人工审批",
         summary: "校验当前策略后，由负责人点击提交到人工审批。",
         expectedRevision,
-        estimatedCostCredits: 0,
-        payload: {},
+        cost: { kind: "free" },
+        payload: { schemaVersion: 1 },
       } satisfies AgentActionCard);
     },
   };

@@ -296,7 +296,7 @@ export class LocalAgentRuntime {
         sequence,
         sessionId,
         runId,
-        ...(active.taskContext === undefined ? {} : { videoTaskId: active.taskContext.videoTaskId }),
+        ...(active.taskContext === undefined ? {} : { videoTaskId: active.taskContext.videoTask.id }),
         occurredAt: new Date().toISOString(),
       };
     };
@@ -383,7 +383,7 @@ export class LocalAgentRuntime {
       ...(active.taskContext === undefined
         ? {}
         : {
-            videoTaskId: active.taskContext.videoTaskId,
+            videoTaskId: active.taskContext.videoTask.id,
             taskContext: structuredClone(active.taskContext),
           }),
       createdAt: active.createdAt,

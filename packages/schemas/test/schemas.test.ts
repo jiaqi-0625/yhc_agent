@@ -9,6 +9,11 @@ import {
   BrandSchema,
   ClaimSchema,
   ProjectAssetPoolSchema,
+  RollbackStageRequestSchema,
+  StageArtifactInvalidationSchema,
+  StageArtifactVersionSchema,
+  StageConfirmationSchema,
+  StageRollbackRecordSchema,
   StrategyActionProposalSchema,
   TaskContextSchema,
   TaskAssetSnapshotSchema,
@@ -18,20 +23,23 @@ import {
   VideoTaskSchema,
   WorkSchema,
   type BatchProject,
-  type AgentActionCard,
-  type AgentStreamEvent,
   type Brand,
   type Claim,
   type CompanyReusableAssetReference,
   type CompanyVehicleAssetReference,
   type ProjectAssetPool,
+  type RollbackStageRequest,
+  type StageArtifactInvalidation,
+  type StageArtifactVersion,
+  type StageConfirmation,
+  type StageRollbackRecord,
   type TaskAssetSnapshot,
-  type TaskContext,
   type TemporaryAsset,
   type TemporaryAssetReference,
   type Vehicle,
   type VideoTask,
 } from "../src/index.ts";
+import { agentActionCardFixtures, taskContextFixture } from "./fixtures/workspace-v2.ts";
 
 const fixedClaim = {
   id: "claim_range",
@@ -116,32 +124,6 @@ const videoTask = {
   platformTags: ["douyin", "xiaohongshu"],
   ...auditFields,
 } satisfies VideoTask;
-
-const taskContext = {
-  schemaVersion: 1,
-  videoTaskId: videoTask.id,
-  batchProjectId: batchProject.id,
-  brandId: brand.id,
-  vehicleId: vehicle.id,
-  taskStatus: videoTask.status,
-  currentStage: videoTask.currentStage,
-  taskRevision: videoTask.revision,
-  vehicleSnapshotId: "vehicle_snapshot_e5_v1",
-  assetSnapshotId: "asset_snapshot_family_weekend_v1",
-  display: {
-    brandName: brand.name,
-    vehicleName: `${vehicle.series} ${vehicle.trim}`,
-    batchProjectName: batchProject.name,
-    videoTaskName: videoTask.name,
-  },
-  brief: {
-    audience: videoTask.audience,
-    theme: videoTask.theme,
-    durationSeconds: videoTask.durationSeconds,
-    platformTags: videoTask.platformTags,
-    hasScriptInput: videoTask.scriptInput !== undefined,
-  },
-} satisfies TaskContext;
 
 const checksumSha256 = "a".repeat(64);
 
@@ -235,6 +217,107 @@ const temporaryAsset = {
   ...auditFields,
 } satisfies TemporaryAsset;
 
+const strategyArtifactVersion = {
+  id: "stage_artifact_strategy_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: "strategy",
+  version: 1,
+  content: {
+    artifactId: "strategy_family_weekend_v1",
+    schemaName: "strategy",
+    schemaVersion: 1,
+    contentHashSha256: checksumSha256,
+  },
+  dependencies: [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: taskAssetSnapshot.vehicleSnapshotId },
+    { kind: "asset_snapshot", assetSnapshotId: taskAssetSnapshot.id },
+  ],
+  provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_v1" },
+  createdAt: auditFields.createdAt,
+  createdBy: videoTask.ownerAccountId,
+} satisfies StageArtifactVersion;
+
+const strategyConfirmation = {
+  id: strategyArtifactVersion.provenance.confirmationId,
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: strategyArtifactVersion.stage,
+  artifactVersionId: strategyArtifactVersion.id,
+  decision: "confirmed",
+  source: "human_action",
+  expectedTaskRevision: 4,
+  actorAccountId: videoTask.ownerAccountId,
+  comment: "策略事实与人工锁定项验收通过。",
+  occurredAt: auditFields.createdAt,
+} satisfies StageConfirmation;
+
+const scriptArtifactVersion = {
+  id: "stage_artifact_script_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: "script",
+  version: 1,
+  content: {
+    artifactId: "script_family_weekend_v1",
+    schemaName: "script",
+    schemaVersion: 1,
+    contentHashSha256: "b".repeat(64),
+  },
+  dependencies: [
+    { kind: "stage_artifact", stage: "strategy", artifactVersionId: "stage_artifact_strategy_v2" },
+  ],
+  provenance: { kind: "human_confirmation", confirmationId: "confirmation_script_v1" },
+  createdAt: auditFields.createdAt,
+  createdBy: videoTask.ownerAccountId,
+} satisfies StageArtifactVersion;
+
+const rollbackStageRequest = {
+  expectedTaskRevision: 9,
+  stage: "strategy",
+  targetArtifactVersionId: strategyArtifactVersion.id,
+  reason: "恢复到事实审核通过的策略版本。",
+} satisfies RollbackStageRequest;
+
+const stageRollbackRecord = {
+  id: "rollback_strategy_v2_to_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: rollbackStageRequest.stage,
+  fromArtifactVersionId: "stage_artifact_strategy_v2",
+  toArtifactVersionId: rollbackStageRequest.targetArtifactVersionId,
+  expectedTaskRevision: rollbackStageRequest.expectedTaskRevision,
+  reason: rollbackStageRequest.reason,
+  requestedBy: videoTask.ownerAccountId,
+  invalidationIds: ["invalidation_script_v1"],
+  occurredAt: auditFields.updatedAt,
+} satisfies StageRollbackRecord;
+
+const scriptInvalidation = {
+  id: "invalidation_script_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  stage: scriptArtifactVersion.stage,
+  artifactVersionId: scriptArtifactVersion.id,
+  reason: "脚本依赖的策略 v2 已回退到 v1。",
+  invalidatedDependency: {
+    kind: "stage_artifact",
+    stage: "strategy",
+    artifactVersionId: stageRollbackRecord.fromArtifactVersionId,
+  },
+  cause: {
+    kind: "rollback",
+    reasonCode: "upstream_rollback",
+    rollbackId: stageRollbackRecord.id,
+  },
+  occurredAt: auditFields.updatedAt,
+} satisfies StageArtifactInvalidation;
+
 test("fixed claim requires valid evidence shape", () => {
   assert.equal(Value.Check(ClaimSchema, fixedClaim), true);
   assert.equal(Value.Check(ClaimSchema, { ...fixedClaim, evidence: { sourceName: "" } }), false);
@@ -268,14 +351,6 @@ test("workspace v2 video task owns its operator and task-level production inputs
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, durationSeconds: 0 }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, platformTags: ["douyin", "douyin"] }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, aspectRatio: "9:16" }), false);
-});
-
-test("task context exposes task facts without client-controlled identity or permission fields", () => {
-  assert.equal(Value.Check(TaskContextSchema, taskContext), true);
-  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, actorId: "account_attacker" }), false);
-  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, role: "content_admin" }), false);
-  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, budgetRemaining: 999999 }), false);
-  assert.equal(Value.Check(TaskContextSchema, { ...taskContext, assetDownloadUrl: "https://provider.invalid" }), false);
 });
 
 test("asset references distinguish vehicle-bound, reusable, and project-local sources", () => {
@@ -314,6 +389,81 @@ test("temporary asset metadata records validation, duplicate, source, and usage 
     }),
     true,
   );
+});
+
+test("confirmed stage versions are immutable references with explicit upstream dependencies", () => {
+  assert.equal(Value.Check(StageArtifactVersionSchema, strategyArtifactVersion), true);
+  assert.equal(Value.Check(StageArtifactVersionSchema, scriptArtifactVersion), true);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, version: 0 }), false);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, dependencies: [] }), false);
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      content: { ...strategyArtifactVersion.content, contentHashSha256: "invalid" },
+    }),
+    false,
+  );
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, updatedAt: auditFields.updatedAt }), false);
+  assert.equal(Value.Check(StageArtifactVersionSchema, { ...strategyArtifactVersion, rawModelPayload: {} }), false);
+});
+
+test("stage version provenance distinguishes human confirmation from migrations and inference", () => {
+  assert.equal(Value.Check(StageArtifactVersionSchema, strategyArtifactVersion), true);
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "migrated_confirmation", legacyApprovalId: "legacy_approval_001" },
+    }),
+    true,
+  );
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "legacy_inferred", migrationId: "migration_v1", note: "旧流程没有资产确认点。" },
+    }),
+    true,
+  );
+  assert.equal(
+    Value.Check(StageArtifactVersionSchema, {
+      ...strategyArtifactVersion,
+      provenance: { kind: "model_confirmation", confirmationId: "model_001" },
+    }),
+    false,
+  );
+});
+
+test("stage confirmation records only explicit human confirmation actions", () => {
+  assert.equal(Value.Check(StageConfirmationSchema, strategyConfirmation), true);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, source: "agent" }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, decision: "rejected" }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, expectedTaskRevision: 0 }), false);
+  assert.equal(Value.Check(StageConfirmationSchema, { ...strategyConfirmation, approvedByModel: true }), false);
+});
+
+test("rollback records name the restored version and all direct invalidations", () => {
+  assert.equal(Value.Check(RollbackStageRequestSchema, rollbackStageRequest), true);
+  assert.equal(Value.Check(StageRollbackRecordSchema, stageRollbackRecord), true);
+  assert.equal(Value.Check(RollbackStageRequestSchema, { ...rollbackStageRequest, reason: "" }), false);
+  assert.equal(
+    Value.Check(StageRollbackRecordSchema, {
+      ...stageRollbackRecord,
+      invalidationIds: [scriptInvalidation.id, scriptInvalidation.id],
+    }),
+    false,
+  );
+});
+
+test("downstream invalidations identify the broken dependency and propagation cause", () => {
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, scriptInvalidation), true);
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, { ...scriptInvalidation, reason: "" }), false);
+  assert.equal(
+    Value.Check(StageArtifactInvalidationSchema, {
+      ...scriptInvalidation,
+      cause: { ...scriptInvalidation.cause, reasonCode: "upstream_invalidation" },
+    }),
+    false,
+  );
+  assert.equal(Value.Check(StageArtifactInvalidationSchema, { ...scriptInvalidation, invalidatedDependency: {} }), false);
 });
 
 test("vehicle snapshot rejects unknown properties and invalid versions", () => {
@@ -379,41 +529,82 @@ test("strategy action proposals are versioned and reject untrusted fields", () =
   assert.equal(Value.Check(StrategyActionProposalSchema, { ...proposal, approved: true }), false);
 });
 
-test("agent action cards bind a task and revision without carrying approval authority", () => {
-  const card = {
-    schemaVersion: 1,
-    kind: "agent_action_card",
-    id: "card_generate_strategy_001",
-    idempotencyKey: "command_generate_strategy_001",
-    videoTaskId: videoTask.id,
-    expectedRevision: videoTask.revision,
-    action: "generate_strategy",
-    label: "生成卖点策略草稿",
-    summary: "面向家庭用户生成周末出行策略",
-    estimatedCostCredits: 0,
-    payload: { audience: videoTask.audience, theme: videoTask.theme },
-  } satisfies AgentActionCard;
-  assert.equal(Value.Check(AgentActionCardSchema, card), true);
-  assert.equal(Value.Check(AgentActionCardSchema, { ...card, approved: true }), false);
-  assert.equal(Value.Check(AgentActionCardSchema, { ...card, actorId: videoTask.ownerAccountId }), false);
-  assert.equal(Value.Check(AgentActionCardSchema, { ...card, videoTaskId: "bad/task" }), false);
+test("task context is a strict server-resolved read-only summary", () => {
+  assert.equal(Value.Check(TaskContextSchema, taskContextFixture), true);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, role: "creator" }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, permissions: ["task:write"] }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, allowedBrandIds: ["brand_firefly"] }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, budgetAuthority: 100 }), false);
+  assert.equal(
+    Value.Check(TaskContextSchema, {
+      ...taskContextFixture,
+      videoTask: { ...taskContextFixture.videoTask, ownerAccountId: "account_creator" },
+    }),
+    false,
+  );
+});
+
+test("agent action cards share one versioned proposal contract", () => {
+  for (const card of agentActionCardFixtures) {
+    assert.equal(Value.Check(AgentActionCardSchema, card), true);
+  }
+
+  const generationCard = agentActionCardFixtures[0];
+  assert.ok(generationCard);
+  const { videoTaskId: _taskId, ...withoutTaskId } = generationCard;
+  assert.equal(Value.Check(AgentActionCardSchema, withoutTaskId), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, expectedRevision: 0 }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, approved: true }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, actorId: "account_creator" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, permission: "task:write" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, apiRoute: "/v1/internal/execute" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, charged: true }), false);
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...generationCard,
+      cost: { kind: "estimated", amount: -1, currency: "CNY" },
+    }),
+    false,
+  );
+});
+
+test("agent action card payloads cannot be mixed or fabricate server rollback results", () => {
+  const generationCard = agentActionCardFixtures[0];
+  const rollbackCard = agentActionCardFixtures[2];
+  assert.ok(generationCard);
+  assert.ok(rollbackCard);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, payload: rollbackCard.payload }), false);
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...rollbackCard,
+      payload: { ...rollbackCard.payload, invalidationIds: ["invalidation_script_v1"] },
+    }),
+    false,
+  );
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...rollbackCard,
+      payload: { ...rollbackCard.payload, confirmationId: "confirmation_strategy_v1" },
+    }),
+    false,
+  );
 });
 
 test("agent stream events require stable ids, ordering, and task-bound action cards", () => {
+  const card = agentActionCardFixtures[0];
+  assert.ok(card);
   const event = {
     schemaVersion: 1,
-    eventId: "event_session_001_1",
+    eventId: "event_stream_fixture_001",
     sequence: 1,
-    sessionId: "session_001",
-    runId: "run_001",
-    videoTaskId: videoTask.id,
-    occurredAt: auditFields.createdAt,
-    type: "text_delta",
-    messageId: "message_001",
-    delta: "正在生成策略",
-  } satisfies AgentStreamEvent;
+    sessionId: "session_stream_fixture_001",
+    runId: "run_stream_fixture_001",
+    videoTaskId: taskContextFixture.videoTask.id,
+    occurredAt: "2026-08-18T00:00:00.000Z",
+    type: "action_card",
+    card,
+  };
   assert.equal(Value.Check(AgentStreamEventSchema, event), true);
   assert.equal(Value.Check(AgentStreamEventSchema, { ...event, sequence: 0 }), false);
-  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, eventId: "event/unsafe" }), false);
-  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, hiddenThinking: "private chain" }), false);
+  assert.equal(Value.Check(AgentStreamEventSchema, { ...event, eventId: "" }), false);
 });

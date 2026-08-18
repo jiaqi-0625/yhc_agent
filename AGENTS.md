@@ -40,13 +40,14 @@ The confirmed product and implementation specification is in `docs/workspace-v2-
 
 - The workspace track is maintained in `docs/plans/workspace-track-todo.md`.
 - The task-scoped Agent/dialog track is maintained in `docs/plans/agent-dialog-track-todo.md`.
-- Treat these files as live execution ledgers. Before starting work, update the active task, status, date, branch, and PR; update them again after every push, block, review transition, or merge.
-- Use the stable task IDs from the ledgers in commit messages and PR descriptions when practical.
-- Do not mark a task complete until its PR is merged to `main`, relevant automated checks pass, and the documented acceptance check has been performed.
-- Keep `main` runnable. Start feature branches from the latest `origin/main`, sync before integration, and never mix unrelated track work into one PR.
+- Treat these files as live execution ledgers. Before starting work, synchronize local `main` with `origin/main`, then update the active task, status, date, target branch, and latest commit; update them again after every push, block, or review transition.
+- Use the stable task IDs from the ledgers in commit messages when practical.
+- The standing repository workflow is direct-to-`main`: work from the latest `origin/main`, keep commits task-scoped, run the relevant checks, and push by non-forced fast-forward. Create a feature branch or PR only when the user explicitly asks.
+- Do not mark a task complete until its commits are present on `origin/main`, relevant automated checks pass, and the documented acceptance check has been performed.
+- Keep `main` runnable and never mix unrelated track work into one commit.
 - The workspace owner has final maintenance responsibility for shared business schemas and domain transitions. The dialog owner must propose shared contract changes for review instead of creating a parallel type or bypassing the domain layer.
 - Split shared monolith files before sustained parallel work. Until `apps/api/src/server.ts` and the Web `app.js`/`app.css`/`index.html` surfaces are modularized, coordinate edit order explicitly in both ledgers.
-- When a shared Schema, workflow state, API contract, or product boundary changes, update both ledgers and the affected source-of-truth document in the same PR.
+- When a shared Schema, workflow state, API contract, or product boundary changes, update both ledgers and the affected source-of-truth document in the same main-bound commit series.
 - Record blockers in the relevant ledger on the day they are discovered, including the owner, required decision, and condition for unblocking.
 
 ## Engineering rules
@@ -57,7 +58,7 @@ The confirmed product and implementation specification is in `docs/workspace-v2-
 - Add focused tests for every state transition, policy decision, and tool boundary.
 - Use mock providers in automated tests. CI must not spend real model credits.
 - Run `npm run check` after code changes.
-- Do not commit or push unless the user explicitly asks.
+- The user has granted standing authorization to commit and push completed in-scope work directly to `main` after checks pass. Do not publish to another branch, open a PR, or force-push `main` unless the user explicitly asks.
 
 ## Repository structure
 

@@ -1,11 +1,11 @@
 # 对话区开发线待办
 
 > 负责人：对话区负责人
-> 推荐分支：`agent/task-agent-panel`
+> 推荐分支：`main`
 > 当前状态：进行中
-> 当前任务：AG-003 与工作区按 WS-005 共同评审并冻结共享 Agent 契约
+> 当前任务：AG-003 将对话实现适配 WS-005 冻结契约与 WS-006 模块边界
 > 最近更新：2026-08-18
-> 关联 PR：无
+> 关联 PR：不适用（直接提交 `main`）
 
 本文是对话区开发线的实时任务账本。产品边界以 [`docs/workspace-v2-product-spec.md`](../workspace-v2-product-spec.md) 为准；本文只记录任务级 Agent、会话、流式交互和操作卡片的实施状态。
 
@@ -18,16 +18,16 @@
 | `部分实现` | 已有可验证实现，但尚未满足全部完成标准或仍缺上游依赖 |
 | `已实现待集成` | 已在当前分支提交并验证，尚未合并到 `main` |
 | `阻塞` | 无法继续，必须填写阻塞原因和解除条件 |
-| `待评审` | 已提交 PR，等待检查或评审 |
-| `已完成` | 已合并到 `main`，验证结果已记录 |
+| `待评审` | 本地实现和检查已完成，等待复核或推送 `main` |
+| `已完成` | 提交已进入 `origin/main`，检查和验收结果已记录 |
 
 ## 实时维护要求
 
-1. 开始工作前更新页首的“当前任务、当前状态、最近更新、关联 PR”。
-2. 将领取任务的状态改为 `进行中`，并记录实际分支。
-3. 每次推送后记录最新提交或 PR；Agent 行为变化不能只记录在提示词中。
+1. 开始工作前先同步 `main` 与 `origin/main`，再更新页首的“当前任务、当前状态、最近更新、最新提交”。
+2. 将领取任务的状态改为 `进行中`，集成目标固定为 `main`。
+3. 相关检查通过后创建任务范围清晰的提交，以非强制快进方式推送 `origin/main`，并记录功能提交；Agent 行为变化不能只记录在提示词中。只有用户明确要求时才创建功能分支或 PR。
 4. 发生阻塞时当天改为 `阻塞`，写清所缺的 Schema、API、产品决定或测试环境。
-5. 只有 PR 合并、会话/权限测试通过并完成浏览器联调后才能标记 `已完成`。
+5. 只有提交已进入 `origin/main`、会话/权限检查通过并完成该任务适用的浏览器联调后才能标记 `已完成`。
 6. 对 `TaskContext`、`AgentActionCard` 或可执行工具提出变更时，先与工作区负责人评审，再修改共享契约。
 7. 每个工作日结束前刷新一次本页状态，并在更新记录中写明对工作区的影响。
 
@@ -55,8 +55,8 @@
 |---|---|---|---|---|
 | AG-001 | 盘点现有会话、流式时间线和作品绑定实现 | 无 | 已实现待集成 | 记录可复用能力、耦合点和需要迁移的事件 |
 | AG-002 | 向工作区提出 `TaskContext` 最小字段需求 | AG-001 | 已实现待集成 | 不包含可由模型伪造的身份或权限字段 |
-| AG-003 | 与工作区共同冻结 `TaskContext` 和 `AgentActionCard` Schema | AG-002, WS-002 | 进行中 | 双方 fixture 和 Schema 测试一致 |
-| AG-004 | 将 Agent API 和前端面板从单体文件拆为独立模块 | AG-003, WS-006 | 部分实现 | 与工作区开发线不再长期修改同一区块 |
+| AG-003 | 与工作区共同冻结 `TaskContext` 和 `AgentActionCard` Schema | AG-002, WS-002 | 已实现待集成 | 双方 fixture 和 Schema 测试一致 |
+| AG-004 | 将 Agent API 和前端面板从单体文件拆为独立模块 | AG-003, WS-006 | 已实现待集成 | 与工作区开发线不再长期修改同一区块 |
 | AG-005 | 建立对话区 Mock `TaskContext` fixture | AG-003 | 已实现待集成 | 工作区 API 未完成时可独立开发和测试 |
 
 ## 里程碑 1：任务级会话与上下文
@@ -115,21 +115,26 @@
 
 ## 当前阻塞
 
-本次实现与验收无阻塞。后续共享契约冻结依赖 WS-005 的工作区负责人评审；跨账号会话隔离依赖 WS-301/WS-304；统一命令、权限和额度闭环依赖 WS-305/WS-107。上述依赖不影响当前 Mock 垂直切片运行。
+本次实现与验收无阻塞。共享契约已由 WS-005 冻结；跨账号会话隔离仍依赖 WS-301/WS-304，统一命令、权限和额度闭环仍依赖 WS-305/WS-107。上述依赖不影响当前 Mock 垂直切片运行。
 
 ## 任务备注
 
 - AG-001：实际分支 `agent/task-agent-panel`；已基于最新 `main` 重放盘点提交 `80d1bcf`，文档位于 [`ag-001-agent-dialog-inventory.md`](./ag-001-agent-dialog-inventory.md)；本轮已完成浏览器联调但尚未合并，状态不标记为已完成。
-- AG-002：实际分支 `agent/task-agent-panel`；实现提交 `6e327cd`。已增加 `TaskContext`、`AgentActionCard`、`AgentStreamEvent` v1 Schema、双方可复用 fixture/Schema 测试和契约提案 [`ag-002-task-context-contract.md`](./ag-002-task-context-contract.md)。上下文引用既有 `VideoTask`、`vehicleSnapshotId`、`assetSnapshotId`，不接收客户端或模型声明的身份、权限、额度和运行锁；尚未合并 `main`，因此不标记为已完成。
-- 模块与会话：`6e327cd` 已拆出 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-panel.js` 和独立样式；新会话绑定 `videoTaskId`，旧 `workId` 持久化记录首次恢复后原子迁移为 v2 `TaskContext`。跨账号拒绝仍等待服务端 SessionScope，不能宣称 AG-103 完成。
+- AG-002/AG-003：`6e327cd` 的候选字段已按 WS-005 功能提交 `a8e13b2` 的冻结结果收敛，直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和跨包 fixture；对话线只新增 `AgentStreamEvent` v1。上下文不接收客户端或模型声明的身份、权限、额度和运行锁；尚未进入 `origin/main`，因此不标记为已完成。
+- 模块与会话：对话实现已迁入 WS-006 冻结的 `agent-routes.ts`、`agent-api.js`、`agent-panel.js` 和 `agent-panel.css` 边界；新会话绑定 `videoTaskId`，旧 `workId` 仅由服务端兼容入口解析。跨账号拒绝仍等待服务端 SessionScope，不能宣称 AG-103 完成。
 - 流式与面板：`6e327cd` 已实现稳定事件 ID/sequence、任务上下文条、实时文本、取消/重试入口、事件去重与断档报错。提交 `b4e75bf` 已撤回未经明确授权的调宽、折叠和快捷键布局改动，恢复既有三栏及固定右侧对话区；AG-205 保持待开始。未实现服务端事件回放，断线后目前只能安全重试，不能宣称 AG-204 完成。
-- 操作卡片：`6e327cd` 已绑定 `videoTaskId`、`expectedRevision`、幂等键和成本展示，并保留显式人工点击；当前仍经兼容作品端点执行，等待 WS-305 统一命令 API 后才能完成权限/预算闭环。
+- 操作卡片：已按冻结契约绑定 `videoTaskId`、`expectedRevision`、结构化成本和版本化 payload，并保留显式人工点击；服务端幂等性不由卡片字段声明。当前仍经兼容作品端点执行，等待 WS-305 统一命令 API 后才能完成权限、预算和幂等闭环。
 - 验证：`npm run check` 通过（57/57 测试、类型检查、凭据扫描）。`b4e75bf` 在 3120 实测恢复三栏 `260px / 1280px / 380px`，对话标题、上下文、消息和输入区均位于右栏，无横向溢出或控制台错误。故障原因是旧服务进程未注册新拆出的 CSS/JS 静态路由，导致两项资源 404；已重启 3120 并确认均返回 200。此前 Mock 正式验收结果及首次误连非 Mock 实例的计费提醒仍然有效。
 
 ## 工作区契约通知
 
 - 2026-08-18：WS-002 已通过 `5b21d7e` 进入 `main`。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
 - 2026-08-18：WS-003 已通过 `e664b30` 进入 `main`。任务上下文后续应只引用 `assetSnapshotId`，资产详情从 `TaskAssetSnapshot` 读取；公司资产和本地上传统一使用 `AssetReference`，不得把 Provider 私有字段或下载地址加入上下文契约。
+- 2026-08-18：WS-004 通过 `86414a1` 随本次账本提交进入 `origin/main`。对话区只展示 `StageArtifactVersion`、`StageConfirmation`、`StageRollbackRecord` 和 `StageArtifactInvalidation` 的只读摘要；回退操作卡片使用 `RollbackStageRequest`，下游失效由服务端计算，Agent 不得提交确认记录或伪造失效列表。
+- 2026-08-18：工作区已开始 WS-005。冻结原则为 `TaskContext` 只包含服务端解析的只读任务摘要，`AgentActionCard` 只携带任务、动作、expectedRevision、摘要、成本提示和版本化 payload；现有 `StrategyActionProposal` 兼容迁入统一卡片，不建立平行契约。
+- 2026-08-18：WS-005 通过功能提交 `a8e13b2` 完成契约冻结。对话区后续直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和 `packages/schemas/test/fixtures/workspace-v2.ts`；卡片仅为人工执行提案，服务端仍须重算身份、权限、任务归属、revision 和实际成本。旧 `StrategyActionProposal` 仅用于当前纵向链路兼容。
+- 2026-08-18：工作区已开始 WS-006。API 将把 Agent 会话/SSE 边界从工作区及策略命令路由中抽离，Web 将把 Agent 面板逻辑与工作区业务逻辑拆到独立模块；对话区后续修改对应 Agent 模块，不再持续编辑单体入口。
+- 2026-08-18：WS-006 通过功能提交 `005a41e` 完成模块拆分。对话区后续维护 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-api.js`、`agent-panel.js` 和 `agent-panel.css`；工作区对应使用 `workspace-routes.ts`、`workspace-api.js` 和 `workspace-shell.js`，共享 HTTP/静态资源仍由组合层协调。
 
 ## 更新记录
 
@@ -144,3 +149,9 @@
 | 2026-08-18 | Codex | 在分支 `agent/task-agent-panel` 完成实现提交 `6e327cd`；全仓检查 57/57 与 Mock 浏览器验收通过。共享契约影响为新增 v1 `TaskContext`/`AgentActionCard`/`AgentStreamEvent`；后续冻结、账号隔离和命令闭环依赖 WS-005、WS-301/304、WS-305/107。 |
 | 2026-08-18 | Codex | 提交 `b4e75bf` 撤回对整体网格、面板调宽和折叠的越界修改，恢复原固定三栏；修复 3120 旧进程造成的新面板资源 404。共享契约无变化，AG-205 继续待开始。 |
 | 2026-08-18 | Codex | 纠正“分支已实现但未合并仍显示待开始”的失真记录：新增“部分实现/已实现待集成”，逐项按提交、测试和未满足依赖重标；当前唯一主动任务调整为 AG-003。 |
+| 2026-08-18 | Codex | 收到 WS-004 版本契约通知；操作卡片只请求回退目标，确认和失效记录保持服务端权威 |
+| 2026-08-18 | Codex | 根据用户长期授权，将开发流程固定为从最新 `origin/main` 开始并在检查后直接推送 `main`；不再默认创建功能分支或 PR |
+| 2026-08-18 | Codex | 与工作区启动 WS-005 契约冻结；AG-003 后续直接复用共享 Schema 和 fixture |
+| 2026-08-18 | Codex | 收到 WS-005 完成通知：共享 Agent 契约及跨包 fixture 已由 `a8e13b2` 冻结，全仓检查 62/62 通过；AG-003～AG-005 不再定义平行类型 |
+| 2026-08-18 | Codex | 收到 WS-006 启动通知：现有 API 与 Web 行为保持不变，Agent 路由和面板将获得独立维护边界 |
+| 2026-08-18 | Codex | 收到 WS-006 完成通知：Agent API/SSE、面板交互和样式已形成独立维护文件；全仓 62/62 及本地浏览器验收通过，AG-004 可在这些边界上继续演进 |

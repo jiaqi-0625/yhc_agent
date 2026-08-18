@@ -1,52 +1,10 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { LocalAgentCredentialsError, type LocalAgentRuntime } from "@firefly/agent";
+import { LocalAgentCredentialsError, LocalAgentRuntime } from "@firefly/agent";
 
-import type { LocalBusinessRuntime } from "./business-runtime.ts";
+import { LocalBusinessRuntime } from "./business-runtime.ts";
+import { readJson, sendEvent, sendJson, startEventStream } from "./http-boundary.ts";
 import { resolveLocalTaskContext } from "./task-context.ts";
-
-const maximumBodyBytes = 64 * 1024;
-
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  if (response.writableEnded) return;
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  });
-  response.end(JSON.stringify(body));
-}
-
-function startEventStream(response: ServerResponse): void {
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store, no-transform",
-    connection: "keep-alive",
-    "x-content-type-options": "nosniff",
-  });
-  response.flushHeaders();
-}
-
-function sendEvent(response: ServerResponse, event: string, data: unknown, id?: string): void {
-  if (response.writableEnded || response.destroyed) return;
-  response.write(`${id === undefined ? "" : `id: ${id}\n`}event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-}
-
-async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    bytes += buffer.length;
-    if (bytes > maximumBodyBytes) throw new Error("Request body exceeds 64 KiB.");
-    chunks.push(buffer);
-  }
-  if (chunks.length === 0) return {};
-  const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Request body must be a JSON object.");
-  }
-  return parsed as Record<string, unknown>;
-}
 
 function sessionRoute(pathname: string): { sessionId: string; action?: string } | undefined {
   const match = pathname.match(/^\/v1\/sessions\/([^/]+)(?:\/([^/]+))?$/u);

@@ -1,6 +1,8 @@
-"use strict";
-
-import { streamAgentMessage } from "./agent-panel.js?build=studio-v8-dialog-no-layout";
+import { agentApi } from "./agent-api.js";
+import { bindAgentPanel } from "./agent-panel.js";
+import { api } from "./api-client.js";
+import { workspaceApi } from "./workspace-api.js";
+import { bindWorkspaceShell } from "./workspace-shell.js";
 
 const state = {
   sessionId: null,
@@ -88,20 +90,6 @@ const statusDescriptions = {
   awaiting_strategy_approval: ["等待人工审批", "策略内容已冻结，只能由审核人员通过或驳回。"],
   strategy_approved: ["策略已通过", "该版本保持只读。继续创作时，请基于同一车型新建独立作品。"],
 };
-
-async function api(path, options) {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    let message = "请求失败（HTTP " + response.status + "）";
-    try {
-      const body = await response.json();
-      if (body && typeof body.message === "string") message = body.message;
-    } catch {}
-    throw new Error(message);
-  }
-  if (response.status === 204) return null;
-  return response.json();
-}
 
 function setStatus(kind, text) {
   elements.status.className = "status " + kind;
@@ -198,7 +186,7 @@ function renderWorkList() {
     button.addEventListener("click", function () {
       if (state.workflowBusy || state.work?.work.id === summary.work.id) return;
       void runWorkflow(function () {
-        return api("/v1/works/" + encodeURIComponent(summary.work.id));
+        return workspaceApi.getWork(summary.work.id);
       });
     });
     elements.workList.appendChild(button);
@@ -370,7 +358,7 @@ function collectStrategyItems() {
 }
 
 async function refreshWorkList() {
-  const result = await api("/v1/works");
+  const result = await workspaceApi.listWorks();
   state.workSummaries = result.works;
   renderWorkList();
 }
@@ -383,7 +371,7 @@ async function loadWorks() {
   }
   const saved = localStorage.getItem("firefly.workId");
   const selected = state.workSummaries.find(function (summary) { return summary.work.id === saved; }) || state.workSummaries[0];
-  const view = await api("/v1/works/" + encodeURIComponent(selected.work.id));
+  const view = await workspaceApi.getWork(selected.work.id);
   renderWork(view);
 }
 
@@ -754,8 +742,9 @@ function proposalEndpoint(proposal) {
 }
 
 function proposalRequestBody(proposal) {
+  const { schemaVersion: _schemaVersion, ...payload } = proposal.payload;
   return {
-    ...proposal.payload,
+    ...payload,
     expectedRevision: proposal.expectedRevision,
   };
 }
@@ -827,7 +816,6 @@ function appendActionProposal(turn, proposal) {
   card.dataset.action = proposal.action;
   card.dataset.expectedRevision = String(proposal.expectedRevision);
   card.dataset.videoTaskId = proposal.videoTaskId || "";
-  card.dataset.idempotencyKey = proposal.idempotencyKey || "";
   const header = document.createElement("div");
   header.className = "agent-action-header";
   const copy = document.createElement("div");
@@ -844,8 +832,12 @@ function appendActionProposal(turn, proposal) {
   summary.textContent = proposal.summary;
   const meta = document.createElement("p");
   meta.className = "agent-action-meta";
-  meta.textContent = "绑定当前任务 · revision " + proposal.expectedRevision
-    + (proposal.estimatedCostCredits === undefined ? "" : " · 预计 " + proposal.estimatedCostCredits + " credits")
+  const costText = proposal.cost?.kind === "estimated"
+    ? " · 预计 " + proposal.cost.amount + " " + proposal.cost.currency
+    : proposal.cost?.kind === "estimate_required"
+      ? " · 执行前需重新估价"
+      : " · 免费";
+  meta.textContent = "绑定当前任务 · revision " + proposal.expectedRevision + costText
     + "；点击前不会写入任何产物。";
   const result = document.createElement("p");
   result.className = "agent-action-result";
@@ -1025,10 +1017,10 @@ function updateSession(summary) {
   elements.sessionWork.title = summary.videoTaskId || "";
   if (summary.taskContext) {
     const context = summary.taskContext;
-    elements.agentContextName.textContent = context.display.brandName + " · " + context.display.vehicleName + " · " + context.display.videoTaskName;
-    elements.agentContextName.title = context.display.batchProjectName + " / " + context.display.videoTaskName;
-    elements.agentContextStage.textContent = taskStageLabels[context.currentStage] || context.currentStage;
-    elements.agentContextRevision.textContent = "r" + context.taskRevision;
+    elements.agentContextName.textContent = context.brand.name + " · " + context.vehicle.displayName + " · " + context.videoTask.name;
+    elements.agentContextName.title = context.batchProject.name + " / " + context.videoTask.name;
+    elements.agentContextStage.textContent = taskStageLabels[context.videoTask.currentStage] || context.videoTask.currentStage;
+    elements.agentContextRevision.textContent = "r" + context.videoTask.revision;
   } else {
     elements.agentContextName.textContent = "尚未绑定任务";
     elements.agentContextName.title = "";
@@ -1042,11 +1034,7 @@ function updateSession(summary) {
 
 async function createSession(videoTaskId) {
   const selectedVideoTaskId = videoTaskId === undefined ? state.work?.work.id : videoTaskId;
-  const body = await api("/v1/sessions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(selectedVideoTaskId ? { videoTaskId: selectedVideoTaskId } : {}),
-  });
+  const body = await agentApi.createSession(selectedVideoTaskId);
   updateSession(body.session);
   clearMessages();
 }
@@ -1064,14 +1052,14 @@ async function restoreSession() {
     return;
   }
   try {
-    const session = await api("/v1/sessions/" + encodeURIComponent(saved));
+    const session = await agentApi.getSession(saved);
     const selectedVideoTaskId = state.work?.work.id || null;
     if ((session.session.videoTaskId || null) !== selectedVideoTaskId) {
       await createSession(selectedVideoTaskId || undefined);
       return;
     }
     updateSession(session.session);
-    const transcript = await api("/v1/sessions/" + encodeURIComponent(saved) + "/transcript");
+    const transcript = await agentApi.getTranscript(saved);
     restoreTranscriptTimeline(transcript.messages);
   } catch {
     localStorage.removeItem("firefly.sessionId");
@@ -1121,8 +1109,8 @@ async function sendMessage(text) {
   let streamedText = "";
   let liveAnswer = null;
   try {
-    const result = await streamAgentMessage(
-      "/v1/sessions/" + encodeURIComponent(state.sessionId) + "/messages-stream",
+    const result = await agentApi.streamMessage(
+      state.sessionId,
       message,
       {
         signal: controller.signal,
@@ -1161,118 +1149,27 @@ async function sendMessage(text) {
   }
 }
 
-elements.composer.addEventListener("submit", function (event) {
-  event.preventDefault();
-  void sendMessage(elements.prompt.value);
+bindAgentPanel({
+  elements,
+  state,
+  sendMessage,
+  createSession,
+  updateSession,
+  clearMessages,
+  clearError,
+  showError,
+  setBusy,
 });
 
-elements.prompt.addEventListener("keydown", function (event) {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    elements.composer.requestSubmit();
-  }
-});
-
-elements.prompt.addEventListener("input", function () {
-  elements.prompt.style.height = "auto";
-  elements.prompt.style.height = Math.min(elements.prompt.scrollHeight, 180) + "px";
-});
-
-elements.cancelGeneration.addEventListener("click", async function () {
-  if (!state.busy || !state.sessionId || !state.activeAbortController) return;
-  elements.cancelGeneration.disabled = true;
-  try {
-    await api("/v1/sessions/" + encodeURIComponent(state.sessionId) + "/abort", { method: "POST" });
-  } catch (error) {
-    showError(error);
-  } finally {
-    state.activeAbortController.abort();
-  }
-});
-
-elements.retryMessage.addEventListener("click", function () {
-  if (!state.lastPrompt || state.busy) return;
-  void sendMessage(state.lastPrompt);
-});
-
-document.querySelectorAll("[data-prompt]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    elements.prompt.value = button.dataset.prompt || "";
-    elements.prompt.focus();
-  });
-});
-
-elements.newSession.addEventListener("click", async function () {
-  if (state.busy) return;
-  clearError();
-  setBusy(true);
-  try { await createSession(); } catch (error) { showError(error); }
-  finally { setBusy(false); elements.prompt.focus(); }
-});
-
-elements.resetSession.addEventListener("click", async function () {
-  if (state.busy || !state.sessionId) return;
-  if (!window.confirm("确认清空当前会话记录？此操作不可撤销。")) return;
-  clearError();
-  setBusy(true);
-  try {
-    const result = await api("/v1/sessions/" + encodeURIComponent(state.sessionId) + "/reset", { method: "POST" });
-    updateSession(result.session);
-    clearMessages();
-  } catch (error) { showError(error); }
-  finally { setBusy(false); elements.prompt.focus(); }
-});
-
-document.querySelectorAll("[data-workspace-view]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    document.querySelectorAll("[data-workspace-view]").forEach(function (candidate) {
-      candidate.classList.toggle("active", candidate === button);
-      candidate.setAttribute("aria-current", candidate === button ? "page" : "false");
-    });
-    document.querySelectorAll("[data-workspace-panel]").forEach(function (view) {
-      view.hidden = view.dataset.workspacePanel !== button.dataset.workspaceView;
-    });
-  });
-});
-
-document.querySelectorAll("[data-mobile-target]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    elements.workspaceShell.dataset.mobilePane = button.dataset.mobileTarget;
-    document.querySelectorAll("[data-mobile-target]").forEach(function (candidate) {
-      candidate.classList.toggle("active", candidate === button);
-    });
-  });
-});
-
-elements.workSearch.addEventListener("input", function () {
-  state.workFilter = elements.workSearch.value;
-  renderWorkList();
-});
-
-function applyTheme(theme) {
-  const resolved = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = resolved;
-  localStorage.setItem("firefly.theme", resolved);
-  elements.themeToggle.setAttribute("aria-label", resolved === "dark" ? "切换到浅色主题" : "切换到深色主题");
-  elements.themeToggle.title = resolved === "dark" ? "切换到浅色主题" : "切换到深色主题";
-}
-
-applyTheme(localStorage.getItem("firefly.theme") || "light");
-elements.themeToggle.addEventListener("click", function () {
-  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-});
+bindWorkspaceShell({ elements, state, renderWorkList });
 
 function createGoldenWork() {
-  return api("/v1/works", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      vehicleId: "vehicle_firefly_e5_2026_long_range",
-      color: "萤火绿",
-      region: "中国大陆",
-      campaignDate: new Date().toISOString().slice(0, 10),
-      name: "黄金样例家庭出行广告",
-    }),
+  return workspaceApi.createWork({
+    vehicleId: "vehicle_firefly_e5_2026_long_range",
+    color: "萤火绿",
+    region: "中国大陆",
+    campaignDate: new Date().toISOString().slice(0, 10),
+    name: "黄金样例家庭出行广告",
   });
 }
 
@@ -1285,14 +1182,10 @@ elements.newWork.addEventListener("click", startNewWork);
 elements.stateNewWork.addEventListener("click", startNewWork);
 
 function generateStrategy() {
-  return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      expectedRevision: state.work.work.revision,
-      audience: elements.audience.value.trim(),
-      theme: elements.theme.value.trim(),
-    }),
+  return workspaceApi.generateStrategy(state.work.work.id, {
+    expectedRevision: state.work.work.revision,
+    audience: elements.audience.value.trim(),
+    theme: elements.theme.value.trim(),
   });
 }
 
@@ -1301,38 +1194,26 @@ elements.regenerateStrategy.addEventListener("click", function () { void runWork
 
 elements.saveStrategy.addEventListener("click", function () {
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        expectedRevision: state.work.work.revision,
-        audience: elements.audience.value.trim(),
-        theme: elements.theme.value.trim(),
-        items: collectStrategyItems(),
-      }),
+    return workspaceApi.updateStrategy(state.work.work.id, {
+      expectedRevision: state.work.work.revision,
+      audience: elements.audience.value.trim(),
+      theme: elements.theme.value.trim(),
+      items: collectStrategyItems(),
     });
   });
 });
 
 elements.requestApproval.addEventListener("click", function () {
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/approval-request", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: state.work.work.revision }),
-    });
+    return workspaceApi.requestStrategyApproval(state.work.work.id, { expectedRevision: state.work.work.revision });
   });
 });
 
 function decideStrategy(decision) {
-  return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/decision", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      expectedRevision: state.work.work.revision,
-      decision: decision,
-      comment: decision === "approved" ? "本地竖切人工验收通过" : "请修改后重新提交",
-    }),
+  return workspaceApi.decideStrategy(state.work.work.id, {
+    expectedRevision: state.work.work.revision,
+    decision: decision,
+    comment: decision === "approved" ? "本地竖切人工验收通过" : "请修改后重新提交",
   });
 }
 
@@ -1341,11 +1222,7 @@ elements.rejectStrategy.addEventListener("click", function () { void runWorkflow
 elements.copyWork.addEventListener("click", function () {
   if (!state.work) return;
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/copy", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: state.work.work.revision }),
-    });
+    return workspaceApi.copyWork(state.work.work.id, { expectedRevision: state.work.work.revision });
   });
 });
 

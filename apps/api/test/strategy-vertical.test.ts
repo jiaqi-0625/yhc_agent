@@ -214,7 +214,7 @@ test("work-bound Agent sessions load only the advertising domain tools", async (
   assert.equal(createResponse.status, 201);
   const sessionBody = await json(createResponse);
   assert.equal(sessionBody.session.videoTaskId, created.work.id);
-  assert.equal(sessionBody.session.taskContext.videoTaskId, created.work.id);
+  assert.equal(sessionBody.session.taskContext.videoTask.id, created.work.id);
   assert.equal("actorId" in sessionBody.session.taskContext, false);
   assert.equal("budgetRemaining" in sessionBody.session.taskContext, false);
   assert.equal(sessionBody.session.domainToolsLoaded, true);

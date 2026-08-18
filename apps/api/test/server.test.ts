@@ -80,26 +80,49 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /studio-v8-dialog-no-layout/u);
+  assert.match(page, /workspace-agent-dialog-v2/u);
+  assert.match(page, /type="module"/u);
 
-  const [styleResponse, scriptResponse, panelStyleResponse, panelScriptResponse] = await Promise.all([
+  const [
+    styleResponse,
+    agentStyleResponse,
+    scriptResponse,
+    agentApiResponse,
+    agentPanelResponse,
+    workspaceApiResponse,
+    workspaceShellResponse,
+  ] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
-    fetch(`${baseUrl}/app.js`),
     fetch(`${baseUrl}/agent-panel.css`),
+    fetch(`${baseUrl}/app.js`),
+    fetch(`${baseUrl}/agent-api.js`),
     fetch(`${baseUrl}/agent-panel.js`),
+    fetch(`${baseUrl}/workspace-api.js`),
+    fetch(`${baseUrl}/workspace-shell.js`),
   ]);
   assert.equal(styleResponse.status, 200);
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
+  assert.equal(agentStyleResponse.status, 200);
+  assert.match(await agentStyleResponse.text(), /\.agent-action-card/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
-  assert.equal(panelStyleResponse.status, 200);
-  assert.match(panelStyleResponse.headers.get("content-type") ?? "", /^text\/css/u);
-  assert.equal(panelScriptResponse.status, 200);
-  assert.match(panelScriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
+  assert.equal(agentApiResponse.status, 200);
+  assert.equal(agentPanelResponse.status, 200);
+  assert.equal(workspaceApiResponse.status, 200);
+  assert.equal(workspaceShellResponse.status, 200);
   const script = await scriptResponse.text();
-  const panelScript = await panelScriptResponse.text();
+  const agentApiScript = await agentApiResponse.text();
+  const agentPanelScript = await agentPanelResponse.text();
+  const workspaceApiScript = await workspaceApiResponse.text();
   assert.match(script, /firefly\.workId/u);
-  assert.match(script, /messages-stream/u);
+  assert.match(script, /\.\/agent-api\.js/u);
+  assert.match(script, /\.\/workspace-api\.js/u);
+  assert.match(agentApiScript, /messages-stream/u);
+  assert.match(agentApiScript, /seenEventIds/u);
+  assert.match(agentPanelScript, /bindAgentPanel/u);
+  assert.match(agentPanelScript, /abortSession/u);
+  assert.match(workspaceApiScript, /generateStrategy/u);
+  assert.match(await workspaceShellResponse.text(), /bindWorkspaceShell/u);
   assert.match(script, /读取车型事实快照/u);
   assert.match(script, /function renderMarkdown/u);
   assert.match(script, /markdown-table-wrap/u);
@@ -109,8 +132,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /确认生成策略/u);
   assert.match(script, /videoTaskId/u);
   assert.match(script, /cancel-generation/u);
-  assert.match(panelScript, /streamAgentMessage/u);
-  assert.doesNotMatch(panelScript, /createAgentPanelLayoutController/u);
+  assert.doesNotMatch(agentPanelScript, /createAgentPanelLayoutController/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {

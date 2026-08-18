@@ -38,9 +38,9 @@ export function createBusinessAgentRuntime(
         ...(context.getApiKey === undefined ? {} : { getApiKey: context.getApiKey }),
         scope: LOCAL_AGENT_SCOPE,
         taskContext: context.taskContext,
-        getWorkStatus: async () => (await business.getWork(context.taskContext.videoTaskId)).work.status,
+        getWorkStatus: async () => (await business.getWork(context.taskContext.videoTask.id)).work.status,
         vehicleService: business.vehicleService,
-        strategyService: business.bindStrategyWorkflow(context.taskContext.videoTaskId),
+        strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id),
       }),
     (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),
   );

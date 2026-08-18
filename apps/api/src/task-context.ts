@@ -36,28 +36,34 @@ export async function resolveLocalTaskContext(
   const strategy = view.strategy;
   return {
     schemaVersion: 1,
-    videoTaskId: view.work.id,
-    batchProjectId: view.work.projectId,
-    brandId: snapshot.brandId,
-    vehicleId: snapshot.vehicleId,
-    taskStatus: taskStatusForLegacyStatus(view.work.status),
-    currentStage: stageForLegacyStatus(view.work.status),
-    taskRevision: view.work.revision,
-    ...(view.work.vehicleSnapshotId === undefined
-      ? {}
-      : { vehicleSnapshotId: view.work.vehicleSnapshotId }),
-    display: {
-      brandName: snapshot.brand,
-      vehicleName: `${snapshot.series} ${snapshot.trim}`,
-      batchProjectName: `${snapshot.brand} ${snapshot.series} 历史作品兼容项目`,
-      videoTaskName: `${snapshot.series} ${snapshot.trim} 广告任务`,
+    kind: "task_context",
+    brand: { id: snapshot.brandId, name: snapshot.brand },
+    vehicle: {
+      id: snapshot.vehicleId,
+      displayName: `${snapshot.series} ${snapshot.trim}`,
+      version: 1,
     },
-    brief: {
+    batchProject: {
+      id: view.work.projectId,
+      name: `${snapshot.brand} ${snapshot.series} 历史作品兼容项目`,
+      aspectRatio: "9:16",
+    },
+    videoTask: {
+      id: view.work.id,
+      name: `${snapshot.series} ${snapshot.trim} 广告任务`,
+      status: taskStatusForLegacyStatus(view.work.status),
+      currentStage: stageForLegacyStatus(view.work.status),
+      revision: view.work.revision,
+      ...(view.work.vehicleSnapshotId === undefined
+        ? {}
+        : { vehicleSnapshotId: view.work.vehicleSnapshotId }),
+      ownership: { state: "owned_by_current_account" },
+    },
+    productionBrief: {
       audience: strategy?.audience ?? "待补充受众",
       theme: strategy?.theme ?? "待补充主题",
       durationSeconds: 30,
       platformTags: [],
-      hasScriptInput: false,
     },
   };
 }

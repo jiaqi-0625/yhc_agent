@@ -1,62 +1,67 @@
-"use strict";
+import { agentApi } from "./agent-api.js";
 
-export async function streamAgentMessage(path, message, options = {}) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "text/event-stream" },
-    body: JSON.stringify({ message }),
-    signal: options.signal,
+export function bindAgentPanel(options) {
+  const { elements, state, sendMessage, createSession, updateSession, clearMessages, clearError, showError, setBusy } = options;
+
+  elements.composer.addEventListener("submit", function (event) {
+    event.preventDefault();
+    void sendMessage(elements.prompt.value);
   });
-  if (!response.ok || !response.body) {
-    let errorMessage = "请求失败（HTTP " + response.status + "）";
-    try {
-      const body = await response.json();
-      if (body && typeof body.message === "string") errorMessage = body.message;
-    } catch {}
-    throw new Error(errorMessage);
-  }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const seenEventIds = new Set();
-  let lastSequence = 0;
-  let buffer = "";
-  let completion;
-
-  while (true) {
-    const chunk = await reader.read();
-    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done }).replace(/\r\n/g, "\n");
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) {
-      let eventName = "message";
-      let eventId;
-      const data = [];
-      for (const line of frame.split("\n")) {
-        if (line.startsWith("event:")) eventName = line.slice(6).trim();
-        if (line.startsWith("id:")) eventId = line.slice(3).trim();
-        if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-      }
-      if (data.length === 0) continue;
-      const payload = JSON.parse(data.join("\n"));
-      if (eventName === "agent") {
-        const stableId = eventId || payload.eventId;
-        if (typeof stableId !== "string" || seenEventIds.has(stableId)) continue;
-        if (!Number.isInteger(payload.sequence) || payload.sequence < 1) {
-          throw new Error("Agent 返回了无效的事件顺序。");
-        }
-        if (lastSequence !== 0 && payload.sequence !== lastSequence + 1) {
-          throw new Error("Agent 事件流出现缺口，请重试本次消息。");
-        }
-        seenEventIds.add(stableId);
-        lastSequence = payload.sequence;
-        options.onEvent?.(payload);
-      }
-      if (eventName === "complete") completion = payload;
-      if (eventName === "error") throw new Error(payload.message || "Agent 流式请求失败。");
+  elements.prompt.addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      elements.composer.requestSubmit();
     }
-    if (chunk.done) break;
-  }
-  if (!completion) throw new Error("Agent 流在完成前意外结束。");
-  return completion;
+  });
+
+  elements.prompt.addEventListener("input", function () {
+    elements.prompt.style.height = "auto";
+    elements.prompt.style.height = Math.min(elements.prompt.scrollHeight, 180) + "px";
+  });
+
+  document.querySelectorAll("[data-prompt]").forEach(function (button) {
+    button.addEventListener("click", function () {
+      elements.prompt.value = button.dataset.prompt || "";
+      elements.prompt.focus();
+    });
+  });
+
+  elements.newSession.addEventListener("click", async function () {
+    if (state.busy) return;
+    clearError();
+    setBusy(true);
+    try { await createSession(); } catch (error) { showError(error); }
+    finally { setBusy(false); elements.prompt.focus(); }
+  });
+
+  elements.resetSession.addEventListener("click", async function () {
+    if (state.busy || !state.sessionId) return;
+    if (!window.confirm("确认清空当前会话记录？此操作不可撤销。")) return;
+    clearError();
+    setBusy(true);
+    try {
+      const result = await agentApi.resetSession(state.sessionId);
+      updateSession(result.session);
+      clearMessages();
+    } catch (error) { showError(error); }
+    finally { setBusy(false); elements.prompt.focus(); }
+  });
+
+  elements.cancelGeneration.addEventListener("click", async function () {
+    if (!state.busy || !state.sessionId || !state.activeAbortController) return;
+    elements.cancelGeneration.disabled = true;
+    try {
+      await agentApi.abortSession(state.sessionId);
+    } catch (error) {
+      showError(error);
+    } finally {
+      state.activeAbortController.abort();
+    }
+  });
+
+  elements.retryMessage.addEventListener("click", function () {
+    if (!state.lastPrompt || state.busy) return;
+    void sendMessage(state.lastPrompt);
+  });
 }
