@@ -126,6 +126,8 @@
 - 2026-08-18：WS-006 通过功能提交 `005a41e` 完成模块拆分。对话区后续维护 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-api.js`、`agent-panel.js` 和 `agent-panel.css`；工作区对应使用 `workspace-routes.ts`、`workspace-api.js` 和 `workspace-shell.js`，共享 HTTP/静态资源仍由组合层协调。
 - 2026-08-18：工作区已开始 WS-101。Agent 后续判断可用建议和操作卡片时应读取共享的 VideoTask 当前阶段/阶段状态，不得继续把旧 `WorkStatus` 当作 V2 权威状态；现有策略纵向链路暂由兼容状态机维持。
 - 2026-08-18：WS-101 通过功能提交 `44b1cf0` 完成。`TaskContext.videoTask` 现同时提供 `currentStage` 和 `stageStatus`；Agent 只能提出当前阶段的 `stage_confirmation_requested` 类操作，`stage_confirmed`/`stage_confirmation_rejected` 必须来自服务端验证后的 `human_action`，不能由模型工具直接调用。
+- 2026-08-18：工作区已开始 WS-102。Agent 不得注册或调用人工确认服务；确认操作者、租户和任务作用域必须由服务端会话上下文注入，模型输出或客户端请求不得提供或覆盖这些字段。
+- 2026-08-18：WS-102 通过功能提交 `7e8d318` 完成。人工确认服务只接受服务端 `HumanSessionScope`，确认命令没有 `source`、`actorAccountId` 或租户作用域字段；Agent 后续仍只能提出确认请求，不能调用该服务或写入版本聚合。
 
 ## 更新记录
 
@@ -144,3 +146,5 @@
 | 2026-08-18 | Codex | 收到 WS-006 完成通知：Agent API/SSE、面板交互和样式已形成独立维护文件；全仓 62/62 及本地浏览器验收通过，AG-004 可在这些边界上继续演进 |
 | 2026-08-18 | Codex | 收到 WS-101 启动通知：后续领域工具策略将以 V2 六阶段状态机为准，旧 Work 状态只用于迁移和当前兼容链路 |
 | 2026-08-18 | Codex | 收到 WS-101 完成通知：共享任务上下文增加阶段状态，六阶段状态机拒绝跳转、模型确认和终态推进；全仓 66/66 通过 |
+| 2026-08-18 | Codex | 收到 WS-102 启动通知：人工确认身份由服务端会话解析，Agent 仅能提出确认请求，不能直接写入确认或不可变版本 |
+| 2026-08-18 | Codex | 收到 WS-102 完成通知：功能提交 `7e8d318` 已实现服务端人工身份注入、不可变版本与审计事件原子落盘；全仓 74/74 通过 |
