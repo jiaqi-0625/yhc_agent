@@ -92,6 +92,22 @@ test("before-tool hook blocks a registered tool in the wrong workflow state", as
   assert.match(result?.reason ?? "", /AIC-WORKFLOW-TOOL_NOT_ALLOWED/);
 });
 
+test("before-tool hook awaits the current persisted workflow status", async () => {
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    getWorkStatus: async () => "awaiting_strategy_approval" as const,
+    vehicleService: new InMemoryVehicleService([]),
+  });
+  assert.ok(agent.beforeToolCall);
+  const result = await agent.beforeToolCall({
+    toolCall: { type: "toolCall", id: "call_async_status", name: "get_vehicle_snapshot", arguments: {} },
+  } as unknown as BeforeToolCallContext);
+  assert.equal(result?.block, true);
+  assert.match(result?.reason ?? "", /AIC-WORKFLOW-TOOL_NOT_ALLOWED/u);
+});
+
 test("redaction removes secret-bearing fields and bearer credentials", () => {
   assert.deepEqual(
     redactSensitive({ apiKey: "not-for-logs", nested: { authorization: "Bearer abc.def", safe: "Bearer abc.def" } }),

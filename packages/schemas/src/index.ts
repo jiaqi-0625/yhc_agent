@@ -267,6 +267,12 @@ export const CreateWorkRequestSchema = Type.Object(
 );
 export type CreateWorkRequest = Static<typeof CreateWorkRequestSchema>;
 
+export const CopyWorkRequestSchema = Type.Object(
+  { expectedRevision: Type.Integer({ minimum: 1 }) },
+  { additionalProperties: false },
+);
+export type CopyWorkRequest = Static<typeof CopyWorkRequestSchema>;
+
 export const ClaimValidationRequestSchema = Type.Object(
   {
     snapshotId: Identifier,

@@ -37,6 +37,16 @@ const defaultBaseUrls: Readonly<Record<LocalAgentProvider, string>> = {
 
 const thinkingLevels = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
+export class LocalAgentCredentialsError extends Error {
+  readonly code = "AIC-AGENT-CREDENTIALS_MISSING";
+
+  constructor(readonly provider: Exclude<LocalAgentProvider, "mock">) {
+    const variable = provider === "deepseek" ? "DEEPSEEK_API_KEY" : "ARK_API_KEY";
+    super(`主 Agent 已配置为 ${provider}，但服务端尚未设置 ${variable}。`);
+    this.name = "LocalAgentCredentialsError";
+  }
+}
+
 function optionalValue(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -52,7 +62,7 @@ function parseBoolean(value: string | undefined, fallback: boolean): boolean {
 export function loadLocalAgentConfig(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): LocalAgentConfig {
-  const providerValue = environment.AGENT_PROVIDER?.trim() || "mock";
+  const providerValue = environment.AGENT_PROVIDER?.trim() || "deepseek";
   if (providerValue !== "mock" && providerValue !== "deepseek" && providerValue !== "volcengine") {
     throw new Error("AGENT_PROVIDER must be one of: mock, deepseek, volcengine.");
   }
@@ -69,10 +79,6 @@ export function loadLocalAgentConfig(
         ? optionalValue(environment.ARK_API_KEY)
         : undefined;
   const apiKey = optionalValue(environment.AGENT_PROVIDER_API_KEY) ?? providerKey;
-  if (provider !== "mock" && apiKey === undefined) {
-    throw new Error(`No API key is configured for provider '${provider}'.`);
-  }
-
   return {
     provider,
     modelId: optionalValue(environment.AGENT_MODEL) ?? defaultModels[provider],

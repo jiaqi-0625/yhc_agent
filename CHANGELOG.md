@@ -9,6 +9,7 @@
 - Versioned strategy schemas, deterministic generation, fact validation, human editing and locking.
 - Strategy approval requests and backend-only human approve/reject decisions.
 - Strategy workflow API, local acceptance UI, optional Agent tools, and end-to-end coverage.
+- Multi-work navigation, selected-work refresh recovery, and safe creation from an approved vehicle snapshot.
 
 ## 0.1.0 - 2026-08-14
 

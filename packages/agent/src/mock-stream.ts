@@ -52,9 +52,13 @@ export const mockStreamFn: StreamFn = (
     }
 
     const input = lastUserText(context).trim();
+    const toolNames = (context.tools ?? []).map((tool) => tool.name);
+    const assembly = toolNames.length > 0
+      ? `已装配当前作品的 ${toolNames.length} 个受控业务工具：${toolNames.join("、")}。Mock 模型仅验证装配链路，不会自主调用工具。`
+      : "当前会话未绑定作品，因此未装配广告工作流工具。";
     const text = input
-      ? `本地 Mock Agent 已收到：${input}\n\n当前模型链路、会话和事件框架运行正常；尚未装配具体广告工作流工具。`
-      : "本地 Mock Agent 运行正常；尚未装配具体广告工作流工具。";
+      ? `本地 Mock Agent 已收到：${input}\n\n当前模型链路、会话和事件框架运行正常；${assembly}`
+      : `本地 Mock Agent 运行正常；${assembly}`;
     const start = messageFor(model, "", "pending");
     const partial = messageFor(model, text, "pending");
     const completed = messageFor(model, text, "stop");

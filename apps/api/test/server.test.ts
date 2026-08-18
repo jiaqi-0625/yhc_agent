@@ -46,6 +46,7 @@ test("health and metadata endpoints expose the current bounded vertical slice", 
     "vehicle_snapshot",
     "strategy_draft",
     "human_strategy_approval",
+    "work_bound_agent",
   ]);
   assert.deepEqual(meta.domainTools, [
     "get_vehicle_snapshot",
@@ -72,7 +73,11 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(pageResponse.status, 200);
   assert.match(pageResponse.headers.get("content-type") ?? "", /^text\/html/u);
   assert.match(pageResponse.headers.get("content-security-policy") ?? "", /default-src 'self'/u);
-  assert.match(await pageResponse.text(), /萤火虫广告 Agent/u);
+  const page = await pageResponse.text();
+  assert.match(page, /萤火虫广告 Agent/u);
+  assert.match(page, /作品列表/u);
+  assert.match(page, /新建广告作品/u);
+  assert.match(page, /基于此车型新建作品/u);
 
   const [styleResponse, scriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
@@ -82,6 +87,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
+  assert.match(await scriptResponse.text(), /firefly\.workId/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {
@@ -129,4 +135,48 @@ test("local API creates a session, prompts the mock Pi agent, and restores trans
   assert.equal(transcriptResponse.status, 200);
   const transcript = (await transcriptResponse.json()) as { messages: unknown[] };
   assert.equal(transcript.messages.length, 2);
+});
+
+test("DeepSeek stays selected while a missing server key blocks model calls with 503", async (context) => {
+  const deepseekConfig: LocalAgentConfig = {
+    provider: "deepseek",
+    modelId: "deepseek-v4-flash",
+    baseUrl: "https://api.deepseek.com",
+    thinkingLevel: "medium",
+    persistSessions: false,
+    dataDirectory: ".data/test-sessions",
+  };
+  const server = await startApiServer(0, "127.0.0.1", new LocalAgentRuntime(deepseekConfig));
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  const meta = (await (await fetch(`${baseUrl}/v1/meta`)).json()) as {
+    model: { provider: string; modelId: string; credentialsConfigured: boolean };
+  };
+  assert.deepEqual(meta.model, {
+    provider: "deepseek",
+    modelId: "deepseek-v4-flash",
+    baseUrl: "https://api.deepseek.com",
+    thinkingLevel: "medium",
+    persistSessions: false,
+    credentialsConfigured: false,
+  });
+
+  await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "session_missing_deepseek_key" }),
+  });
+  const response = await fetch(`${baseUrl}/v1/sessions/session_missing_deepseek_key/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "不要产生计费请求" }),
+  });
+  assert.equal(response.status, 503);
+  const error = (await response.json()) as { code: string; charged: boolean; message: string };
+  assert.equal(error.code, "AIC-AGENT-CREDENTIALS_MISSING");
+  assert.equal(error.charged, false);
+  assert.match(error.message, /DEEPSEEK_API_KEY/u);
 });

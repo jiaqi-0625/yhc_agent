@@ -7,6 +7,7 @@ import test from "node:test";
 import { LocalAgentRuntime, type LocalAgentConfig } from "@firefly/agent";
 
 import { LocalBusinessRuntime } from "../src/business-runtime.ts";
+import { createBusinessAgentRuntime } from "../src/business-agent-runtime.ts";
 import { LocalWorkStore } from "../src/business-store.ts";
 import { startApiServer } from "../src/server.ts";
 
@@ -131,6 +132,45 @@ test("strategy vertical slice preserves human locks and requires a human approva
   assert.equal(approved.work.status, "strategy_approved");
   assert.equal(approved.approvals[0].actorId, "reviewer_local");
   assert.equal(approved.approvals[0].decision, "approved");
+
+  const listResponse = await fetch(`${baseUrl}/v1/works`);
+  assert.equal(listResponse.status, 200);
+  const listed = await json(listResponse);
+  assert.equal(listed.works.length, 1);
+  assert.equal(listed.works[0].work.id, created.work.id);
+  assert.equal(listed.works[0].vehicle.series, "萤火 E5");
+  assert.equal(listed.works[0].strategy.status, "approved");
+  assert.equal("vehicleSnapshot" in listed.works[0], false);
+
+  const copyResponse = await fetch(`${baseUrl}/v1/works/${created.work.id}/copy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: approved.work.revision }),
+  });
+  assert.equal(copyResponse.status, 201);
+  const copied = await json(copyResponse);
+  assert.notEqual(copied.work.id, created.work.id);
+  assert.equal(copied.work.status, "created");
+  assert.equal(copied.work.revision, 1);
+  assert.equal(copied.vehicleSnapshot.id, approved.vehicleSnapshot.id);
+  assert.equal(copied.strategyVersionCount, 0);
+
+  const copiedList = await json(await fetch(`${baseUrl}/v1/works`));
+  assert.equal(copiedList.works.length, 2);
+  assert.equal(copiedList.works[0].work.id, copied.work.id);
+});
+
+test("copying is rejected for a work that has not passed strategy approval", async (context) => {
+  const { server, baseUrl } = await startBusinessApi();
+  context.after(() => server.close());
+  const created = await createWork(baseUrl);
+  const response = await fetch(`${baseUrl}/v1/works/${created.work.id}/copy`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedRevision: created.work.revision }),
+  });
+  assert.equal(response.status, 409);
+  assert.equal((await json(response)).code, "AIC-WORKFLOW-WORK_COPY_DENIED");
 });
 
 test("business work is restored independently from the Agent transcript", async (context) => {
@@ -147,4 +187,52 @@ test("business work is restored independently from the Agent transcript", async 
   const restored = await json(response);
   assert.equal(restored.work.id, created.work.id);
   assert.equal(restored.vehicleSnapshot.id, created.vehicleSnapshot.id);
+});
+
+test("work-bound Agent sessions load only the advertising domain tools", async (context) => {
+  const business = new LocalBusinessRuntime(new LocalWorkStore(".data/test-works", false));
+  const runtime = createBusinessAgentRuntime(business, testConfig);
+  const server = await startApiServer(0, "127.0.0.1", runtime, business);
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const created = await createWork(baseUrl);
+
+  const missingResponse = await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workId: "work_missing" }),
+  });
+  assert.equal(missingResponse.status, 404);
+
+  const createResponse = await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "session_business_agent", workId: created.work.id }),
+  });
+  assert.equal(createResponse.status, 201);
+  const sessionBody = await json(createResponse);
+  assert.equal(sessionBody.session.workId, created.work.id);
+  assert.equal(sessionBody.session.domainToolsLoaded, true);
+  assert.deepEqual(sessionBody.session.toolNames, [
+    "get_vehicle_snapshot",
+    "validate_vehicle_claims",
+    "generate_strategy",
+    "validate_strategy",
+    "request_strategy_approval",
+  ]);
+  assert.doesNotMatch(sessionBody.session.toolNames.join(","), /bash|shell|http|browser|approve_strategy/u);
+
+  const promptResponse = await fetch(`${baseUrl}/v1/sessions/session_business_agent/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "检查当前作品工具" }),
+  });
+  assert.equal(promptResponse.status, 200);
+  const prompt = await json(promptResponse);
+  assert.match(prompt.assistantText, /已装配当前作品的 5 个受控业务工具/u);
+
+  const meta = await json(await fetch(`${baseUrl}/v1/meta`));
+  assert.equal(meta.agentDomainToolsLoaded, true);
 });

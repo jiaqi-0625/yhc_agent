@@ -4,12 +4,12 @@
 
 当前工作区已经在 Agent 框架之上完成第一条本地业务纵切：不可变车型快照、版本化卖点策略、事实校验、人工锁定、审批请求和人工决策。策略生成默认使用确定性 Mock，不宣称已经具备真实模型策略质量、脚本、分镜、视频生成或投放能力。
 
-默认聊天 Agent 仍是不带领域工具的 Mock Agent；本地验收页通过受控业务 API 运行策略纵切。车型与策略工具可按作品装配到广告 Agent，但人工批准始终只存在于后端/UI。
+本地验收页的聊天会话现在由服务端绑定当前 `workId`，并装配车型与策略白名单工具；未绑定作品的 CLI/框架会话仍保持无工具模式。Mock 模型用于无费用地验收装配、会话恢复和权限链路，不会自主发起工具调用。人工批准始终只存在于后端/UI。
 
 ## 分层
 
 ```text
-apps/api             HTTP/API 边界、本地作品存储、黄金样例与人工审批命令
+apps/api             HTTP/API 边界、本地作品存储、作品摘要/复制、黄金样例与人工审批命令
 packages/agent       Pi Agent 装配、系统提示词、策略钩子、审计与脱敏
 packages/tools       车型快照、宣传表述校验和策略草稿白名单工具
 packages/domain      工作流状态机、revision 冲突和工具策略
@@ -27,13 +27,15 @@ CLI / Local HTTP API
 LocalAgentRuntime
   ├─ 配置与密钥解析（Mock / DeepSeek / 火山方舟）
   ├─ Pi Agent Core 生命周期与 AbortSignal
-  ├─ 会话创建、恢复、重置和取消
-  └─ .data/sessions 中的本地聊天记录
+  ├─ 会话创建、作品绑定、恢复、重置和取消
+  └─ .data/sessions 中的本地聊天记录与 workId
         |
         v
-createBaseAgent（默认 tools=[]）
-        |
-        +---- 以后按工作流装配白名单领域工具
+未绑定作品 -> createBaseAgent（tools=[]）
+绑定作品   -> createAdvertisingAgent
+              ├─ 车型快照与宣传表述校验
+              ├─ 策略生成、校验与请求人工审批
+              └─ 每次调用前读取最新作品状态并执行策略检查
 ```
 
 聊天记录和业务产物必须分开保存。本地 JSON 会话仅用于开发调试，不作为作品、审批、车型快照或生成任务的数据源。

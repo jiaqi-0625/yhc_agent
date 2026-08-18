@@ -3,6 +3,7 @@ import {
   type AfterToolCallResult,
   type BeforeToolCallContext,
   type BeforeToolCallResult,
+  type AgentMessage,
   type StreamFn,
 } from "@earendil-works/pi-agent-core";
 import type { Api, Model, TextContent } from "@earendil-works/pi-ai";
@@ -33,8 +34,11 @@ export type AgentAuditSink = (event: AgentAuditEvent) => void | Promise<void>;
 export interface CreateAdvertisingAgentOptions {
   model: Model<Api>;
   streamFn: StreamFn;
+  messages?: readonly AgentMessage[];
+  sessionId?: string;
+  getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   scope: SessionScope;
-  getWorkStatus: () => WorkStatus;
+  getWorkStatus: () => WorkStatus | Promise<WorkStatus>;
   vehicleService: InMemoryVehicleService;
   strategyService?: StrategyWorkflowPort;
   auditSink?: AgentAuditSink;
@@ -93,7 +97,7 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   const beforeToolCall = async (context: BeforeToolCallContext): Promise<BeforeToolCallResult | undefined> => {
     const decision = evaluateToolPolicy({
       toolName: context.toolCall.name,
-      status: options.getWorkStatus(),
+      status: await options.getWorkStatus(),
       scope: options.scope,
     });
     if (!decision.allowed) {
@@ -120,6 +124,9 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
     streamFn: options.streamFn,
     systemPrompt: ADVERTISING_AGENT_SYSTEM_PROMPT,
     tools,
+    ...(options.messages === undefined ? {} : { messages: options.messages }),
+    ...(options.sessionId === undefined ? {} : { sessionId: options.sessionId }),
+    ...(options.getApiKey === undefined ? {} : { getApiKey: options.getApiKey }),
     beforeToolCall,
     afterToolCall,
   });

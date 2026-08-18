@@ -8,24 +8,46 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 
 import {
+  createBaseAgent,
+  createLocalModelRuntime,
   LocalAgentRuntime,
+  LocalSessionStore,
   loadLocalAgentConfig,
   toPublicLocalAgentConfig,
   type LocalAgentConfig,
   type LocalModelRuntime,
 } from "../src/index.ts";
 
-test("local configuration defaults to credential-free mock mode", () => {
+test("local configuration defaults the main Agent to DeepSeek without exposing credentials", () => {
   const config = loadLocalAgentConfig({});
+  assert.equal(config.provider, "deepseek");
+  assert.equal(config.modelId, "deepseek-v4-flash");
+  assert.equal(config.baseUrl, "https://api.deepseek.com");
+  assert.equal(config.apiKey, undefined);
+  assert.equal(toPublicLocalAgentConfig(config).credentialsConfigured, false);
+});
+
+test("credential-free mock mode remains available explicitly for tests and local development", () => {
+  const config = loadLocalAgentConfig({ AGENT_PROVIDER: "mock" });
   assert.equal(config.provider, "mock");
   assert.equal(config.modelId, "mock-local");
-  assert.equal(config.apiKey, undefined);
   assert.equal(toPublicLocalAgentConfig(config).credentialsConfigured, true);
 });
 
-test("real providers fail closed without a server-side API key", () => {
-  assert.throws(() => loadLocalAgentConfig({ AGENT_PROVIDER: "deepseek" }), /No API key/u);
-  assert.throws(() => loadLocalAgentConfig({ AGENT_PROVIDER: "volcengine" }), /No API key/u);
+test("real providers start for diagnostics but reject prompts without a server-side API key", async () => {
+  for (const provider of ["deepseek", "volcengine"] as const) {
+    const runtime = new LocalAgentRuntime(
+      loadLocalAgentConfig({
+        AGENT_PROVIDER: provider,
+        LOCAL_AGENT_PERSIST_SESSIONS: "false",
+      }),
+    );
+    const session = await runtime.createSession(`missing_key_${provider}`);
+    await assert.rejects(
+      () => runtime.prompt(session.id, "不会发起外部调用"),
+      /服务端尚未设置/u,
+    );
+  }
 });
 
 test("public configuration never exposes provider credentials", () => {
@@ -66,6 +88,46 @@ test("mock runtime persists and restores a multi-turn Pi transcript", async (con
 
   const reset = await secondRuntime.resetSession("session_persistence_test");
   assert.equal(reset.messageCount, 0);
+});
+
+test("work-bound sessions restore the same work through the injected Agent factory", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-bound-agent-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  const assembledWorkIds: string[] = [];
+  const createRuntime = () =>
+    new LocalAgentRuntime(
+      config,
+      createLocalModelRuntime(config),
+      new LocalSessionStore(directory, true),
+      (factoryContext) => {
+        assembledWorkIds.push(factoryContext.workId);
+        return createBaseAgent({
+          model: factoryContext.model,
+          streamFn: factoryContext.streamFn,
+          systemPrompt: "Bound test Agent",
+          messages: factoryContext.messages,
+          sessionId: factoryContext.sessionId,
+        });
+      },
+    );
+
+  const firstRuntime = createRuntime();
+  const created = await firstRuntime.createSession("session_work_restore", { workId: "work_bound_001" });
+  assert.equal(created.workId, "work_bound_001");
+  await firstRuntime.prompt(created.id, "保存绑定");
+
+  const restored = await createRuntime().getSession(created.id);
+  assert.equal(restored?.workId, "work_bound_001");
+  assert.equal(restored?.messageCount, 2);
+  assert.deepEqual(assembledWorkIds, ["work_bound_001", "work_bound_001"]);
 });
 
 test("session identifiers cannot escape the configured directory", async () => {
