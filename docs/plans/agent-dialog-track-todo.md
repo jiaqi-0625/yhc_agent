@@ -124,6 +124,8 @@
 - 2026-08-18：WS-005 通过功能提交 `a8e13b2` 完成契约冻结。对话区后续直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和 `packages/schemas/test/fixtures/workspace-v2.ts`；卡片仅为人工执行提案，服务端仍须重算身份、权限、任务归属、revision 和实际成本。旧 `StrategyActionProposal` 仅用于当前纵向链路兼容。
 - 2026-08-18：工作区已开始 WS-006。API 将把 Agent 会话/SSE 边界从工作区及策略命令路由中抽离，Web 将把 Agent 面板逻辑与工作区业务逻辑拆到独立模块；对话区后续修改对应 Agent 模块，不再持续编辑单体入口。
 - 2026-08-18：WS-006 通过功能提交 `005a41e` 完成模块拆分。对话区后续维护 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-api.js`、`agent-panel.js` 和 `agent-panel.css`；工作区对应使用 `workspace-routes.ts`、`workspace-api.js` 和 `workspace-shell.js`，共享 HTTP/静态资源仍由组合层协调。
+- 2026-08-18：工作区已开始 WS-101。Agent 后续判断可用建议和操作卡片时应读取共享的 VideoTask 当前阶段/阶段状态，不得继续把旧 `WorkStatus` 当作 V2 权威状态；现有策略纵向链路暂由兼容状态机维持。
+- 2026-08-18：WS-101 通过功能提交 `44b1cf0` 完成。`TaskContext.videoTask` 现同时提供 `currentStage` 和 `stageStatus`；Agent 只能提出当前阶段的 `stage_confirmation_requested` 类操作，`stage_confirmed`/`stage_confirmation_rejected` 必须来自服务端验证后的 `human_action`，不能由模型工具直接调用。
 
 ## 更新记录
 
@@ -140,3 +142,5 @@
 | 2026-08-18 | Codex | 收到 WS-005 完成通知：共享 Agent 契约及跨包 fixture 已由 `a8e13b2` 冻结，全仓检查 62/62 通过；AG-003～AG-005 不再定义平行类型 |
 | 2026-08-18 | Codex | 收到 WS-006 启动通知：现有 API 与 Web 行为保持不变，Agent 路由和面板将获得独立维护边界 |
 | 2026-08-18 | Codex | 收到 WS-006 完成通知：Agent API/SSE、面板交互和样式已形成独立维护文件；全仓 62/62 及本地浏览器验收通过，AG-004 可在这些边界上继续演进 |
+| 2026-08-18 | Codex | 收到 WS-101 启动通知：后续领域工具策略将以 V2 六阶段状态机为准，旧 Work 状态只用于迁移和当前兼容链路 |
+| 2026-08-18 | Codex | 收到 WS-101 完成通知：共享任务上下文增加阶段状态，六阶段状态机拒绝跳转、模型确认和终态推进；全仓 66/66 通过 |
