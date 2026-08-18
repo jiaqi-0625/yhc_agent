@@ -117,7 +117,7 @@
 
 ## 工作区契约通知
 
-- 2026-08-18：WS-002 已在 `agent/workspace-v2-foundation` 本地定义 `Brand`、`Vehicle`、`BatchProject`、`VideoTask`，尚未提交 PR 或合并。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
+- 2026-08-18：WS-002 已在 `agent/workspace-v2-foundation` 提交为 `4302ac8`，尚未提交 PR 或合并。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
 
 ## 更新记录
 

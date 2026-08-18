@@ -1,8 +1,8 @@
 # WS-001 现有领域对象与本地存储迁移盘点
 
-> 盘点日期：2026-08-18  
-> 实际分支：`agent/workspace-v2-foundation`  
-> 依据：`docs/workspace-v2-product-spec.md`  
+> 盘点日期：2026-08-18
+> 实际分支：`agent/workspace-v2-foundation`
+> 依据：`docs/workspace-v2-product-spec.md`
 > 范围：`Project`、`Work`、车型快照、业务数据文件、Agent 会话和浏览器本地状态
 
 ## 1. 结论

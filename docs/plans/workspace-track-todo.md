@@ -122,8 +122,8 @@
 
 ## 任务备注
 
-- WS-001：实际分支 `agent/workspace-v2-foundation`；2026-08-18 已形成 [`ws-001-migration-inventory.md`](./ws-001-migration-inventory.md)，`npm run check` 通过（43/43 测试），待评审与合并流程。
-- WS-002：实际分支 `agent/workspace-v2-foundation`；已定义四个 Workspace V2 核心实体、类型导出和边界测试，`npm run check` 通过（47/47 测试）；共享契约通知已同步到对话区账本，待评审与合并流程。
+- WS-001：实际分支 `agent/workspace-v2-foundation`；提交 `407b321`；已形成 [`ws-001-migration-inventory.md`](./ws-001-migration-inventory.md)，`npm run check` 通过（43/43 测试），待评审与合并流程。
+- WS-002：实际分支 `agent/workspace-v2-foundation`；提交 `4302ac8`；已定义四个 Workspace V2 核心实体、类型导出和边界测试，`npm run check` 通过（47/47 测试）；共享契约通知已同步到对话区账本，待评审与合并流程。
 
 ## 更新记录
 
@@ -135,3 +135,4 @@
 | 2026-08-18 | Codex | WS-001 基线检查通过：typecheck、43 项测试和安全扫描均成功 |
 | 2026-08-18 | Codex | 切换当前任务到 WS-002，开始定义 Workspace V2 核心实体 Schema |
 | 2026-08-18 | Codex | WS-002 本地验收通过：四个核心实体 Schema、类型导出、边界测试及全仓 47 项测试均成功 |
+| 2026-08-18 | Codex | 首次提交完成：WS-001 `407b321`、WS-002 `4302ac8`，提交身份已统一为 `jiaqi-0625` |
