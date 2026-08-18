@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { AgentActionCardSchema } from "@firefly/schemas";
+import { Value } from "typebox/value";
 
 import { createStrategyTools, type StrategyWorkflowPort } from "../src/index.ts";
+import { agentActionCardFixtures, taskContextFixture } from "../../schemas/test/fixtures/workspace-v2.ts";
+
+test("dialog fixtures consume the shared workspace v2 Agent contracts", () => {
+  assert.equal(taskContextFixture.schemaVersion, 1);
+  for (const card of agentActionCardFixtures) {
+    assert.equal(card.schemaVersion, taskContextFixture.schemaVersion);
+    assert.equal(card.videoTaskId, taskContextFixture.videoTask.id);
+    assert.equal(Value.Check(AgentActionCardSchema, card), true);
+  }
+});
 
 test("strategy Agent tools return versioned proposals without mutating workflow state", async () => {
   let mutationCalls = 0;

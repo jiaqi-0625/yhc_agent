@@ -1,0 +1,74 @@
+import type { AgentActionCard, TaskContext } from "../../src/index.ts";
+
+export const taskContextFixture = {
+  schemaVersion: 1,
+  kind: "task_context",
+  brand: { id: "brand_firefly", name: "萤火汽车" },
+  vehicle: {
+    id: "vehicle_e5_long_range",
+    displayName: "萤火 E5 2026 长续航版",
+    version: 3,
+  },
+  batchProject: {
+    id: "project_family_weekend",
+    name: "家庭周末出行短视频批次",
+    aspectRatio: "9:16",
+  },
+  videoTask: {
+    id: "task_family_weekend_01",
+    name: "家庭周末出行 01",
+    status: "active",
+    currentStage: "strategy",
+    revision: 4,
+    vehicleSnapshotId: "vehicle_snapshot_003",
+    assetSnapshotId: "asset_snapshot_002",
+    ownership: { state: "owned_by_current_account" },
+  },
+  productionBrief: {
+    audience: "有孩家庭",
+    theme: "周末出行",
+    durationSeconds: 30,
+    platformTags: ["douyin", "xiaohongshu"],
+  },
+} satisfies TaskContext;
+
+export const agentActionCardFixtures = [
+  {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId: taskContextFixture.videoTask.id,
+    action: "generate_strategy",
+    label: "生成卖点策略草稿",
+    summary: "面向有孩家庭生成周末出行策略。",
+    expectedRevision: taskContextFixture.videoTask.revision,
+    cost: { kind: "estimated", amount: 0.08, currency: "CNY" },
+    payload: { schemaVersion: 1, audience: "有孩家庭", theme: "周末出行" },
+  },
+  {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId: taskContextFixture.videoTask.id,
+    action: "request_strategy_approval",
+    label: "提交卖点策略人工审批",
+    summary: "将当前策略版本提交人工审批。",
+    expectedRevision: taskContextFixture.videoTask.revision,
+    cost: { kind: "free" },
+    payload: { schemaVersion: 1 },
+  },
+  {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId: taskContextFixture.videoTask.id,
+    action: "rollback_stage",
+    label: "回退已确认阶段版本",
+    summary: "将策略阶段恢复到事实审核通过的版本。",
+    expectedRevision: taskContextFixture.videoTask.revision,
+    cost: { kind: "estimate_required" },
+    payload: {
+      schemaVersion: 1,
+      stage: "strategy",
+      targetArtifactVersionId: "stage_artifact_strategy_v1",
+      reason: "恢复到事实审核通过的策略版本。",
+    },
+  },
+] satisfies AgentActionCard[];

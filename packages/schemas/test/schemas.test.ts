@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
 import {
+  AgentActionCardSchema,
   AssetReferenceSchema,
   BatchProjectSchema,
   BrandSchema,
@@ -13,6 +14,7 @@ import {
   StageConfirmationSchema,
   StageRollbackRecordSchema,
   StrategyActionProposalSchema,
+  TaskContextSchema,
   TaskAssetSnapshotSchema,
   TemporaryAssetSchema,
   VehicleSchema,
@@ -36,6 +38,7 @@ import {
   type Vehicle,
   type VideoTask,
 } from "../src/index.ts";
+import { agentActionCardFixtures, taskContextFixture } from "./fixtures/workspace-v2.ts";
 
 const fixedClaim = {
   id: "claim_range",
@@ -523,4 +526,65 @@ test("strategy action proposals are versioned and reject untrusted fields", () =
   };
   assert.equal(Value.Check(StrategyActionProposalSchema, proposal), true);
   assert.equal(Value.Check(StrategyActionProposalSchema, { ...proposal, approved: true }), false);
+});
+
+test("task context is a strict server-resolved read-only summary", () => {
+  assert.equal(Value.Check(TaskContextSchema, taskContextFixture), true);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, role: "creator" }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, permissions: ["task:write"] }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, allowedBrandIds: ["brand_firefly"] }), false);
+  assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, budgetAuthority: 100 }), false);
+  assert.equal(
+    Value.Check(TaskContextSchema, {
+      ...taskContextFixture,
+      videoTask: { ...taskContextFixture.videoTask, ownerAccountId: "account_creator" },
+    }),
+    false,
+  );
+});
+
+test("agent action cards share one versioned proposal contract", () => {
+  for (const card of agentActionCardFixtures) {
+    assert.equal(Value.Check(AgentActionCardSchema, card), true);
+  }
+
+  const generationCard = agentActionCardFixtures[0];
+  assert.ok(generationCard);
+  const { videoTaskId: _taskId, ...withoutTaskId } = generationCard;
+  assert.equal(Value.Check(AgentActionCardSchema, withoutTaskId), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, expectedRevision: 0 }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, approved: true }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, actorId: "account_creator" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, permission: "task:write" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, apiRoute: "/v1/internal/execute" }), false);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, charged: true }), false);
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...generationCard,
+      cost: { kind: "estimated", amount: -1, currency: "CNY" },
+    }),
+    false,
+  );
+});
+
+test("agent action card payloads cannot be mixed or fabricate server rollback results", () => {
+  const generationCard = agentActionCardFixtures[0];
+  const rollbackCard = agentActionCardFixtures[2];
+  assert.ok(generationCard);
+  assert.ok(rollbackCard);
+  assert.equal(Value.Check(AgentActionCardSchema, { ...generationCard, payload: rollbackCard.payload }), false);
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...rollbackCard,
+      payload: { ...rollbackCard.payload, invalidationIds: ["invalidation_script_v1"] },
+    }),
+    false,
+  );
+  assert.equal(
+    Value.Check(AgentActionCardSchema, {
+      ...rollbackCard,
+      payload: { ...rollbackCard.payload, confirmationId: "confirmation_strategy_v1" },
+    }),
+    false,
+  );
 });

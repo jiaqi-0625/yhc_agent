@@ -666,6 +666,179 @@ export type ProposeStrategyGenerationRequest = Static<typeof ProposeStrategyGene
 export const ProposeStrategyApprovalRequestSchema = Type.Object({}, { additionalProperties: false });
 export type ProposeStrategyApprovalRequest = Static<typeof ProposeStrategyApprovalRequestSchema>;
 
+export const TaskContextOwnershipSchema = Type.Union([
+  Type.Object(
+    { state: Type.Literal("owned_by_current_account") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      state: Type.Literal("owned_by_other_account"),
+      ownerDisplayName: Type.String({ minLength: 1, maxLength: 120 }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { state: Type.Literal("unassigned") },
+    { additionalProperties: false },
+  ),
+]);
+export type TaskContextOwnership = Static<typeof TaskContextOwnershipSchema>;
+
+/**
+ * Server-resolved, read-only context for an Agent turn.
+ *
+ * This is display and generation context only. Authorization, account identity,
+ * tenant scope, credentials, allowed actions, and budget authority must be
+ * resolved again by the command API and are intentionally absent here.
+ */
+export const TaskContextSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    kind: Type.Literal("task_context"),
+    brand: Type.Object(
+      {
+        id: Identifier,
+        name: Type.String({ minLength: 1, maxLength: 120 }),
+      },
+      { additionalProperties: false },
+    ),
+    vehicle: Type.Object(
+      {
+        id: Identifier,
+        displayName: Type.String({ minLength: 1, maxLength: 240 }),
+        version: Type.Integer({ minimum: 1 }),
+      },
+      { additionalProperties: false },
+    ),
+    batchProject: Type.Object(
+      {
+        id: Identifier,
+        name: Type.String({ minLength: 1, maxLength: 240 }),
+        aspectRatio: AspectRatioSchema,
+      },
+      { additionalProperties: false },
+    ),
+    videoTask: Type.Object(
+      {
+        id: Identifier,
+        name: Type.String({ minLength: 1, maxLength: 160 }),
+        status: VideoTaskStatusSchema,
+        currentStage: VideoTaskStageSchema,
+        revision: Type.Integer({ minimum: 1 }),
+        vehicleSnapshotId: Type.Optional(Identifier),
+        assetSnapshotId: Type.Optional(Identifier),
+        ownership: TaskContextOwnershipSchema,
+      },
+      { additionalProperties: false },
+    ),
+    productionBrief: Type.Object(
+      {
+        audience: Type.String({ minLength: 1, maxLength: 500 }),
+        theme: Type.String({ minLength: 1, maxLength: 500 }),
+        durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+        platformTags: Type.Array(Identifier, { maxItems: 20, uniqueItems: true }),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type TaskContext = Static<typeof TaskContextSchema>;
+
+export const AgentActionCostSchema = Type.Union([
+  Type.Object(
+    { kind: Type.Literal("free") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    { kind: Type.Literal("estimate_required") },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("estimated"),
+      amount: Type.Number({ minimum: 0 }),
+      currency: Type.String({ pattern: "^[A-Z]{3}$" }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type AgentActionCost = Static<typeof AgentActionCostSchema>;
+
+const AgentActionCardFields = {
+  schemaVersion: Type.Literal(1),
+  kind: Type.Literal("agent_action_card"),
+  videoTaskId: Identifier,
+  summary: Type.String({ minLength: 1, maxLength: 2000 }),
+  expectedRevision: Type.Integer({ minimum: 1 }),
+  cost: AgentActionCostSchema,
+};
+
+export const GenerateStrategyActionPayloadSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    audience: NonEmptyString,
+    theme: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+export type GenerateStrategyActionPayload = Static<typeof GenerateStrategyActionPayloadSchema>;
+
+export const RequestStrategyApprovalActionPayloadSchema = Type.Object(
+  { schemaVersion: Type.Literal(1) },
+  { additionalProperties: false },
+);
+export type RequestStrategyApprovalActionPayload = Static<typeof RequestStrategyApprovalActionPayloadSchema>;
+
+export const RollbackStageActionPayloadSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    stage: VideoTaskStageSchema,
+    targetArtifactVersionId: Identifier,
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type RollbackStageActionPayload = Static<typeof RollbackStageActionPayloadSchema>;
+
+/**
+ * A proposal rendered for a human. It is never an approval or authorization.
+ * The command API must recalculate ownership, permissions, state, revision, and
+ * billable cost before executing it.
+ */
+export const AgentActionCardSchema = Type.Union([
+  Type.Object(
+    {
+      ...AgentActionCardFields,
+      action: Type.Literal("generate_strategy"),
+      label: Type.Literal("生成卖点策略草稿"),
+      payload: GenerateStrategyActionPayloadSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentActionCardFields,
+      action: Type.Literal("request_strategy_approval"),
+      label: Type.Literal("提交卖点策略人工审批"),
+      payload: RequestStrategyApprovalActionPayloadSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentActionCardFields,
+      action: Type.Literal("rollback_stage"),
+      label: Type.Literal("回退已确认阶段版本"),
+      payload: RollbackStageActionPayloadSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type AgentActionCard = Static<typeof AgentActionCardSchema>;
+
+/** @deprecated Compatibility contract; migrate producers to AgentActionCardSchema. */
 export const StrategyActionProposalSchema = Type.Union([
   Type.Object(
     {
