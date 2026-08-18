@@ -115,6 +115,7 @@ const videoTask = {
   ownerAccountId: "account_creator_001",
   status: "active",
   currentStage: "strategy",
+  stageStatus: "in_progress",
   revision: 1,
   audience: "有孩家庭",
   theme: "周末郊游",
@@ -346,8 +347,11 @@ test("workspace v2 batch project locks vehicle, visual style, and aspect ratio a
 
 test("workspace v2 video task owns its operator and task-level production inputs", () => {
   assert.equal(Value.Check(VideoTaskSchema, videoTask), true);
+  const { stageStatus: _stageStatus, ...withoutStageStatus } = videoTask;
+  assert.equal(Value.Check(VideoTaskSchema, withoutStageStatus), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, vehicleSnapshotId: "snapshot_001" }), true);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, durationSeconds: 0 }), false);
+  assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, stageStatus: "approved" }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, platformTags: ["douyin", "douyin"] }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, aspectRatio: "9:16" }), false);
 });
@@ -530,6 +534,13 @@ test("strategy action proposals are versioned and reject untrusted fields", () =
 
 test("task context is a strict server-resolved read-only summary", () => {
   assert.equal(Value.Check(TaskContextSchema, taskContextFixture), true);
+  assert.equal(
+    Value.Check(TaskContextSchema, {
+      ...taskContextFixture,
+      videoTask: { ...taskContextFixture.videoTask, stageStatus: "approved" },
+    }),
+    false,
+  );
   assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, role: "creator" }), false);
   assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, permissions: ["task:write"] }), false);
   assert.equal(Value.Check(TaskContextSchema, { ...taskContextFixture, allowedBrandIds: ["brand_firefly"] }), false);

@@ -1,5 +1,101 @@
-import type { WorkStatus } from "@firefly/schemas";
+import type {
+  VideoTaskStage,
+  VideoTaskStageStatus,
+  VideoTaskStatus,
+  WorkStatus,
+} from "@firefly/schemas";
 
+export const videoTaskStageOrder = [
+  "strategy",
+  "asset_matching",
+  "script",
+  "storyboard",
+  "video_preview",
+  "delivery",
+] as const satisfies readonly VideoTaskStage[];
+
+export interface VideoTaskWorkflowState {
+  taskStatus: VideoTaskStatus;
+  currentStage: VideoTaskStage;
+  stageStatus: VideoTaskStageStatus;
+}
+
+export type VideoTaskWorkflowEvent =
+  | { type: "stage_revised"; stage: VideoTaskStage }
+  | { type: "stage_confirmation_requested"; stage: VideoTaskStage }
+  | { type: "stage_confirmation_rejected"; stage: VideoTaskStage; source: "human_action" }
+  | { type: "stage_confirmed"; stage: VideoTaskStage; source: "human_action" };
+
+export type VideoTaskWorkflowEventType = VideoTaskWorkflowEvent["type"];
+
+export const initialVideoTaskWorkflowState: Readonly<VideoTaskWorkflowState> = {
+  taskStatus: "active",
+  currentStage: "strategy",
+  stageStatus: "in_progress",
+};
+
+const videoTaskTransitions: Readonly<
+  Record<VideoTaskStageStatus, readonly VideoTaskWorkflowEventType[]>
+> = {
+  in_progress: ["stage_revised", "stage_confirmation_requested"],
+  awaiting_confirmation: ["stage_confirmation_rejected", "stage_confirmed"],
+  confirmed: [],
+};
+
+export class InvalidVideoTaskTransitionError extends Error {
+  readonly code = "AIC-VIDEO-TASK-WORKFLOW-INVALID_TRANSITION";
+
+  constructor(
+    readonly state: Readonly<VideoTaskWorkflowState>,
+    readonly event: Readonly<VideoTaskWorkflowEvent>,
+  ) {
+    super(
+      `Video task event '${event.type}' for stage '${event.stage}' is not allowed from ` +
+        `'${state.taskStatus}/${state.currentStage}/${state.stageStatus}'.`,
+    );
+    this.name = "InvalidVideoTaskTransitionError";
+  }
+}
+
+export function allowedVideoTaskEvents(
+  state: Readonly<VideoTaskWorkflowState>,
+): readonly VideoTaskWorkflowEventType[] {
+  if (state.taskStatus !== "active") return [];
+  return videoTaskTransitions[state.stageStatus];
+}
+
+export function nextVideoTaskWorkflowState(
+  state: Readonly<VideoTaskWorkflowState>,
+  event: Readonly<VideoTaskWorkflowEvent>,
+): VideoTaskWorkflowState {
+  const requiresHumanAction =
+    event.type === "stage_confirmation_rejected" || event.type === "stage_confirmed";
+  if (
+    state.taskStatus !== "active" ||
+    event.stage !== state.currentStage ||
+    (requiresHumanAction && event.source !== "human_action") ||
+    !videoTaskTransitions[state.stageStatus].includes(event.type)
+  ) {
+    throw new InvalidVideoTaskTransitionError(state, event);
+  }
+
+  if (event.type === "stage_revised") return { ...state };
+  if (event.type === "stage_confirmation_requested") {
+    return { ...state, stageStatus: "awaiting_confirmation" };
+  }
+  if (event.type === "stage_confirmation_rejected") {
+    return { ...state, stageStatus: "in_progress" };
+  }
+
+  const currentIndex = videoTaskStageOrder.indexOf(state.currentStage);
+  const nextStage = videoTaskStageOrder[currentIndex + 1];
+  if (nextStage === undefined) {
+    return { taskStatus: "completed", currentStage: "delivery", stageStatus: "confirmed" };
+  }
+  return { taskStatus: "active", currentStage: nextStage, stageStatus: "in_progress" };
+}
+
+/** @deprecated Workspace V1 compatibility state machine. Use nextVideoTaskWorkflowState for V2 writes. */
 export type WorkflowEvent =
   | "strategy_generated"
   | "strategy_regenerated"
@@ -86,6 +182,7 @@ export class RevisionConflictError extends Error {
   }
 }
 
+/** @deprecated Workspace V1 compatibility state machine. Use nextVideoTaskWorkflowState for V2 writes. */
 export function nextWorkStatus(status: WorkStatus, event: WorkflowEvent): WorkStatus {
   const next = transitions[status][event];
   if (!next) throw new InvalidTransitionError(status, event);
