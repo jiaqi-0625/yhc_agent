@@ -135,6 +135,10 @@
 - 2026-08-18：WS-005 通过功能提交 `a8e13b2` 完成契约冻结。对话区后续直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和 `packages/schemas/test/fixtures/workspace-v2.ts`；卡片仅为人工执行提案，服务端仍须重算身份、权限、任务归属、revision 和实际成本。旧 `StrategyActionProposal` 仅用于当前纵向链路兼容。
 - 2026-08-18：工作区已开始 WS-006。API 将把 Agent 会话/SSE 边界从工作区及策略命令路由中抽离，Web 将把 Agent 面板逻辑与工作区业务逻辑拆到独立模块；对话区后续修改对应 Agent 模块，不再持续编辑单体入口。
 - 2026-08-18：WS-006 通过功能提交 `005a41e` 完成模块拆分。对话区后续维护 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-api.js`、`agent-panel.js` 和 `agent-panel.css`；工作区对应使用 `workspace-routes.ts`、`workspace-api.js` 和 `workspace-shell.js`，共享 HTTP/静态资源仍由组合层协调。
+- 2026-08-18：工作区已开始 WS-101。Agent 后续判断可用建议和操作卡片时应读取共享的 VideoTask 当前阶段/阶段状态，不得继续把旧 `WorkStatus` 当作 V2 权威状态；现有策略纵向链路暂由兼容状态机维持。
+- 2026-08-18：WS-101 通过功能提交 `44b1cf0` 完成。`TaskContext.videoTask` 现同时提供 `currentStage` 和 `stageStatus`；Agent 只能提出当前阶段的 `stage_confirmation_requested` 类操作，`stage_confirmed`/`stage_confirmation_rejected` 必须来自服务端验证后的 `human_action`，不能由模型工具直接调用。
+- 2026-08-18：工作区已开始 WS-102。Agent 不得注册或调用人工确认服务；确认操作者、租户和任务作用域必须由服务端会话上下文注入，模型输出或客户端请求不得提供或覆盖这些字段。
+- 2026-08-18：WS-102 通过功能提交 `7e8d318` 完成。人工确认服务只接受服务端 `HumanSessionScope`，确认命令没有 `source`、`actorAccountId` 或租户作用域字段；Agent 后续仍只能提出确认请求，不能调用该服务或写入版本聚合。
 
 ## 更新记录
 
@@ -156,3 +160,7 @@
 | 2026-08-18 | Codex | 收到 WS-006 启动通知：现有 API 与 Web 行为保持不变，Agent 路由和面板将获得独立维护边界 |
 | 2026-08-18 | Codex | 收到 WS-006 完成通知：Agent API/SSE、面板交互和样式已形成独立维护文件；全仓 62/62 及本地浏览器验收通过，AG-004 可在这些边界上继续演进 |
 | 2026-08-18 | Codex | 合并提交 `bb044ff` 将对话线适配 WS-005 冻结契约与 WS-006 模块边界；目标分支为本地 `main`，状态为待评审（尚未推送 `origin/main`）。`npm run check` 通过（64/64 测试、类型检查、凭据扫描）；Mock 浏览器实测 1280px 下三栏为 `260 / 640 / 380`、无横向溢出、任务上下文和消息流正常、控制台无错误。共享契约影响：直接复用 `TaskContextSchema`、`AgentActionCardSchema` 和跨包 fixture，仅新增版本化 `AgentStreamEvent`；未改业务状态机或页面布局。当前实现无阻塞；后续跨账号隔离依赖 WS-301/304，统一命令、权限、预算和服务端幂等闭环依赖 WS-305/107。 |
+| 2026-08-18 | Codex | 收到 WS-101 启动通知：后续领域工具策略将以 V2 六阶段状态机为准，旧 Work 状态只用于迁移和当前兼容链路 |
+| 2026-08-18 | Codex | 收到 WS-101 完成通知：共享任务上下文增加阶段状态，六阶段状态机拒绝跳转、模型确认和终态推进；全仓 66/66 通过 |
+| 2026-08-18 | Codex | 收到 WS-102 启动通知：人工确认身份由服务端会话解析，Agent 仅能提出确认请求，不能直接写入确认或不可变版本 |
+| 2026-08-18 | Codex | 收到 WS-102 完成通知：功能提交 `7e8d318` 已实现服务端人工身份注入、不可变版本与审计事件原子落盘；全仓 74/74 通过 |

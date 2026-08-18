@@ -1,12 +1,109 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  InvalidVideoTaskTransitionError,
   InvalidTransitionError,
   RevisionConflictError,
+  allowedVideoTaskEvents,
   allowedEvents,
   assertRevision,
+  initialVideoTaskWorkflowState,
+  nextVideoTaskWorkflowState,
   nextWorkStatus,
+  videoTaskStageOrder,
+  type VideoTaskWorkflowEvent,
+  type VideoTaskWorkflowState,
 } from "../src/workflow.ts";
+
+test("workspace v2 workflow advances through all six stages only after human confirmation", () => {
+  let state: VideoTaskWorkflowState = { ...initialVideoTaskWorkflowState };
+
+  for (const stage of videoTaskStageOrder) {
+    assert.equal(state.taskStatus, "active");
+    assert.equal(state.currentStage, stage);
+    assert.equal(state.stageStatus, "in_progress");
+    state = nextVideoTaskWorkflowState(state, { type: "stage_confirmation_requested", stage });
+    assert.equal(state.stageStatus, "awaiting_confirmation");
+    state = nextVideoTaskWorkflowState(state, { type: "stage_confirmed", stage, source: "human_action" });
+  }
+
+  assert.deepEqual(state, {
+    taskStatus: "completed",
+    currentStage: "delivery",
+    stageStatus: "confirmed",
+  });
+  assert.deepEqual(allowedVideoTaskEvents(state), []);
+});
+
+test("workspace v2 workflow exposes only events valid for the current stage state", () => {
+  assert.deepEqual(allowedVideoTaskEvents(initialVideoTaskWorkflowState), [
+    "stage_revised",
+    "stage_confirmation_requested",
+  ]);
+  const awaiting = nextVideoTaskWorkflowState(initialVideoTaskWorkflowState, {
+    type: "stage_confirmation_requested",
+    stage: "strategy",
+  });
+  assert.deepEqual(allowedVideoTaskEvents(awaiting), ["stage_confirmation_rejected", "stage_confirmed"]);
+  assert.deepEqual(allowedVideoTaskEvents({ ...awaiting, taskStatus: "cancelled" }), []);
+});
+
+test("workspace v2 workflow rejects skipped, stale, model-confirmed, and terminal transitions", () => {
+  assert.throws(
+    () =>
+      nextVideoTaskWorkflowState(initialVideoTaskWorkflowState, {
+        type: "stage_confirmed",
+        stage: "strategy",
+        source: "human_action",
+      }),
+    InvalidVideoTaskTransitionError,
+  );
+  assert.throws(
+    () =>
+      nextVideoTaskWorkflowState(initialVideoTaskWorkflowState, {
+        type: "stage_confirmation_requested",
+        stage: "script",
+      }),
+    InvalidVideoTaskTransitionError,
+  );
+
+  const awaiting = nextVideoTaskWorkflowState(initialVideoTaskWorkflowState, {
+    type: "stage_confirmation_requested",
+    stage: "strategy",
+  });
+  const modelConfirmation = {
+    type: "stage_confirmed",
+    stage: "strategy",
+    source: "agent",
+  } as unknown as VideoTaskWorkflowEvent;
+  assert.throws(
+    () => nextVideoTaskWorkflowState(awaiting, modelConfirmation),
+    InvalidVideoTaskTransitionError,
+  );
+  assert.throws(
+    () =>
+      nextVideoTaskWorkflowState(
+        { taskStatus: "completed", currentStage: "delivery", stageStatus: "confirmed" },
+        { type: "stage_revised", stage: "delivery" },
+      ),
+    InvalidVideoTaskTransitionError,
+  );
+});
+
+test("workspace v2 human rejection returns only the current stage to work in progress", () => {
+  const awaiting = nextVideoTaskWorkflowState(initialVideoTaskWorkflowState, {
+    type: "stage_confirmation_requested",
+    stage: "strategy",
+  });
+  assert.deepEqual(
+    nextVideoTaskWorkflowState(awaiting, {
+      type: "stage_confirmation_rejected",
+      stage: "strategy",
+      source: "human_action",
+    }),
+    initialVideoTaskWorkflowState,
+  );
+});
 
 test("workflow follows strategy approval gate", () => {
   assert.equal(nextWorkStatus("created", "strategy_generated"), "strategy_draft");

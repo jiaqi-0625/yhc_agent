@@ -19,6 +19,7 @@ export const taskContextFixture = {
     name: "家庭周末出行 01",
     status: "active",
     currentStage: "strategy",
+    stageStatus: "in_progress",
     revision: 4,
     vehicleSnapshotId: "vehicle_snapshot_003",
     assetSnapshotId: "asset_snapshot_002",

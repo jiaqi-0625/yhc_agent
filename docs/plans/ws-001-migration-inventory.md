@@ -168,6 +168,8 @@ WS-004/WS-101 将冻结最终枚举；WS-001 先固定语义映射，避免丢�
 
 旧流程没有“资产匹配”确认点。只有 `strategy_approved` 及更后状态的历史任务可创建一个明确标记为 `legacy_inferred` 的资产匹配版本；不能伪造成人工确认。其他任务应停在资产匹配待确认状态。
 
+WS-101 已冻结 V2 写路径枚举：`VideoTask.currentStage` 依次为 `strategy`、`asset_matching`、`script`、`storyboard`、`video_preview`、`delivery`，`stageStatus` 为 `in_progress`、`awaiting_confirmation` 或终态 `confirmed`。迁移器在 WS-307 中按上表显式生成这两个字段；旧 `WorkStatus` 不直接写入 V2 Store。
+
 ## 5. V1 → V2 聚合迁移映射
 
 产品规格要求迁移到“示例品牌 → 示例车型项目 → 原广告作品对应的视频任务”。建议使用以下确定性流程：

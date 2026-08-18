@@ -148,6 +148,13 @@ export const VideoTaskStageSchema = Type.Union([
 ]);
 export type VideoTaskStage = Static<typeof VideoTaskStageSchema>;
 
+export const VideoTaskStageStatusSchema = Type.Union([
+  Type.Literal("in_progress"),
+  Type.Literal("awaiting_confirmation"),
+  Type.Literal("confirmed"),
+]);
+export type VideoTaskStageStatus = Static<typeof VideoTaskStageStatusSchema>;
+
 export const VideoTaskStatusSchema = Type.Union([
   Type.Literal("active"),
   Type.Literal("completed"),
@@ -165,6 +172,7 @@ export const VideoTaskSchema = Type.Object(
     ownerAccountId: Identifier,
     status: VideoTaskStatusSchema,
     currentStage: VideoTaskStageSchema,
+    stageStatus: VideoTaskStageStatusSchema,
     revision: Type.Integer({ minimum: 1 }),
     vehicleSnapshotId: Type.Optional(Identifier),
     assetSnapshotId: Type.Optional(Identifier),
@@ -725,6 +733,7 @@ export const TaskContextSchema = Type.Object(
         name: Type.String({ minLength: 1, maxLength: 160 }),
         status: VideoTaskStatusSchema,
         currentStage: VideoTaskStageSchema,
+        stageStatus: VideoTaskStageStatusSchema,
         revision: Type.Integer({ minimum: 1 }),
         vehicleSnapshotId: Type.Optional(Identifier),
         assetSnapshotId: Type.Optional(Identifier),

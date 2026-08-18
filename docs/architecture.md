@@ -45,6 +45,7 @@ LocalAgentRuntime
 - 身份、租户、项目、品牌范围和预算来自认证后的服务端会话，通过闭包注入工具；模型参数中不存在这些字段。
 - Agent 按当前作品装配车型读取、事实校验、策略校验，以及“建议生成策略”“建议请求人工审批”白名单工具。建议工具只返回版本化操作卡片，不写入业务状态；负责人点击卡片后，由服务端/UI 使用 revision 守卫执行生成或审批请求。生产运行时不得注册 shell、文件系统、SQL、任意 HTTP、浏览器、直接状态变更或人工批准工具。
 - 每次工具调用先经过 `beforeToolCall` 的角色、状态、审批通道和预算策略；未知工具默认拒绝。
+- Workspace V2 的权威任务流程使用 `VideoTask.currentStage + stageStatus`：`strategy → asset_matching → script → storyboard → video_preview → delivery`。当前阶段只能从 `in_progress` 提交为 `awaiting_confirmation`，再由显式 `human_action` 确认后进入紧邻下一阶段；交付确认后任务才成为 `completed`。旧 `WorkStatus` 状态机仅供现有策略纵向链路和迁移读取，不得用于新的 V2 写路径。
 - 工具结果在 `afterToolCall` 中写入审计并进行敏感字段脱敏。
 - 车型快照按租户、项目、车型版本、颜色、地区和活动日期生成稳定 ID；保存和返回均使用副本，避免调用者回写历史事实。
 - 审批是服务端/UI 的人工事件。模型能提示“需要审批”，但没有批准工具。
