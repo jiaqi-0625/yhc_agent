@@ -126,6 +126,7 @@ export const BatchProjectSchema = Type.Object(
     aspectRatio: AspectRatioSchema,
     visualStylePresetId: Identifier,
     customStylePrompt: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+    assetPoolId: Identifier,
     status: CatalogRecordStatusSchema,
     revision: Type.Integer({ minimum: 1 }),
     createdAt: IsoDateTime,
@@ -166,6 +167,7 @@ export const VideoTaskSchema = Type.Object(
     currentStage: VideoTaskStageSchema,
     revision: Type.Integer({ minimum: 1 }),
     vehicleSnapshotId: Type.Optional(Identifier),
+    assetSnapshotId: Type.Optional(Identifier),
     audience: Type.String({ minLength: 1, maxLength: 500 }),
     theme: Type.String({ minLength: 1, maxLength: 500 }),
     durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
@@ -179,6 +181,146 @@ export const VideoTaskSchema = Type.Object(
   { additionalProperties: false },
 );
 export type VideoTask = Static<typeof VideoTaskSchema>;
+
+export const AssetCategorySchema = Type.Union([
+  Type.Literal("vehicle"),
+  Type.Literal("person"),
+  Type.Literal("scene"),
+  Type.Literal("visual_style"),
+]);
+export type AssetCategory = Static<typeof AssetCategorySchema>;
+
+const CompanyAssetReferenceFields = {
+  assetId: Identifier,
+  version: Type.Integer({ minimum: 1 }),
+  source: Type.Literal("company_catalog"),
+  sourceProvider: Identifier,
+};
+
+export const CompanyVehicleAssetReferenceSchema = Type.Object(
+  {
+    ...CompanyAssetReferenceFields,
+    category: Type.Literal("vehicle"),
+    vehicleId: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type CompanyVehicleAssetReference = Static<typeof CompanyVehicleAssetReferenceSchema>;
+
+export const CompanyReusableAssetReferenceSchema = Type.Object(
+  {
+    ...CompanyAssetReferenceFields,
+    category: Type.Union([
+      Type.Literal("person"),
+      Type.Literal("scene"),
+      Type.Literal("visual_style"),
+    ]),
+  },
+  { additionalProperties: false },
+);
+export type CompanyReusableAssetReference = Static<typeof CompanyReusableAssetReferenceSchema>;
+
+export const TemporaryAssetReferenceSchema = Type.Object(
+  {
+    assetId: Identifier,
+    version: Type.Integer({ minimum: 1 }),
+    category: AssetCategorySchema,
+    source: Type.Literal("local_upload"),
+    batchProjectId: Identifier,
+    checksumSha256: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+  },
+  { additionalProperties: false },
+);
+export type TemporaryAssetReference = Static<typeof TemporaryAssetReferenceSchema>;
+
+export const AssetReferenceSchema = Type.Union([
+  CompanyVehicleAssetReferenceSchema,
+  CompanyReusableAssetReferenceSchema,
+  TemporaryAssetReferenceSchema,
+]);
+export type AssetReference = Static<typeof AssetReferenceSchema>;
+
+export const ProjectAssetPoolSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    vehicleId: Identifier,
+    revision: Type.Integer({ minimum: 1 }),
+    assets: Type.Array(AssetReferenceSchema, { minItems: 1, maxItems: 500 }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type ProjectAssetPool = Static<typeof ProjectAssetPoolSchema>;
+
+export const TaskAssetSnapshotSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    version: Type.Integer({ minimum: 1 }),
+    sourceProjectAssetPoolRevision: Type.Integer({ minimum: 1 }),
+    vehicleSnapshotId: Identifier,
+    assets: Type.Array(AssetReferenceSchema, { minItems: 1, maxItems: 500 }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type TaskAssetSnapshot = Static<typeof TaskAssetSnapshotSchema>;
+
+export const TemporaryAssetValidationStatusSchema = Type.Union([
+  Type.Literal("pending"),
+  Type.Literal("valid"),
+  Type.Literal("needs_review"),
+  Type.Literal("rejected"),
+]);
+export type TemporaryAssetValidationStatus = Static<typeof TemporaryAssetValidationStatusSchema>;
+
+export const TemporaryAssetValidationIssueSchema = Type.Object(
+  {
+    code: Type.String({ pattern: "^AIC-ASSET-[A-Z0-9_-]+$" }),
+    message: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+export type TemporaryAssetValidationIssue = Static<typeof TemporaryAssetValidationIssueSchema>;
+
+export const TemporaryAssetSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    vehicleId: Identifier,
+    version: Type.Integer({ minimum: 1 }),
+    revision: Type.Integer({ minimum: 1 }),
+    category: AssetCategorySchema,
+    fileName: Type.String({ minLength: 1, maxLength: 255, pattern: "^[^\\\\/\\r\\n]+$" }),
+    mediaType: Type.String({ pattern: "^(image|video)/[A-Za-z0-9.+-]+$" }),
+    byteSize: Type.Integer({ minimum: 1, maximum: 5000000000 }),
+    width: Type.Integer({ minimum: 1, maximum: 32768 }),
+    height: Type.Integer({ minimum: 1, maximum: 32768 }),
+    checksumSha256: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+    sourceDescription: Type.String({ minLength: 1, maxLength: 2000 }),
+    rightsDeclaration: Type.String({ minLength: 1, maxLength: 2000 }),
+    rightsConfirmed: Type.Boolean(),
+    validationStatus: TemporaryAssetValidationStatusSchema,
+    validationIssues: Type.Array(TemporaryAssetValidationIssueSchema, { maxItems: 100 }),
+    duplicateOfAssetId: Type.Optional(Identifier),
+    expiresAt: Type.Optional(IsoDateTime),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type TemporaryAsset = Static<typeof TemporaryAssetSchema>;
 
 export const VehicleSnapshotSchema = Type.Object(
   {

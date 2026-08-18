@@ -2,10 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
 import {
+  AssetReferenceSchema,
   BatchProjectSchema,
   BrandSchema,
   ClaimSchema,
+  ProjectAssetPoolSchema,
   StrategyActionProposalSchema,
+  TaskAssetSnapshotSchema,
+  TemporaryAssetSchema,
   VehicleSchema,
   VehicleSnapshotSchema,
   VideoTaskSchema,
@@ -13,6 +17,12 @@ import {
   type BatchProject,
   type Brand,
   type Claim,
+  type CompanyReusableAssetReference,
+  type CompanyVehicleAssetReference,
+  type ProjectAssetPool,
+  type TaskAssetSnapshot,
+  type TemporaryAsset,
+  type TemporaryAssetReference,
   type Vehicle,
   type VideoTask,
 } from "../src/index.ts";
@@ -78,6 +88,7 @@ const batchProject = {
   aspectRatio: "9:16",
   visualStylePresetId: brand.defaultVisualStylePresetId,
   customStylePrompt: "清爽夏日公路氛围",
+  assetPoolId: "asset_pool_e5_vertical_launch",
   status: "active",
   revision: 1,
   ...auditFields,
@@ -99,6 +110,98 @@ const videoTask = {
   platformTags: ["douyin", "xiaohongshu"],
   ...auditFields,
 } satisfies VideoTask;
+
+const checksumSha256 = "a".repeat(64);
+
+const vehicleAsset = {
+  assetId: "asset_vehicle_front",
+  version: 3,
+  category: "vehicle",
+  source: "company_catalog",
+  sourceProvider: "company_asset_service",
+  vehicleId: vehicle.id,
+} satisfies CompanyVehicleAssetReference;
+
+const personAsset = {
+  assetId: "asset_person_family",
+  version: 2,
+  category: "person",
+  source: "company_catalog",
+  sourceProvider: "company_asset_service",
+} satisfies CompanyReusableAssetReference;
+
+const sceneAsset = {
+  assetId: "asset_scene_campground",
+  version: 4,
+  category: "scene",
+  source: "company_catalog",
+  sourceProvider: "company_asset_service",
+} satisfies CompanyReusableAssetReference;
+
+const visualStyleAsset = {
+  assetId: "style_firefly_default",
+  version: 5,
+  category: "visual_style",
+  source: "company_catalog",
+  sourceProvider: "company_asset_service",
+} satisfies CompanyReusableAssetReference;
+
+const temporaryAssetReference = {
+  assetId: "temporary_asset_camping_gear",
+  version: 1,
+  category: "scene",
+  source: "local_upload",
+  batchProjectId: batchProject.id,
+  checksumSha256,
+} satisfies TemporaryAssetReference;
+
+const projectAssetPool = {
+  id: batchProject.assetPoolId,
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  vehicleId: vehicle.id,
+  revision: 2,
+  assets: [vehicleAsset, personAsset, sceneAsset, visualStyleAsset, temporaryAssetReference],
+  createdAt: auditFields.createdAt,
+  createdBy: auditFields.createdBy,
+  updatedAt: auditFields.updatedAt,
+  updatedBy: "account_creator_001",
+} satisfies ProjectAssetPool;
+
+const taskAssetSnapshot = {
+  id: "asset_snapshot_family_weekend_v1",
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  videoTaskId: videoTask.id,
+  version: 1,
+  sourceProjectAssetPoolRevision: projectAssetPool.revision,
+  vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+  assets: projectAssetPool.assets,
+  createdAt: auditFields.createdAt,
+  createdBy: videoTask.ownerAccountId,
+} satisfies TaskAssetSnapshot;
+
+const temporaryAsset = {
+  id: temporaryAssetReference.assetId,
+  tenantId: brand.tenantId,
+  batchProjectId: batchProject.id,
+  vehicleId: vehicle.id,
+  version: temporaryAssetReference.version,
+  revision: 1,
+  category: temporaryAssetReference.category,
+  fileName: "露营装备.png",
+  mediaType: "image/png",
+  byteSize: 2048000,
+  width: 1920,
+  height: 1080,
+  checksumSha256,
+  sourceDescription: "项目成员拍摄并上传的露营装备素材",
+  rightsDeclaration: "上传者确认拥有本项目广告制作所需的使用授权",
+  rightsConfirmed: true,
+  validationStatus: "valid",
+  validationIssues: [],
+  ...auditFields,
+} satisfies TemporaryAsset;
 
 test("fixed claim requires valid evidence shape", () => {
   assert.equal(Value.Check(ClaimSchema, fixedClaim), true);
@@ -133,6 +236,44 @@ test("workspace v2 video task owns its operator and task-level production inputs
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, durationSeconds: 0 }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, platformTags: ["douyin", "douyin"] }), false);
   assert.equal(Value.Check(VideoTaskSchema, { ...videoTask, aspectRatio: "9:16" }), false);
+});
+
+test("asset references distinguish vehicle-bound, reusable, and project-local sources", () => {
+  for (const reference of projectAssetPool.assets) {
+    assert.equal(Value.Check(AssetReferenceSchema, reference), true);
+  }
+  const { vehicleId: _vehicleId, ...unboundVehicleAsset } = vehicleAsset;
+  assert.equal(Value.Check(AssetReferenceSchema, unboundVehicleAsset), false);
+  assert.equal(Value.Check(AssetReferenceSchema, { ...personAsset, vehicleId: vehicle.id }), false);
+  assert.equal(Value.Check(AssetReferenceSchema, { ...sceneAsset, version: 0 }), false);
+  assert.equal(Value.Check(AssetReferenceSchema, { ...temporaryAssetReference, checksumSha256: "bad" }), false);
+});
+
+test("project asset pools track current catalog data while task snapshots lock exact versions", () => {
+  assert.equal(Value.Check(ProjectAssetPoolSchema, projectAssetPool), true);
+  assert.equal(Value.Check(TaskAssetSnapshotSchema, taskAssetSnapshot), true);
+  assert.equal(
+    Value.Check(TaskAssetSnapshotSchema, { ...taskAssetSnapshot, sourceProjectAssetPoolRevision: 0 }),
+    false,
+  );
+  assert.equal(Value.Check(TaskAssetSnapshotSchema, { ...taskAssetSnapshot, downloadUrl: "https://invalid" }), false);
+});
+
+test("temporary asset metadata records validation, duplicate, source, and usage rights fields", () => {
+  assert.equal(Value.Check(TemporaryAssetSchema, temporaryAsset), true);
+  assert.equal(Value.Check(TemporaryAssetSchema, { ...temporaryAsset, fileName: "../escape.png" }), false);
+  assert.equal(Value.Check(TemporaryAssetSchema, { ...temporaryAsset, mediaType: "application/octet-stream" }), false);
+  assert.equal(Value.Check(TemporaryAssetSchema, { ...temporaryAsset, width: 0 }), false);
+  assert.equal(Value.Check(TemporaryAssetSchema, { ...temporaryAsset, rightsDeclaration: "" }), false);
+  assert.equal(
+    Value.Check(TemporaryAssetSchema, {
+      ...temporaryAsset,
+      validationStatus: "needs_review",
+      validationIssues: [{ code: "AIC-ASSET-DUPLICATE", message: "检测到重复素材。" }],
+      duplicateOfAssetId: "temporary_asset_existing",
+    }),
+    true,
+  );
 });
 
 test("vehicle snapshot rejects unknown properties and invalid versions", () => {
