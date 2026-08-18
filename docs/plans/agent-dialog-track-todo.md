@@ -122,6 +122,8 @@
 - 2026-08-18：WS-004 通过 `86414a1` 随本次账本提交进入 `origin/main`。对话区只展示 `StageArtifactVersion`、`StageConfirmation`、`StageRollbackRecord` 和 `StageArtifactInvalidation` 的只读摘要；回退操作卡片使用 `RollbackStageRequest`，下游失效由服务端计算，Agent 不得提交确认记录或伪造失效列表。
 - 2026-08-18：工作区已开始 WS-005。冻结原则为 `TaskContext` 只包含服务端解析的只读任务摘要，`AgentActionCard` 只携带任务、动作、expectedRevision、摘要、成本提示和版本化 payload；现有 `StrategyActionProposal` 兼容迁入统一卡片，不建立平行契约。
 - 2026-08-18：WS-005 通过功能提交 `a8e13b2` 完成契约冻结。对话区后续直接使用共享 `TaskContextSchema`、`AgentActionCardSchema` 和 `packages/schemas/test/fixtures/workspace-v2.ts`；卡片仅为人工执行提案，服务端仍须重算身份、权限、任务归属、revision 和实际成本。旧 `StrategyActionProposal` 仅用于当前纵向链路兼容。
+- 2026-08-18：工作区已开始 WS-006。API 将把 Agent 会话/SSE 边界从工作区及策略命令路由中抽离，Web 将把 Agent 面板逻辑与工作区业务逻辑拆到独立模块；对话区后续修改对应 Agent 模块，不再持续编辑单体入口。
+- 2026-08-18：WS-006 通过功能提交 `005a41e` 完成模块拆分。对话区后续维护 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-api.js`、`agent-panel.js` 和 `agent-panel.css`；工作区对应使用 `workspace-routes.ts`、`workspace-api.js` 和 `workspace-shell.js`，共享 HTTP/静态资源仍由组合层协调。
 
 ## 更新记录
 
@@ -136,3 +138,5 @@
 | 2026-08-18 | Codex | 根据用户长期授权，将开发流程固定为从最新 `origin/main` 开始并在检查后直接推送 `main`；不再默认创建功能分支或 PR |
 | 2026-08-18 | Codex | 与工作区启动 WS-005 契约冻结；AG-003 后续直接复用共享 Schema 和 fixture |
 | 2026-08-18 | Codex | 收到 WS-005 完成通知：共享 Agent 契约及跨包 fixture 已由 `a8e13b2` 冻结，全仓检查 62/62 通过；AG-003～AG-005 不再定义平行类型 |
+| 2026-08-18 | Codex | 收到 WS-006 启动通知：现有 API 与 Web 行为保持不变，Agent 路由和面板将获得独立维护边界 |
+| 2026-08-18 | Codex | 收到 WS-006 完成通知：Agent API/SSE、面板交互和样式已形成独立维护文件；全仓 62/62 及本地浏览器验收通过，AG-004 可在这些边界上继续演进 |
