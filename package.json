@@ -11,9 +11,9 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:api": "tsx watch apps/api/src/server.ts",
-    "start:api": "tsx apps/api/src/server.ts",
-    "dev:cli": "tsx apps/cli/src/main.ts",
+    "dev:api": "tsx --env-file-if-exists=.env watch apps/api/src/server.ts",
+    "start:api": "tsx --env-file-if-exists=.env apps/api/src/server.ts",
+    "dev:cli": "tsx --env-file-if-exists=.env apps/cli/src/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"packages/**/test/*.test.ts\" \"apps/**/test/*.test.ts\"",
     "security:check": "node scripts/security-check.mjs",

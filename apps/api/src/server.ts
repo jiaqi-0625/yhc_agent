@@ -2,7 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { LocalAgentRuntime } from "@firefly/agent";
+import { LocalAgentCredentialsError, LocalAgentRuntime } from "@firefly/agent";
 import { RevisionConflictError } from "@firefly/domain";
 import {
   CopyWorkRequestSchema,
@@ -16,6 +16,7 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
+import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
 
 const version = "0.1.0";
 const maximumBodyBytes = 64 * 1024;
@@ -103,6 +104,7 @@ function validateBody<T>(schema: TSchema, body: Record<string, unknown>): T {
 
 function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
+  if (error instanceof LocalAgentCredentialsError) return 503;
   if (error instanceof RevisionConflictError) return 409;
   if (error.message.includes("was not found")) return 404;
   if (error.message.includes("already exists") || error.message.includes("already running")) return 409;
@@ -134,6 +136,7 @@ async function handleRequest(
         "vehicle_snapshot",
         "strategy_draft",
         "human_strategy_approval",
+        "work_bound_agent",
       ],
       domainTools: [
         "get_vehicle_snapshot",
@@ -142,7 +145,7 @@ async function handleRequest(
         "validate_strategy",
         "request_strategy_approval",
       ],
-      agentDomainToolsLoaded: false,
+      agentDomainToolsLoaded: runtime.domainToolsAvailable,
       model: runtime.publicConfig(),
       boundaries: {
         publishesAds: false,
@@ -209,7 +212,13 @@ async function handleRequest(
   if (request.method === "POST" && url.pathname === "/v1/sessions") {
     const body = await readJson(request);
     if (body.id !== undefined && typeof body.id !== "string") throw new Error("Session id must be a string.");
-    const session = await runtime.createSession(body.id);
+    if (body.workId !== undefined && typeof body.workId !== "string") throw new Error("Work id must be a string.");
+    const workId = body.workId as string | undefined;
+    if (workId !== undefined) await business.getWork(workId);
+    const session = await runtime.createSession(
+      body.id as string | undefined,
+      workId === undefined ? {} : { workId },
+    );
     sendJson(response, 201, { session });
     return;
   }
@@ -259,15 +268,18 @@ async function handleRequest(
 }
 
 export function createApiServer(
-  runtime = new LocalAgentRuntime(),
+  runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
 ): Server {
+  const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   return createServer((request, response) => {
-    void handleRequest(request, response, runtime, business).catch((error: unknown) => {
+    void handleRequest(request, response, activeRuntime, business).catch((error: unknown) => {
       const normalized = error instanceof Error ? error : new Error("Unknown request error.");
       sendJson(response, errorStatus(normalized), {
         code:
-          normalized instanceof BusinessRuntimeError || normalized instanceof RevisionConflictError
+          normalized instanceof BusinessRuntimeError ||
+          normalized instanceof RevisionConflictError ||
+          normalized instanceof LocalAgentCredentialsError
             ? normalized.code
             : "AIC-API-INVALID_REQUEST",
         message: normalized.message,
@@ -281,7 +293,7 @@ export function createApiServer(
 export async function startApiServer(
   port = 3100,
   host = "127.0.0.1",
-  runtime = new LocalAgentRuntime(),
+  runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
 ): Promise<Server> {
   const server = createApiServer(runtime, business);
@@ -299,8 +311,9 @@ const isEntrypoint = process.argv[1] !== undefined && fileURLToPath(import.meta.
 if (isEntrypoint) {
   const configuredPort = Number.parseInt(process.env.PORT ?? "3100", 10);
   const configuredHost = process.env.HOST ?? "127.0.0.1";
-  const runtime = new LocalAgentRuntime();
-  const server = await startApiServer(configuredPort, configuredHost, runtime);
+  const business = new LocalBusinessRuntime();
+  const runtime = createBusinessAgentRuntime(business);
+  const server = await startApiServer(configuredPort, configuredHost, runtime, business);
   const address = server.address();
   const activePort = typeof address === "object" && address ? address.port : configuredPort;
   console.log(

@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { type Agent, type AgentEvent, type AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
+import { type Agent, type AgentEvent, type AgentMessage, type StreamFn } from "@earendil-works/pi-agent-core";
+import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
 
 import { createBaseAgent } from "./base-agent.ts";
 import {
+  LocalAgentCredentialsError,
   loadLocalAgentConfig,
   toPublicLocalAgentConfig,
   type LocalAgentConfig,
@@ -16,13 +17,27 @@ import { LOCAL_FRAMEWORK_SYSTEM_PROMPT } from "./system-prompt.ts";
 
 export interface LocalSessionSummary {
   id: string;
+  workId?: string;
   createdAt: string;
   updatedAt: string;
   provider: string;
   modelId: string;
   messageCount: number;
   isRunning: boolean;
+  domainToolsLoaded: boolean;
+  toolNames: string[];
 }
+
+export interface LocalWorkAgentFactoryContext {
+  model: Model<Api>;
+  streamFn: StreamFn;
+  getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
+  messages: readonly AgentMessage[];
+  sessionId: string;
+  workId: string;
+}
+
+export type LocalWorkAgentFactory = (context: LocalWorkAgentFactoryContext) => Agent;
 
 export type LocalRuntimeEvent =
   | { type: "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_end" }
@@ -39,6 +54,7 @@ export interface LocalPromptResult {
 
 interface ActiveLocalSession {
   agent: Agent;
+  workId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,21 +101,40 @@ export class LocalAgentRuntime {
   readonly #sessions = new Map<string, ActiveLocalSession>();
   readonly #modelRuntime: LocalModelRuntime;
   readonly #store: LocalSessionStore;
+  readonly #workAgentFactory: LocalWorkAgentFactory | undefined;
 
   constructor(
     readonly config: LocalAgentConfig = loadLocalAgentConfig(),
     modelRuntime: LocalModelRuntime = createLocalModelRuntime(config),
     store: LocalSessionStore = new LocalSessionStore(config.dataDirectory, config.persistSessions),
+    workAgentFactory?: LocalWorkAgentFactory,
   ) {
     this.#modelRuntime = modelRuntime;
     this.#store = store;
+    this.#workAgentFactory = workAgentFactory;
   }
 
   publicConfig(): PublicLocalAgentConfig {
     return toPublicLocalAgentConfig(this.config);
   }
 
-  #createAgent(messages: readonly AgentMessage[], sessionId: string): Agent {
+  get domainToolsAvailable(): boolean {
+    return this.#workAgentFactory !== undefined;
+  }
+
+  #createAgent(messages: readonly AgentMessage[], sessionId: string, workId?: string): Agent {
+    if (workId !== undefined && this.#workAgentFactory !== undefined) {
+      const agent = this.#workAgentFactory({
+        model: this.#modelRuntime.model,
+        streamFn: this.#modelRuntime.streamFn,
+        messages,
+        sessionId,
+        workId,
+        ...(this.#modelRuntime.getApiKey === undefined ? {} : { getApiKey: this.#modelRuntime.getApiKey }),
+      });
+      agent.state.thinkingLevel = this.config.thinkingLevel;
+      return agent;
+    }
     const agent = createBaseAgent({
       model: this.#modelRuntime.model,
       streamFn: this.#modelRuntime.streamFn,
@@ -112,13 +147,21 @@ export class LocalAgentRuntime {
     return agent;
   }
 
-  async createSession(sessionId = `session_${randomUUID()}`): Promise<LocalSessionSummary> {
+  async createSession(
+    sessionId = `session_${randomUUID()}`,
+    options: { workId?: string } = {},
+  ): Promise<LocalSessionSummary> {
     assertLocalSessionId(sessionId);
     if (this.#sessions.has(sessionId) || (await this.#store.load(sessionId))) {
       throw new Error(`Session '${sessionId}' already exists.`);
     }
     const now = new Date().toISOString();
-    const active = { agent: this.#createAgent([], sessionId), createdAt: now, updatedAt: now };
+    const active = {
+      agent: this.#createAgent([], sessionId, options.workId),
+      ...(options.workId === undefined ? {} : { workId: options.workId }),
+      createdAt: now,
+      updatedAt: now,
+    };
     this.#sessions.set(sessionId, active);
     await this.#persist(sessionId, active);
     return this.#summary(sessionId, active);
@@ -131,7 +174,8 @@ export class LocalAgentRuntime {
     const persisted = await this.#store.load(sessionId);
     if (!persisted) return undefined;
     const active = {
-      agent: this.#createAgent(persisted.messages, sessionId),
+      agent: this.#createAgent(persisted.messages, sessionId, persisted.workId),
+      ...(persisted.workId === undefined ? {} : { workId: persisted.workId }),
       createdAt: persisted.createdAt,
       updatedAt: persisted.updatedAt,
     };
@@ -159,6 +203,9 @@ export class LocalAgentRuntime {
     const active = await this.#getActive(sessionId);
     if (!active) throw new Error(`Session '${sessionId}' was not found.`);
     if (active.agent.state.isStreaming) throw new Error(`Session '${sessionId}' is already running.`);
+    if (this.config.provider !== "mock" && this.config.apiKey === undefined) {
+      throw new LocalAgentCredentialsError(this.config.provider);
+    }
 
     const events: LocalRuntimeEvent[] = [];
     const unsubscribe = active.agent.subscribe((event) => {
@@ -217,12 +264,15 @@ export class LocalAgentRuntime {
   #summary(sessionId: string, active: ActiveLocalSession): LocalSessionSummary {
     return {
       id: sessionId,
+      ...(active.workId === undefined ? {} : { workId: active.workId }),
       createdAt: active.createdAt,
       updatedAt: active.updatedAt,
       provider: this.config.provider,
       modelId: this.config.modelId,
       messageCount: active.agent.state.messages.length,
       isRunning: active.agent.state.isStreaming,
+      domainToolsLoaded: active.agent.state.tools.length > 0,
+      toolNames: active.agent.state.tools.map((tool) => tool.name),
     };
   }
 
@@ -230,6 +280,7 @@ export class LocalAgentRuntime {
     const record: PersistedLocalSession = {
       schemaVersion: 1,
       id: sessionId,
+      ...(active.workId === undefined ? {} : { workId: active.workId }),
       createdAt: active.createdAt,
       updatedAt: active.updatedAt,
       provider: this.config.provider,

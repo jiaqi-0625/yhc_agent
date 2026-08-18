@@ -6,6 +6,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 export interface PersistedLocalSession {
   schemaVersion: 1;
   id: string;
+  workId?: string;
   createdAt: string;
   updatedAt: string;
   provider: string;
@@ -27,6 +28,7 @@ function isPersistedSession(value: unknown): value is PersistedLocalSession {
   return (
     record.schemaVersion === 1 &&
     typeof record.id === "string" &&
+    (record.workId === undefined || typeof record.workId === "string") &&
     typeof record.createdAt === "string" &&
     typeof record.updatedAt === "string" &&
     typeof record.provider === "string" &&

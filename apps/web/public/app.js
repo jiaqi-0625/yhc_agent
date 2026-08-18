@@ -2,10 +2,13 @@
 
 const state = {
   sessionId: null,
+  sessionWorkId: null,
   busy: false,
   work: null,
   workSummaries: [],
   workflowBusy: false,
+  workFilter: "",
+  modelReady: true,
 };
 const elements = {
   messages: document.querySelector("#messages"),
@@ -16,6 +19,8 @@ const elements = {
   provider: document.querySelector("#provider"),
   model: document.querySelector("#model"),
   sessionId: document.querySelector("#session-id"),
+  sessionWork: document.querySelector("#session-work"),
+  agentTools: document.querySelector("#agent-tools"),
   status: document.querySelector("#service-status"),
   error: document.querySelector("#error-banner"),
   newSession: document.querySelector("#new-session"),
@@ -50,6 +55,14 @@ const elements = {
   approveStrategy: document.querySelector("#approve-strategy"),
   copyWork: document.querySelector("#copy-work"),
   approvalNote: document.querySelector("#approval-note"),
+  workSearch: document.querySelector("#work-search"),
+  themeToggle: document.querySelector("#theme-toggle"),
+  workspaceShell: document.querySelector("#workspace-shell"),
+  topbarWorkName: document.querySelector("#topbar-work-name"),
+  studioWorkTitle: document.querySelector("#studio-work-title"),
+  studioWorkDescription: document.querySelector("#studio-work-description"),
+  studioStatus: document.querySelector("#studio-status"),
+  agentContextName: document.querySelector("#agent-context-name"),
 };
 
 const statusLabels = {
@@ -107,8 +120,8 @@ function clearWorkflowError() {
 
 function setBusy(busy) {
   state.busy = busy;
-  elements.prompt.disabled = busy;
-  elements.send.disabled = busy;
+  elements.prompt.disabled = busy || !state.modelReady;
+  elements.send.disabled = busy || !state.modelReady;
   elements.newSession.disabled = busy;
   elements.resetSession.disabled = busy;
 }
@@ -136,14 +149,23 @@ function shortWorkId(workId) {
 
 function renderWorkList() {
   elements.workList.replaceChildren();
-  if (state.workSummaries.length === 0) {
+  const normalizedFilter = state.workFilter.trim().toLocaleLowerCase("zh-CN");
+  const visibleWorks = state.workSummaries.filter(function (summary) {
+    if (!normalizedFilter) return true;
+    const searchable = [summary.work.name, summary.work.id, summary.vehicle.brand, summary.vehicle.series, summary.vehicle.trim]
+      .filter(Boolean).join(" ").toLocaleLowerCase("zh-CN");
+    return searchable.includes(normalizedFilter);
+  });
+  if (visibleWorks.length === 0) {
     const empty = document.createElement("p");
     empty.className = "work-list-empty";
-    empty.textContent = "还没有作品，点击右上角＋开始。";
+    empty.textContent = state.workSummaries.length === 0
+      ? "还没有项目，点击右上角＋开始。"
+      : "没有匹配的项目，请换个关键词。";
     elements.workList.appendChild(empty);
     return;
   }
-  state.workSummaries.forEach(function (summary) {
+  visibleWorks.forEach(function (summary) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "work-list-item" + (state.work && state.work.work.id === summary.work.id ? " active" : "");
@@ -240,7 +262,14 @@ function renderWork(view) {
     elements.createWorkCard.hidden = false;
     elements.activeWork.hidden = true;
     elements.workStatus.textContent = "尚未创建";
+    elements.workStatus.className = "badge neutral";
     elements.workRevision.textContent = "—";
+    elements.topbarWorkName.textContent = "未选择项目";
+    elements.studioWorkTitle.textContent = "开始第一个汽车广告项目";
+    elements.studioWorkDescription.textContent = "从可信车型快照开始，逐步完成策略、脚本、分镜与成片。";
+    elements.studioStatus.textContent = "未开始";
+    elements.studioStatus.className = "badge neutral";
+    elements.agentContextName.textContent = "尚未绑定项目";
     updateStages(null);
     renderWorkList();
     return;
@@ -251,12 +280,20 @@ function renderWork(view) {
   elements.createWorkCard.hidden = true;
   elements.activeWork.hidden = false;
   elements.workStatus.textContent = statusLabels[work.status] || work.status;
+  elements.workStatus.className = "badge " + (work.status === "strategy_approved" ? "success" : work.status === "awaiting_strategy_approval" ? "pending" : "neutral");
   elements.workRevision.textContent = String(work.revision);
+  const displayName = work.name || snapshot.series + " · " + snapshot.trim;
+  elements.topbarWorkName.textContent = displayName;
+  elements.studioWorkTitle.textContent = displayName;
+  elements.studioWorkDescription.textContent = snapshot.brand + " · " + snapshot.series + " · " + snapshot.trim + " · " + snapshot.modelYear + " 年款";
+  elements.studioStatus.textContent = statusLabels[work.status] || work.status;
+  elements.studioStatus.className = elements.workStatus.className;
+  elements.agentContextName.textContent = displayName;
   const stateCopy = statusDescriptions[work.status] || ["当前作品", "继续完成当前阶段。"];
   elements.stateTitle.textContent = stateCopy[0];
   elements.stateDescription.textContent = stateCopy[1];
   elements.stateCard.className =
-    "workflow-state-card" +
+    "state-callout" +
     (work.status === "strategy_approved"
       ? " approved"
       : work.status === "awaiting_strategy_approval"
@@ -285,7 +322,7 @@ function renderWork(view) {
   elements.strategyEditor.hidden = false;
   elements.strategyVersion.textContent = "v" + strategy.version + " · " + view.strategyVersionCount + " 个历史版本";
   elements.validationState.textContent = view.validation.valid ? "事实校验通过" : view.validation.issues.length + " 个校验问题";
-  elements.validationState.className = "validation-state" + (view.validation.valid ? "" : " invalid");
+  elements.validationState.className = "badge " + (view.validation.valid ? "success" : "invalid");
   renderStrategyItems(strategy, editable);
 
   elements.saveStrategy.hidden = !editable;
@@ -339,6 +376,7 @@ async function runWorkflow(action) {
   setWorkflowBusy(true);
   try {
     renderWork(await action());
+    await ensureSessionForCurrentWork();
     await refreshWorkList();
   }
   catch (error) { showWorkflowError(error); }
@@ -375,18 +413,31 @@ function clearMessages() {
 
 function updateSession(summary) {
   state.sessionId = summary.id;
+  state.sessionWorkId = summary.workId || null;
   localStorage.setItem("firefly.sessionId", summary.id);
   elements.sessionId.textContent = summary.id;
+  elements.sessionWork.textContent = summary.workId ? shortWorkId(summary.workId) : "未绑定";
+  elements.sessionWork.title = summary.workId || "";
+  const toolNames = Array.isArray(summary.toolNames) ? summary.toolNames : [];
+  elements.agentTools.textContent = summary.domainToolsLoaded ? toolNames.length + " 个已加载" : "未加载";
+  elements.agentTools.title = toolNames.join("、");
 }
 
-async function createSession() {
+async function createSession(workId) {
+  const selectedWorkId = workId === undefined ? state.work?.work.id : workId;
   const body = await api("/v1/sessions", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(selectedWorkId ? { workId: selectedWorkId } : {}),
   });
   updateSession(body.session);
   clearMessages();
+}
+
+async function ensureSessionForCurrentWork() {
+  const workId = state.work?.work.id || null;
+  if (state.sessionId && state.sessionWorkId === workId) return;
+  await createSession(workId || undefined);
 }
 
 async function restoreSession() {
@@ -397,6 +448,11 @@ async function restoreSession() {
   }
   try {
     const session = await api("/v1/sessions/" + encodeURIComponent(saved));
+    const selectedWorkId = state.work?.work.id || null;
+    if ((session.session.workId || null) !== selectedWorkId) {
+      await createSession(selectedWorkId || undefined);
+      return;
+    }
     updateSession(session.session);
     const transcript = await api("/v1/sessions/" + encodeURIComponent(saved) + "/transcript");
     clearMessages();
@@ -415,14 +471,23 @@ async function restoreSession() {
 async function initialize() {
   try {
     const meta = await api("/v1/meta");
-    if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("strategy_draft")) {
+    if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("work_bound_agent")) {
       throw new Error("当前后端进程版本过旧，请重启 npm run dev:api 后刷新页面。");
     }
     elements.provider.textContent = meta.model.provider;
     elements.model.textContent = meta.model.modelId;
-    await Promise.all([restoreSession(), loadWorks()]);
-    setStatus("online", "服务正常");
-    elements.prompt.focus();
+    state.modelReady = Boolean(meta.model.credentialsConfigured);
+    await loadWorks();
+    await restoreSession();
+    if (state.modelReady) {
+      setStatus("online", "服务正常");
+      elements.prompt.focus();
+    } else {
+      setStatus("warning", "等待模型密钥");
+      elements.prompt.placeholder = "请先在服务端配置 DEEPSEEK_API_KEY";
+      setBusy(false);
+      showError(new Error("DeepSeek 已设为主 Agent；请在项目 .env 中配置 DEEPSEEK_API_KEY 后重启服务。"));
+    }
   } catch (error) {
     setStatus("error", "连接失败");
     showError(error);
@@ -501,15 +566,43 @@ elements.resetSession.addEventListener("click", async function () {
   finally { setBusy(false); elements.prompt.focus(); }
 });
 
-document.querySelectorAll("[data-view]").forEach(function (button) {
+document.querySelectorAll("[data-workspace-view]").forEach(function (button) {
   button.addEventListener("click", function () {
-    document.querySelectorAll("[data-view]").forEach(function (candidate) {
+    document.querySelectorAll("[data-workspace-view]").forEach(function (candidate) {
       candidate.classList.toggle("active", candidate === button);
+      candidate.setAttribute("aria-current", candidate === button ? "page" : "false");
     });
-    document.querySelectorAll(".view").forEach(function (view) {
-      view.hidden = view.id !== button.dataset.view + "-view";
+    document.querySelectorAll("[data-workspace-panel]").forEach(function (view) {
+      view.hidden = view.dataset.workspacePanel !== button.dataset.workspaceView;
     });
   });
+});
+
+document.querySelectorAll("[data-mobile-target]").forEach(function (button) {
+  button.addEventListener("click", function () {
+    elements.workspaceShell.dataset.mobilePane = button.dataset.mobileTarget;
+    document.querySelectorAll("[data-mobile-target]").forEach(function (candidate) {
+      candidate.classList.toggle("active", candidate === button);
+    });
+  });
+});
+
+elements.workSearch.addEventListener("input", function () {
+  state.workFilter = elements.workSearch.value;
+  renderWorkList();
+});
+
+function applyTheme(theme) {
+  const resolved = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem("firefly.theme", resolved);
+  elements.themeToggle.setAttribute("aria-label", resolved === "dark" ? "切换到浅色主题" : "切换到深色主题");
+  elements.themeToggle.title = resolved === "dark" ? "切换到浅色主题" : "切换到深色主题";
+}
+
+applyTheme(localStorage.getItem("firefly.theme") || "light");
+elements.themeToggle.addEventListener("click", function () {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 });
 
 function createGoldenWork() {

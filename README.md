@@ -74,7 +74,7 @@ After the server starts, open the local acceptance page:
 http://127.0.0.1:3100/
 ```
 
-The page creates and restores a local session and also runs the golden-sample business flow: create a vehicle snapshot, generate a strategy, edit or lock items, regenerate unlocked items, submit for approval, and make an explicit human decision. The work list supports creating and switching among multiple works, restores the selected work after refresh, and can create a fresh work from an approved vehicle snapshot. It uses the credential-free Mock provider unless you explicitly configure another provider.
+The page creates and restores a local session and also runs the golden-sample business flow: create a vehicle snapshot, generate a strategy, edit or lock items, regenerate unlocked items, submit for approval, and make an explicit human decision. The work list supports creating and switching among multiple works, restores the selected work after refresh, and can create a fresh work from an approved vehicle snapshot. The main Agent defaults to DeepSeek; without a server-side key the UI remains available for diagnostics while model calls fail closed and never fall back to Mock.
 
 Default endpoints:
 
@@ -106,14 +106,15 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:3100/v1/sessions/$id/messa
 
 ## Connect a real model
 
-DeepSeek V4:
+DeepSeek V4 (default main Agent):
 
 ```powershell
-$env:AGENT_PROVIDER = "deepseek"
-$env:AGENT_MODEL = "deepseek-v4-flash"
-$env:DEEPSEEK_API_KEY = "<set in your shell or secret manager>"
-npm run dev:cli
+Copy-Item .env.example .env
+# Edit only the ignored .env file and set DEEPSEEK_API_KEY there.
+npm run dev:api
 ```
+
+`npm run dev:api`, `npm run start:api`, and `npm run dev:cli` load `.env` when it exists. Keep `AGENT_MODEL=deepseek-v4-flash` for the faster default, or use the Pi 0.84.1-supported `deepseek-v4-pro`. Never commit `.env`.
 
 Volcengine Ark:
 
@@ -131,9 +132,10 @@ Keys are resolved server-side and never returned by `/v1/meta` or written to ses
 ```text
 Product UI
     -> API and event boundary
-    -> LocalAgentRuntime
-    -> Pi Agent Core (tools=[] by default)
-    -> optional policy-gated domain assembly
+    -> LocalAgentRuntime (persisted workId binding)
+    -> Pi Agent Core
+       -> unbound session: tools=[]
+       -> work-bound session: policy-gated vehicle and strategy tools
 ```
 
 Read [docs/architecture.md](docs/architecture.md) for component responsibilities and [docs/decisions/open-decisions.md](docs/decisions/open-decisions.md) for decisions that need business or infrastructure input before external model integration.
@@ -141,7 +143,7 @@ Read [docs/architecture.md](docs/architecture.md) for component responsibilities
 ## Security model
 
 - The production agent receives no generic shell or filesystem tools.
-- The local framework starts with no tools at all.
+- Unbound framework sessions start with no tools; API sessions bound to a valid work receive only the five allowlisted vehicle and strategy tools.
 - Actor and project identity come from server-side session scope.
 - All tool calls are checked against workflow state and tool risk.
 - Secrets stay in the server-side deployment secret store.

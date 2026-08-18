@@ -79,6 +79,10 @@ export class LocalBusinessRuntime {
     this.#vehicles = vehicles;
   }
 
+  get vehicleService(): InMemoryVehicleService {
+    return this.#vehicles;
+  }
+
   async listWorks(): Promise<LocalWorkSummary[]> {
     const records = await this.store.list();
     return records

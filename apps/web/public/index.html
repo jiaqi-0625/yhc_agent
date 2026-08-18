@@ -1,180 +1,263 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark" />
-    <title>萤火虫广告 Agent</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-v2" />
+    <meta name="color-scheme" content="dark light" />
+    <title>萤火虫广告 Agent · 汽车广告工作台</title>
+    <link rel="stylesheet" href="/app.css?build=studio-v2-deepseek" />
   </head>
   <body>
-    <div class="shell">
+    <svg class="svg-sprite" aria-hidden="true">
+      <symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 2 1.5 5.1L18 9l-4.5 1.9L12 16l-1.5-5.1L6 9l4.5-1.9L12 2Z"/><path d="m18.5 15 .8 2.7L22 19l-2.7 1.3-.8 2.7-.8-2.7L15 19l2.7-1.3.8-2.7Z"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+      <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4v8Z"/></symbol>
+      <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6Z"/></symbol>
+      <symbol id="i-car" viewBox="0 0 24 24"><path d="m5 11 2-5h10l2 5M3 13a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v5H3v-5Z"/><path d="M6 18v2M18 18v2M7 14h.01M17 14h.01"/></symbol>
+      <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6V2Z"/><path d="M14 2v5h5M9 12h6M9 16h6"/></symbol>
+      <symbol id="i-film" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M17 9h4M3 15h4M17 15h4"/></symbol>
+      <symbol id="i-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></symbol>
+      <symbol id="i-package" viewBox="0 0 24 24"><path d="m12 2 9 5-9 5-9-5 9-5Z"/><path d="m3 7 9 5 9-5v10l-9 5-9-5V7ZM12 12v10"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></symbol>
+      <symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4 20-7Z"/><path d="M22 2 11 13"/></symbol>
+      <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    </svg>
+
+    <div class="app-shell">
       <header class="topbar">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">✦</span>
-          <div>
-            <strong>萤火虫广告 Agent</strong>
-            <span>Pi 本地框架</span>
+          <span class="brand-mark" aria-hidden="true"><svg class="icon"><use href="#i-spark" /></svg></span>
+          <div class="brand-copy">
+            <strong>萤火虫</strong>
+            <span>汽车信息流广告 Agent</span>
           </div>
         </div>
-        <div id="service-status" class="status" aria-live="polite">
-          <span class="status-dot"></span>
-          <span>正在连接</span>
+        <div class="topbar-context" aria-label="当前工作区">
+          <span class="context-label">广告生产工作台</span>
+          <span class="context-separator" aria-hidden="true">/</span>
+          <strong id="topbar-work-name">未选择作品</strong>
+        </div>
+        <div class="topbar-actions">
+          <div id="service-status" class="status" aria-live="polite">
+            <span class="status-dot"></span><span>正在连接</span>
+          </div>
+          <button id="theme-toggle" class="icon-button subtle" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+            <svg class="icon theme-dark-icon"><use href="#i-sun" /></svg>
+            <svg class="icon theme-light-icon"><use href="#i-moon" /></svg>
+          </button>
         </div>
       </header>
 
-      <div class="workspace">
-        <aside class="sidebar">
-          <section>
-            <p class="eyebrow">当前运行环境</p>
+      <nav class="mobile-panel-switcher" aria-label="移动端工作区切换">
+        <button type="button" data-mobile-target="projects"><svg class="icon"><use href="#i-folder" /></svg>项目</button>
+        <button class="active" type="button" data-mobile-target="canvas"><svg class="icon"><use href="#i-grid" /></svg>工作区</button>
+        <button type="button" data-mobile-target="agent"><svg class="icon"><use href="#i-message" /></svg>Agent</button>
+      </nav>
+
+      <div id="workspace-shell" class="workspace-shell" data-mobile-pane="canvas">
+        <aside class="project-sidebar" aria-label="项目列表">
+          <div class="pane-header">
+            <div><p class="eyebrow">Projects <span class="sr-only">作品列表</span></p><h1>广告项目</h1></div>
+            <button id="new-work" class="icon-button" type="button" aria-label="新建广告作品" title="新建广告作品">
+              <svg class="icon"><use href="#i-plus" /></svg>
+            </button>
+          </div>
+
+          <label class="search-field" for="work-search">
+            <span class="sr-only">搜索项目</span>
+            <input id="work-search" type="search" placeholder="搜索车型或项目…" autocomplete="off" />
+          </label>
+
+          <div id="work-list" class="work-list" aria-live="polite">
+            <div class="skeleton-list" aria-label="正在加载项目">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <section class="sidebar-summary" aria-labelledby="current-project-heading">
+            <div class="summary-heading">
+              <p id="current-project-heading" class="eyebrow">Current work</p>
+              <span id="work-status" class="badge neutral">尚未创建</span>
+            </div>
+            <dl class="facts compact">
+              <div><dt>Revision</dt><dd id="work-revision">—</dd></div>
+              <div><dt>Agent scope</dt><dd id="session-work">未绑定</dd></div>
+              <div><dt>Domain tools</dt><dd id="agent-tools">未加载</dd></div>
+            </dl>
+          </section>
+
+          <details class="runtime-details">
+            <summary><span><svg class="icon"><use href="#i-shield" /></svg>运行环境与安全边界</span><svg class="icon chevron"><use href="#i-chevron" /></svg></summary>
             <dl class="facts">
               <div><dt>Provider</dt><dd id="provider">—</dd></div>
               <div><dt>Model</dt><dd id="model">—</dd></div>
               <div><dt>Session</dt><dd id="session-id">—</dd></div>
             </dl>
-          </section>
-
-          <section class="boundary-card">
-            <p class="eyebrow">安全边界</p>
-            <ul>
-              <li>业务工具按作品受控装配</li>
-              <li>不能发布广告</li>
-              <li>不能替代人工审批</li>
-              <li>未开放通用系统工具</li>
+            <ul class="boundary-list">
+              <li>仅装配作品域白名单工具</li>
+              <li>不能发布广告或替代人工审批</li>
+              <li>正式生成前必须确认模型与费用</li>
             </ul>
-          </section>
-
-          <section>
-            <p class="eyebrow">当前作品</p>
-            <dl class="facts">
-              <div><dt>Status</dt><dd id="work-status">尚未创建</dd></div>
-              <div><dt>Revision</dt><dd id="work-revision">—</dd></div>
-            </dl>
-          </section>
-
-          <section class="work-library">
-            <div class="sidebar-section-heading">
-              <p class="eyebrow">作品列表</p>
-              <button id="new-work" class="icon-button" type="button" aria-label="新建广告作品">＋</button>
-            </div>
-            <div id="work-list" class="work-list" aria-live="polite">
-              <p class="work-list-empty">正在加载作品…</p>
-            </div>
-          </section>
-
-          <div class="sidebar-actions">
-            <button id="new-session" class="button secondary" type="button">新建会话</button>
-            <button id="reset-session" class="button ghost" type="button">清空当前会话</button>
-          </div>
+          </details>
         </aside>
 
-        <div class="main-area">
-          <nav class="view-tabs" aria-label="工作区视图">
-            <button class="active" type="button" data-view="workflow">策略竖切</button>
-            <button type="button" data-view="chat">Agent 会话</button>
+        <main class="studio" aria-label="广告生产工作区">
+          <header class="studio-header">
+            <div class="studio-title-group">
+              <div class="title-line">
+                <h1 id="studio-work-title">开始第一个汽车广告项目</h1>
+                <span id="studio-status" class="badge neutral">未开始</span>
+              </div>
+              <p id="studio-work-description">从可信车型快照开始，逐步完成策略、脚本、分镜与成片。</p>
+            </div>
+            <button id="state-new-work" class="button secondary" type="button"><svg class="icon"><use href="#i-plus" /></svg>新建项目</button>
+          </header>
+
+          <nav class="stage-navigation" aria-label="生产阶段">
+            <button class="active" type="button" data-workspace-view="strategy"><span>01</span>策略</button>
+            <button type="button" data-workspace-view="script"><span>02</span>脚本</button>
+            <button type="button" data-workspace-view="storyboard"><span>03</span>分镜</button>
+            <button type="button" data-workspace-view="assets"><span>04</span>素材</button>
+            <button type="button" data-workspace-view="delivery"><span>05</span>交付</button>
           </nav>
 
-          <main id="workflow-view" class="workflow-panel view">
-            <header class="workflow-header">
-              <div>
-                <p class="eyebrow">FIRST BUSINESS VERTICAL</p>
-                <h1>车型快照 → 卖点策略 → 人工审批</h1>
-                <p>使用内置黄金样例验证业务状态、版本、锁定和审批边界，不消耗模型额度。</p>
-              </div>
-              <div class="stage-strip" aria-label="流程阶段">
-                <span data-stage="snapshot">1 车型快照</span>
-                <span data-stage="strategy">2 策略草稿</span>
-                <span data-stage="approval">3 人工审批</span>
+          <div id="workflow-error" class="alert destructive" role="alert" hidden></div>
+
+          <section id="workflow-view" class="workspace-view workflow-panel" data-workspace-panel="strategy">
+            <header class="section-intro">
+              <div><p class="eyebrow">Strategy workspace</p><h2>车型事实与传播策略</h2></div>
+              <div class="stage-strip" aria-label="策略阶段">
+                <span data-stage="snapshot">车型快照</span><span data-stage="strategy">策略草稿</span><span data-stage="approval">人工审批</span>
               </div>
             </header>
 
-            <div id="workflow-error" class="error-banner" role="alert" hidden></div>
-
-            <section id="create-work-card" class="work-card empty-state">
-              <span class="card-icon" aria-hidden="true">◆</span>
-              <div>
-                <h2>创建黄金样例作品</h2>
-                <p>内置虚构车型“萤火 E5 长续航示例版”，包含带来源的固定卖点、扩展卖点和禁用表达。</p>
-              </div>
-              <button id="create-work" class="primary-action" type="button">创建车型快照</button>
+            <section id="create-work-card" class="empty-state">
+              <span class="empty-icon" aria-hidden="true"><svg class="icon"><use href="#i-car" /></svg></span>
+              <div><h2>创建黄金样例项目</h2><p>使用虚构车型“萤火 E5 长续航示例版”，无模型费用即可体验完整策略审批链路。</p></div>
+              <button id="create-work" class="button primary" type="button">创建车型快照</button>
             </section>
 
             <div id="active-work" hidden>
-              <section id="workflow-state-card" class="workflow-state-card">
-                <div>
-                  <strong id="workflow-state-title">作品已就绪</strong>
-                  <p id="workflow-state-description">继续完成当前阶段。</p>
-                </div>
-                <button id="state-new-work" class="button secondary" type="button">新建独立作品</button>
+              <section id="workflow-state-card" class="state-callout">
+                <div><strong id="workflow-state-title">作品已就绪</strong><p id="workflow-state-description">继续完成当前阶段。</p></div>
+                <span class="state-indicator" aria-hidden="true"></span>
               </section>
 
-              <section class="work-card snapshot-card">
-                <div>
-                  <p class="eyebrow">不可变车型快照</p>
-                  <h2 id="vehicle-name">—</h2>
-                  <p id="snapshot-id" class="mono">—</p>
+              <section class="snapshot-card">
+                <div class="snapshot-identity">
+                  <span class="asset-icon" aria-hidden="true"><svg class="icon"><use href="#i-car" /></svg></span>
+                  <div><p class="eyebrow">Immutable vehicle snapshot</p><h2 id="vehicle-name">—</h2><p id="snapshot-id" class="mono">—</p></div>
                 </div>
                 <div id="vehicle-facts" class="fact-pills"></div>
               </section>
 
-              <section id="strategy-setup" class="work-card strategy-setup">
-                <div>
-                  <p class="eyebrow">策略输入</p>
-                  <h2>生成卖点策略草稿</h2>
-                </div>
-                <label>目标人群<input id="strategy-audience" value="有孩家庭用户" maxlength="120" /></label>
-                <label>传播主题<input id="strategy-theme" value="周末家庭出行" maxlength="120" /></label>
-                <button id="generate-strategy" class="primary-action" type="button">生成策略草稿</button>
+              <section id="strategy-setup" class="strategy-setup">
+                <div class="setup-copy"><p class="eyebrow">Campaign brief</p><h2>生成卖点策略草稿</h2><p>所有宣传表述都会与车型快照和禁用词进行校验。</p></div>
+                <label class="field"><span>目标人群</span><input id="strategy-audience" value="有孩家庭用户" maxlength="120" /></label>
+                <label class="field"><span>传播主题</span><input id="strategy-theme" value="周末家庭出行" maxlength="120" /></label>
+                <button id="generate-strategy" class="button primary" type="button">生成策略草稿</button>
               </section>
 
               <section id="strategy-editor" class="strategy-editor" hidden>
                 <div class="section-heading">
-                  <div>
-                    <p class="eyebrow">当前策略版本</p>
-                    <h2>卖点策略 <span id="strategy-version" class="version-tag">—</span></h2>
-                  </div>
-                  <div id="validation-state" class="validation-state">等待校验</div>
+                  <div><p class="eyebrow">Current revision</p><h2>卖点策略 <span id="strategy-version" class="version-tag">—</span></h2></div>
+                  <div id="validation-state" class="badge success">等待校验</div>
                 </div>
                 <div id="strategy-items" class="strategy-items"></div>
                 <div class="editor-actions">
                   <button id="save-strategy" class="button secondary" type="button">保存人工修改</button>
-                  <button id="regenerate-strategy" class="button secondary" type="button">重新生成未锁定项</button>
-                  <button id="request-approval" class="primary-action" type="button">提交人工审批</button>
-                  <button id="reject-strategy" class="button danger" type="button" hidden>驳回</button>
-                  <button id="approve-strategy" class="primary-action" type="button" hidden>人工通过</button>
-                  <button id="copy-work" class="primary-action" type="button" hidden>基于此车型新建作品</button>
+                  <button id="regenerate-strategy" class="button secondary" type="button"><svg class="icon"><use href="#i-rotate" /></svg>重生成未锁定项</button>
+                  <button id="request-approval" class="button primary" type="button">提交人工审批</button>
+                  <button id="reject-strategy" class="button destructive" type="button" hidden>驳回</button>
+                  <button id="approve-strategy" class="button primary" type="button" hidden>人工通过</button>
+                  <button id="copy-work" class="button primary" type="button" hidden>基于此车型新建作品</button>
                 </div>
                 <p id="approval-note" class="approval-note"></p>
               </section>
             </div>
-          </main>
+          </section>
 
-        <main id="chat-view" class="chat-panel view" hidden>
+          <section class="workspace-view" data-workspace-panel="script" hidden>
+            <header class="section-intro"><div><p class="eyebrow">Script workspace</p><h2>信息流广告脚本</h2><p>承接已批准策略，组织首屏钩子、卖点节拍、口播与行动号召。</p></div><span class="badge pending">下一纵切</span></header>
+            <div id="script-gate" class="alert"><strong>尚未接通脚本 API</strong><span>策略通过后，这里将进入结构化脚本生成与人工编辑；当前仅展示交互骨架。</span></div>
+            <div class="editor-layout prototype-locked">
+              <aside class="beat-list" aria-label="脚本节拍预览">
+                <button class="active" type="button" disabled><span>00–03s</span><strong>首屏钩子</strong><small>快速建立观看承诺</small></button>
+                <button type="button" disabled><span>03–12s</span><strong>使用场景</strong><small>将卖点放进真实情境</small></button>
+                <button type="button" disabled><span>12–24s</span><strong>核心兑现</strong><small>可视化证明产品价值</small></button>
+                <button type="button" disabled><span>24–30s</span><strong>行动号召</strong><small>收束主题与转化动作</small></button>
+              </aside>
+              <div class="script-canvas">
+                <div class="canvas-toolbar"><div><strong>首屏钩子</strong><span>结构化脚本编辑器预览</span></div><button class="button secondary" disabled>保存脚本</button></div>
+                <label class="field"><span>画面任务</span><textarea disabled placeholder="脚本服务接通后，在这里编辑镜头可见事件和终态。"></textarea></label>
+                <label class="field"><span>口播 / 字幕</span><textarea disabled placeholder="口播必须继承已批准卖点和事实边界。"></textarea></label>
+                <div class="two-fields"><label class="field"><span>目标时长</span><input disabled value="3 秒" /></label><label class="field"><span>事实引用</span><input disabled value="等待策略批准" /></label></div>
+              </div>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-panel="storyboard" hidden>
+            <header class="section-intro"><div><p class="eyebrow">Storyboard workspace</p><h2>分镜与生成单元</h2><p>脚本决定拍什么，视觉合同决定如何拍；每个生成单元独立审核。</p></div><span class="badge pending">待接入</span></header>
+            <div class="alert"><strong>需先批准事实脚本</strong><span>按视频 Skill 合同，未批准脚本前不会选择模型或生成控制图。</span></div>
+            <div class="storyboard-grid" aria-label="分镜卡片预览">
+              <article class="storyboard-card"><div class="frame-placeholder"><span>01</span><svg class="icon"><use href="#i-image" /></svg></div><div><strong>建立人物与车辆关系</strong><p>景别、构图、运镜和可见终态将在此展示。</p></div></article>
+              <article class="storyboard-card"><div class="frame-placeholder"><span>02</span><svg class="icon"><use href="#i-image" /></svg></div><div><strong>卖点场景化证明</strong><p>引用角色锚点、场景锚点与已批准风格图。</p></div></article>
+              <article class="storyboard-card"><div class="frame-placeholder"><span>03</span><svg class="icon"><use href="#i-image" /></svg></div><div><strong>行动与结果兑现</strong><p>生成前展示模型、数量、费用和参考输入。</p></div></article>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-panel="assets" hidden>
+            <header class="section-intro"><div><p class="eyebrow">Asset library</p><h2>项目素材与视觉锚点</h2><p>车型事实、品牌素材、人物、场景和参考图按版本管理。</p></div><button class="button secondary" disabled>导入素材</button></header>
+            <div class="asset-sections">
+              <article><span class="asset-icon"><svg class="icon"><use href="#i-car" /></svg></span><div><strong>车型与品牌事实</strong><p>当前已接通不可变车型快照；Logo、色值和官方图待接入。</p></div><span class="badge success">已接通</span></article>
+              <article><span class="asset-icon"><svg class="icon"><use href="#i-image" /></svg></span><div><strong>人物与场景锚点</strong><p>承载角色身份、环境连续性和风格定调图。</p></div><span class="badge pending">规划中</span></article>
+              <article><span class="asset-icon"><svg class="icon"><use href="#i-film" /></svg></span><div><strong>生成片段与真实终态</strong><p>保存已接受片段、失败记录和连续性接力信息。</p></div><span class="badge pending">规划中</span></article>
+            </div>
+          </section>
+
+          <section class="workspace-view" data-workspace-panel="delivery" hidden>
+            <header class="section-intro"><div><p class="eyebrow">Delivery</p><h2>成片、封面与交付包</h2><p>所有片段通过真实后期、字幕、封面和 QC 后才进入交付。</p></div><span class="badge pending">待接入</span></header>
+            <div class="delivery-empty"><span class="empty-icon"><svg class="icon"><use href="#i-package" /></svg></span><h3>还没有可交付产物</h3><p>完成脚本、分镜和视频验收后，这里将汇总成片、封面、字幕和质检报告。</p><button class="button secondary" disabled>打开交付检查</button></div>
+          </section>
+        </main>
+
+        <aside id="chat-view" class="chat-panel" aria-label="Agent 对话区">
+          <header class="chat-header">
+            <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫 Agent</strong><span><i class="online-dot"></i>Pi Runtime · 作品已隔离</span></div></div>
+            <button id="new-session" class="icon-button subtle" type="button" aria-label="新建 Agent 会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
+          </header>
+
+          <div class="agent-context">
+            <span>当前上下文</span><strong id="agent-context-name">尚未绑定项目</strong>
+          </div>
+
           <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
             <section id="welcome" class="welcome">
-              <div class="welcome-icon" aria-hidden="true">✦</div>
-              <p class="eyebrow">LOCAL FRAMEWORK</p>
-              <h1>本地 Agent 已准备好</h1>
-              <p>这里用于验收 Pi Agent 的会话、上下文恢复和模型连接。默认 Mock 模型不会产生费用。</p>
+              <div class="welcome-icon" aria-hidden="true"><svg class="icon"><use href="#i-message" /></svg></div>
+              <h2>一起完成这条广告</h2>
+              <p>我会根据作品状态调用受控工具，并在事实、审批和付费生成边界前停下来确认。</p>
               <div class="suggestions">
-                <button type="button" data-prompt="介绍一下当前 Agent 框架的能力边界">查看能力边界</button>
-                <button type="button" data-prompt="为汽车信息流广告生成流程列出三个规划步骤">测试多轮对话</button>
+                <button type="button" data-prompt="介绍当前项目状态和下一步应该做什么">查看下一步</button>
+                <button type="button" data-prompt="根据当前车型快照，说明策略生成会遵守哪些事实边界">查看事实边界</button>
               </div>
             </section>
           </div>
 
-          <div id="error-banner" class="error-banner" role="alert" hidden></div>
+          <div id="error-banner" class="alert destructive chat-error" role="alert" hidden></div>
 
           <form id="composer" class="composer">
             <label class="sr-only" for="prompt">发送消息</label>
-            <textarea id="prompt" rows="1" maxlength="12000" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
-            <button id="send" class="send-button" type="submit" aria-label="发送消息">发送</button>
+            <textarea id="prompt" rows="1" maxlength="12000" placeholder="给 Agent 发送消息…"></textarea>
+            <button id="send" class="send-button" type="submit" aria-label="发送消息"><svg class="icon"><use href="#i-send" /></svg></button>
           </form>
-          <p class="footnote">会话与业务产物分开持久化；当前聊天 Agent 默认不加载业务工具。</p>
-        </main>
-        </div>
+          <footer class="chat-footer"><span>Enter 发送 · Shift + Enter 换行</span><button id="reset-session" type="button">清空会话</button></footer>
+        </aside>
       </div>
     </div>
-    <script src="/app.js?build=workspace-v2" defer></script>
+    <script src="/app.js?build=studio-v2-deepseek" defer></script>
   </body>
 </html>
