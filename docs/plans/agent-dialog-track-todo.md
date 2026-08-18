@@ -120,9 +120,9 @@
 - AG-001：实际分支 `agent/task-agent-panel`；已基于最新 `main` 重放盘点提交 `80d1bcf`，文档位于 [`ag-001-agent-dialog-inventory.md`](./ag-001-agent-dialog-inventory.md)；本轮已完成浏览器联调但尚未合并，状态不标记为已完成。
 - AG-002：实际分支 `agent/task-agent-panel`；实现提交 `6e327cd`。已增加 `TaskContext`、`AgentActionCard`、`AgentStreamEvent` v1 Schema、双方可复用 fixture/Schema 测试和契约提案 [`ag-002-task-context-contract.md`](./ag-002-task-context-contract.md)。上下文引用既有 `VideoTask`、`vehicleSnapshotId`、`assetSnapshotId`，不接收客户端或模型声明的身份、权限、额度和运行锁；尚未合并 `main`，因此不标记为已完成。
 - 模块与会话：`6e327cd` 已拆出 `apps/api/src/agent-routes.ts`、`apps/web/public/agent-panel.js` 和独立样式；新会话绑定 `videoTaskId`，旧 `workId` 持久化记录首次恢复后原子迁移为 v2 `TaskContext`。跨账号拒绝仍等待服务端 SessionScope，不能宣称 AG-103 完成。
-- 流式与面板：`6e327cd` 已实现稳定事件 ID/sequence、任务上下文条、实时文本、取消/重试入口、事件去重与断档报错、320–560px 调宽、折叠及快捷键。未实现服务端事件回放，断线后目前只能安全重试，不能宣称 AG-204 完成。
+- 流式与面板：`6e327cd` 已实现稳定事件 ID/sequence、任务上下文条、实时文本、取消/重试入口、事件去重与断档报错。提交 `b4e75bf` 已撤回未经明确授权的调宽、折叠和快捷键布局改动，恢复既有三栏及固定右侧对话区；AG-205 保持待开始。未实现服务端事件回放，断线后目前只能安全重试，不能宣称 AG-204 完成。
 - 操作卡片：`6e327cd` 已绑定 `videoTaskId`、`expectedRevision`、幂等键和成本展示，并保留显式人工点击；当前仍经兼容作品端点执行，等待 WS-305 统一命令 API 后才能完成权限/预算闭环。
-- 验证：`npm run check` 通过（57/57 测试、类型检查、凭据扫描）；Mock Provider 浏览器验收通过任务切换、上下文同步、流式回复、1280/1920 布局、键盘调宽、折叠/展开与 980px 移动端切换，控制台无错误。验收开始时误连用户已运行的 `3100` 非 Mock 实例并发送过 1 条只读状态询问，随后立即改用独立 `3101` Mock 实例完成全部正式验收；该首次请求是否计费以 Provider 记录为准。
+- 验证：`npm run check` 通过（57/57 测试、类型检查、凭据扫描）。`b4e75bf` 在 3120 实测恢复三栏 `260px / 1280px / 380px`，对话标题、上下文、消息和输入区均位于右栏，无横向溢出或控制台错误。故障原因是旧服务进程未注册新拆出的 CSS/JS 静态路由，导致两项资源 404；已重启 3120 并确认均返回 200。此前 Mock 正式验收结果及首次误连非 Mock 实例的计费提醒仍然有效。
 
 ## 工作区契约通知
 
@@ -140,3 +140,4 @@
 | 2026-08-18 | Codex | WS-002/WS-003 共享契约已随 `main` 集成完成；全仓检查 53/53 通过 |
 | 2026-08-18 | Codex | 基于最新 `main` 领取 AG-002；开始推进任务上下文、Agent 卡片、流式事件和面板模块边界优化。 |
 | 2026-08-18 | Codex | 在分支 `agent/task-agent-panel` 完成实现提交 `6e327cd`；全仓检查 57/57 与 Mock 浏览器验收通过。共享契约影响为新增 v1 `TaskContext`/`AgentActionCard`/`AgentStreamEvent`；后续冻结、账号隔离和命令闭环依赖 WS-005、WS-301/304、WS-305/107。 |
+| 2026-08-18 | Codex | 提交 `b4e75bf` 撤回对整体网格、面板调宽和折叠的越界修改，恢复原固定三栏；修复 3120 旧进程造成的新面板资源 404。共享契约无变化，AG-205 继续待开始。 |
