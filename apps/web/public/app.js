@@ -1,4 +1,8 @@
-"use strict";
+import { agentApi } from "./agent-api.js";
+import { bindAgentPanel } from "./agent-panel.js";
+import { api } from "./api-client.js";
+import { workspaceApi } from "./workspace-api.js";
+import { bindWorkspaceShell } from "./workspace-shell.js";
 
 const state = {
   sessionId: null,
@@ -78,20 +82,6 @@ const statusDescriptions = {
   awaiting_strategy_approval: ["等待人工审批", "策略内容已冻结，只能由审核人员通过或驳回。"],
   strategy_approved: ["策略已通过", "该版本保持只读。继续创作时，请基于同一车型新建独立作品。"],
 };
-
-async function api(path, options) {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    let message = "请求失败（HTTP " + response.status + "）";
-    try {
-      const body = await response.json();
-      if (body && typeof body.message === "string") message = body.message;
-    } catch {}
-    throw new Error(message);
-  }
-  if (response.status === 204) return null;
-  return response.json();
-}
 
 function setStatus(kind, text) {
   elements.status.className = "status " + kind;
@@ -185,7 +175,7 @@ function renderWorkList() {
     button.addEventListener("click", function () {
       if (state.workflowBusy || state.work?.work.id === summary.work.id) return;
       void runWorkflow(function () {
-        return api("/v1/works/" + encodeURIComponent(summary.work.id));
+        return workspaceApi.getWork(summary.work.id);
       });
     });
     elements.workList.appendChild(button);
@@ -357,7 +347,7 @@ function collectStrategyItems() {
 }
 
 async function refreshWorkList() {
-  const result = await api("/v1/works");
+  const result = await workspaceApi.listWorks();
   state.workSummaries = result.works;
   renderWorkList();
 }
@@ -370,7 +360,7 @@ async function loadWorks() {
   }
   const saved = localStorage.getItem("firefly.workId");
   const selected = state.workSummaries.find(function (summary) { return summary.work.id === saved; }) || state.workSummaries[0];
-  const view = await api("/v1/works/" + encodeURIComponent(selected.work.id));
+  const view = await workspaceApi.getWork(selected.work.id);
   renderWork(view);
 }
 
@@ -889,49 +879,6 @@ function failAgentTurn(turn, message) {
   content.appendChild(failure);
 }
 
-async function streamAgentMessage(path, message, onRuntimeEvent) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "content-type": "application/json", accept: "text/event-stream" },
-    body: JSON.stringify({ message: message }),
-  });
-  if (!response.ok || !response.body) {
-    let errorMessage = "请求失败（HTTP " + response.status + "）";
-    try {
-      const body = await response.json();
-      if (body && typeof body.message === "string") errorMessage = body.message;
-    } catch {}
-    throw new Error(errorMessage);
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let completion;
-  while (true) {
-    const chunk = await reader.read();
-    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done }).replace(/\r\n/g, "\n");
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    frames.forEach(function (frame) {
-      let eventName = "message";
-      const data = [];
-      frame.split("\n").forEach(function (line) {
-        if (line.startsWith("event:")) eventName = line.slice(6).trim();
-        if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
-      });
-      if (data.length === 0) return;
-      const payload = JSON.parse(data.join("\n"));
-      if (eventName === "runtime") onRuntimeEvent(payload);
-      if (eventName === "complete") completion = payload;
-      if (eventName === "error") throw new Error(payload.message || "Agent 流式请求失败。");
-    });
-    if (chunk.done) break;
-  }
-  if (!completion) throw new Error("Agent 流在完成前意外结束。");
-  return completion;
-}
-
 function clearMessages() {
   elements.messages.querySelectorAll(".message, .agent-turn").forEach(function (node) { node.remove(); });
   if (elements.welcome) elements.welcome.hidden = false;
@@ -1000,11 +947,7 @@ function updateSession(summary) {
 
 async function createSession(workId) {
   const selectedWorkId = workId === undefined ? state.work?.work.id : workId;
-  const body = await api("/v1/sessions", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(selectedWorkId ? { workId: selectedWorkId } : {}),
-  });
+  const body = await agentApi.createSession(selectedWorkId);
   updateSession(body.session);
   clearMessages();
 }
@@ -1022,14 +965,14 @@ async function restoreSession() {
     return;
   }
   try {
-    const session = await api("/v1/sessions/" + encodeURIComponent(saved));
+    const session = await agentApi.getSession(saved);
     const selectedWorkId = state.work?.work.id || null;
     if ((session.session.workId || null) !== selectedWorkId) {
       await createSession(selectedWorkId || undefined);
       return;
     }
     updateSession(session.session);
-    const transcript = await api("/v1/sessions/" + encodeURIComponent(saved) + "/transcript");
+    const transcript = await agentApi.getTranscript(saved);
     restoreTranscriptTimeline(transcript.messages);
   } catch {
     localStorage.removeItem("firefly.sessionId");
@@ -1073,8 +1016,8 @@ async function sendMessage(text) {
   elements.prompt.style.height = "auto";
   const turn = createAgentTurn();
   try {
-    const result = await streamAgentMessage(
-      "/v1/sessions/" + encodeURIComponent(state.sessionId) + "/messages-stream",
+    const result = await agentApi.streamMessage(
+      state.sessionId,
       message,
       function (event) {
         if (event.type === "tool_start") addToolEvent(turn, event);
@@ -1092,101 +1035,27 @@ async function sendMessage(text) {
   }
 }
 
-elements.composer.addEventListener("submit", function (event) {
-  event.preventDefault();
-  void sendMessage(elements.prompt.value);
+bindAgentPanel({
+  elements,
+  state,
+  sendMessage,
+  createSession,
+  updateSession,
+  clearMessages,
+  clearError,
+  showError,
+  setBusy,
 });
 
-elements.prompt.addEventListener("keydown", function (event) {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    elements.composer.requestSubmit();
-  }
-});
-
-elements.prompt.addEventListener("input", function () {
-  elements.prompt.style.height = "auto";
-  elements.prompt.style.height = Math.min(elements.prompt.scrollHeight, 180) + "px";
-});
-
-document.querySelectorAll("[data-prompt]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    elements.prompt.value = button.dataset.prompt || "";
-    elements.prompt.focus();
-  });
-});
-
-elements.newSession.addEventListener("click", async function () {
-  if (state.busy) return;
-  clearError();
-  setBusy(true);
-  try { await createSession(); } catch (error) { showError(error); }
-  finally { setBusy(false); elements.prompt.focus(); }
-});
-
-elements.resetSession.addEventListener("click", async function () {
-  if (state.busy || !state.sessionId) return;
-  if (!window.confirm("确认清空当前会话记录？此操作不可撤销。")) return;
-  clearError();
-  setBusy(true);
-  try {
-    const result = await api("/v1/sessions/" + encodeURIComponent(state.sessionId) + "/reset", { method: "POST" });
-    updateSession(result.session);
-    clearMessages();
-  } catch (error) { showError(error); }
-  finally { setBusy(false); elements.prompt.focus(); }
-});
-
-document.querySelectorAll("[data-workspace-view]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    document.querySelectorAll("[data-workspace-view]").forEach(function (candidate) {
-      candidate.classList.toggle("active", candidate === button);
-      candidate.setAttribute("aria-current", candidate === button ? "page" : "false");
-    });
-    document.querySelectorAll("[data-workspace-panel]").forEach(function (view) {
-      view.hidden = view.dataset.workspacePanel !== button.dataset.workspaceView;
-    });
-  });
-});
-
-document.querySelectorAll("[data-mobile-target]").forEach(function (button) {
-  button.addEventListener("click", function () {
-    elements.workspaceShell.dataset.mobilePane = button.dataset.mobileTarget;
-    document.querySelectorAll("[data-mobile-target]").forEach(function (candidate) {
-      candidate.classList.toggle("active", candidate === button);
-    });
-  });
-});
-
-elements.workSearch.addEventListener("input", function () {
-  state.workFilter = elements.workSearch.value;
-  renderWorkList();
-});
-
-function applyTheme(theme) {
-  const resolved = theme === "dark" ? "dark" : "light";
-  document.documentElement.dataset.theme = resolved;
-  localStorage.setItem("firefly.theme", resolved);
-  elements.themeToggle.setAttribute("aria-label", resolved === "dark" ? "切换到浅色主题" : "切换到深色主题");
-  elements.themeToggle.title = resolved === "dark" ? "切换到浅色主题" : "切换到深色主题";
-}
-
-applyTheme(localStorage.getItem("firefly.theme") || "light");
-elements.themeToggle.addEventListener("click", function () {
-  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-});
+bindWorkspaceShell({ elements, state, renderWorkList });
 
 function createGoldenWork() {
-  return api("/v1/works", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      vehicleId: "vehicle_firefly_e5_2026_long_range",
-      color: "萤火绿",
-      region: "中国大陆",
-      campaignDate: new Date().toISOString().slice(0, 10),
-      name: "黄金样例家庭出行广告",
-    }),
+  return workspaceApi.createWork({
+    vehicleId: "vehicle_firefly_e5_2026_long_range",
+    color: "萤火绿",
+    region: "中国大陆",
+    campaignDate: new Date().toISOString().slice(0, 10),
+    name: "黄金样例家庭出行广告",
   });
 }
 
@@ -1199,14 +1068,10 @@ elements.newWork.addEventListener("click", startNewWork);
 elements.stateNewWork.addEventListener("click", startNewWork);
 
 function generateStrategy() {
-  return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/generate", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      expectedRevision: state.work.work.revision,
-      audience: elements.audience.value.trim(),
-      theme: elements.theme.value.trim(),
-    }),
+  return workspaceApi.generateStrategy(state.work.work.id, {
+    expectedRevision: state.work.work.revision,
+    audience: elements.audience.value.trim(),
+    theme: elements.theme.value.trim(),
   });
 }
 
@@ -1215,38 +1080,26 @@ elements.regenerateStrategy.addEventListener("click", function () { void runWork
 
 elements.saveStrategy.addEventListener("click", function () {
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy", {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        expectedRevision: state.work.work.revision,
-        audience: elements.audience.value.trim(),
-        theme: elements.theme.value.trim(),
-        items: collectStrategyItems(),
-      }),
+    return workspaceApi.updateStrategy(state.work.work.id, {
+      expectedRevision: state.work.work.revision,
+      audience: elements.audience.value.trim(),
+      theme: elements.theme.value.trim(),
+      items: collectStrategyItems(),
     });
   });
 });
 
 elements.requestApproval.addEventListener("click", function () {
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/approval-request", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: state.work.work.revision }),
-    });
+    return workspaceApi.requestStrategyApproval(state.work.work.id, { expectedRevision: state.work.work.revision });
   });
 });
 
 function decideStrategy(decision) {
-  return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/strategy/decision", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      expectedRevision: state.work.work.revision,
-      decision: decision,
-      comment: decision === "approved" ? "本地竖切人工验收通过" : "请修改后重新提交",
-    }),
+  return workspaceApi.decideStrategy(state.work.work.id, {
+    expectedRevision: state.work.work.revision,
+    decision: decision,
+    comment: decision === "approved" ? "本地竖切人工验收通过" : "请修改后重新提交",
   });
 }
 
@@ -1255,11 +1108,7 @@ elements.rejectStrategy.addEventListener("click", function () { void runWorkflow
 elements.copyWork.addEventListener("click", function () {
   if (!state.work) return;
   void runWorkflow(function () {
-    return api("/v1/works/" + encodeURIComponent(state.work.work.id) + "/copy", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ expectedRevision: state.work.work.revision }),
-    });
+    return workspaceApi.copyWork(state.work.work.id, { expectedRevision: state.work.work.revision });
   });
 });
 
