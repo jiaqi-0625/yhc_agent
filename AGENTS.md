@@ -36,6 +36,19 @@ This repository implements an automotive information-feed advertising production
 
 The confirmed product and implementation specification is in `docs/workspace-v2-product-spec.md`. Treat it as the source of truth for Workspace V2 unless a later decision record explicitly supersedes it.
 
+## Active development tracking and repository maintenance
+
+- The workspace track is maintained in `docs/plans/workspace-track-todo.md`.
+- The task-scoped Agent/dialog track is maintained in `docs/plans/agent-dialog-track-todo.md`.
+- Treat these files as live execution ledgers. Before starting work, update the active task, status, date, branch, and PR; update them again after every push, block, review transition, or merge.
+- Use the stable task IDs from the ledgers in commit messages and PR descriptions when practical.
+- Do not mark a task complete until its PR is merged to `main`, relevant automated checks pass, and the documented acceptance check has been performed.
+- Keep `main` runnable. Start feature branches from the latest `origin/main`, sync before integration, and never mix unrelated track work into one PR.
+- The workspace owner has final maintenance responsibility for shared business schemas and domain transitions. The dialog owner must propose shared contract changes for review instead of creating a parallel type or bypassing the domain layer.
+- Split shared monolith files before sustained parallel work. Until `apps/api/src/server.ts` and the Web `app.js`/`app.css`/`index.html` surfaces are modularized, coordinate edit order explicitly in both ledgers.
+- When a shared Schema, workflow state, API contract, or product boundary changes, update both ledgers and the affected source-of-truth document in the same PR.
+- Record blockers in the relevant ledger on the day they are discovered, including the owner, required decision, and condition for unblocking.
+
 ## Engineering rules
 
 - Use Node.js 22.19 or newer and strict TypeScript.
