@@ -79,6 +79,9 @@ test("business assembly adds strategy tools without exposing an approval decisio
       "request_strategy_approval",
     ],
   );
+  assert.match(agent.state.systemPrompt, /卖点策略生成/u);
+  assert.match(agent.state.systemPrompt, /策略人工审批请求/u);
+  assert.match(agent.state.systemPrompt, /人工审批决策尚未注册/u);
   assert.doesNotMatch(agent.state.tools.map((tool) => tool.name).join(","), /approve_strategy/u);
 });
 

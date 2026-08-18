@@ -51,6 +51,21 @@ function sendJson(response: ServerResponse, statusCode: number, body: unknown): 
   response.end(JSON.stringify(body));
 }
 
+function startEventStream(response: ServerResponse): void {
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store, no-transform",
+    connection: "keep-alive",
+    "x-content-type-options": "nosniff",
+  });
+  response.flushHeaders();
+}
+
+function sendEvent(response: ServerResponse, event: string, data: unknown): void {
+  if (response.writableEnded || response.destroyed) return;
+  response.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -130,6 +145,7 @@ async function handleRequest(
       maturity: "strategy-vertical-slice",
       capabilities: [
         "local_chat",
+        "streaming_chat",
         "session_persistence",
         "lifecycle_events",
         "request_cancellation",
@@ -242,6 +258,39 @@ async function handleRequest(
     request.once("aborted", () => void runtime.abortSession(route.sessionId));
     const result = await runtime.prompt(route.sessionId, body.message);
     sendJson(response, 200, result);
+    return;
+  }
+  if (route && request.method === "POST" && route.action === "messages-stream") {
+    const body = await readJson(request);
+    if (typeof body.message !== "string") throw new Error("Message must be a string.");
+    startEventStream(response);
+    let completed = false;
+    const abort = () => {
+      if (!completed) void runtime.abortSession(route.sessionId);
+    };
+    request.once("aborted", abort);
+    response.once("close", abort);
+    try {
+      const result = await runtime.prompt(route.sessionId, body.message, (event) => {
+        sendEvent(response, "runtime", event);
+      });
+      completed = true;
+      const { events: _events, ...completion } = result;
+      sendEvent(response, "complete", completion);
+    } catch (error) {
+      completed = true;
+      const normalized = error instanceof Error ? error : new Error("Unknown Agent stream error.");
+      sendEvent(response, "error", {
+        code: normalized instanceof LocalAgentCredentialsError ? normalized.code : "AIC-AGENT-STREAM_FAILED",
+        message: normalized.message,
+        retryable: false,
+        charged: false,
+      });
+    } finally {
+      request.off("aborted", abort);
+      response.off("close", abort);
+      if (!response.writableEnded) response.end();
+    }
     return;
   }
   if (route && request.method === "POST" && route.action === "reset") {

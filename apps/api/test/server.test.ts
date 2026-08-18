@@ -40,6 +40,7 @@ test("health and metadata endpoints expose the current bounded vertical slice", 
   assert.equal(meta.maturity, "strategy-vertical-slice");
   assert.deepEqual(meta.capabilities, [
     "local_chat",
+    "streaming_chat",
     "session_persistence",
     "lifecycle_events",
     "request_cancellation",
@@ -78,6 +79,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
+  assert.match(page, /studio-v5-persisted-timeline/u);
 
   const [styleResponse, scriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
@@ -87,7 +89,14 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
-  assert.match(await scriptResponse.text(), /firefly\.workId/u);
+  const script = await scriptResponse.text();
+  assert.match(script, /firefly\.workId/u);
+  assert.match(script, /messages-stream/u);
+  assert.match(script, /读取车型事实快照/u);
+  assert.match(script, /function renderMarkdown/u);
+  assert.match(script, /markdown-table-wrap/u);
+  assert.match(script, /function restoreTranscriptTimeline/u);
+  assert.match(script, /思考完成 · 历史记录/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {
@@ -135,6 +144,34 @@ test("local API creates a session, prompts the mock Pi agent, and restores trans
   assert.equal(transcriptResponse.status, 200);
   const transcript = (await transcriptResponse.json()) as { messages: unknown[] };
   assert.equal(transcript.messages.length, 2);
+});
+
+test("streaming message endpoint emits lifecycle events and a completion payload", async (context) => {
+  const server = await startApiServer(0, "127.0.0.1", new LocalAgentRuntime(testConfig));
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "session_stream_test" }),
+  });
+  const response = await fetch(`${baseUrl}/v1/sessions/session_stream_test/messages-stream`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "流式测试" }),
+  });
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/event-stream/u);
+  const stream = await response.text();
+  assert.match(stream, /event: runtime\ndata: \{"type":"agent_start","occurredAt":"[^"]+"\}/u);
+  assert.match(stream, /"type":"text_delta"/u);
+  assert.match(stream, /event: complete/u);
+  assert.match(stream, /"assistantText":"本地 Mock Agent 已收到：流式测试/u);
+  assert.doesNotMatch(stream, /"events":/u);
 });
 
 test("DeepSeek stays selected while a missing server key blocks model calls with 503", async (context) => {

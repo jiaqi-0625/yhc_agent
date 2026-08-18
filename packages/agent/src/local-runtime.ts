@@ -4,6 +4,7 @@ import { type Agent, type AgentEvent, type AgentMessage, type StreamFn } from "@
 import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
 
 import { createBaseAgent } from "./base-agent.ts";
+import { redactSensitive } from "./factory.ts";
 import {
   LocalAgentCredentialsError,
   loadLocalAgentConfig,
@@ -40,9 +41,27 @@ export interface LocalWorkAgentFactoryContext {
 export type LocalWorkAgentFactory = (context: LocalWorkAgentFactoryContext) => Agent;
 
 export type LocalRuntimeEvent =
-  | { type: "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_end" }
-  | { type: "text_delta"; delta: string }
-  | { type: "tool_start" | "tool_end"; toolName: string; toolCallId: string; isError?: boolean };
+  | {
+      type: "agent_start" | "agent_end" | "turn_start" | "turn_end" | "message_start" | "message_end";
+      occurredAt: string;
+    }
+  | { type: "text_delta"; delta: string; occurredAt: string }
+  | {
+      type: "tool_start";
+      toolName: string;
+      toolCallId: string;
+      input?: unknown;
+      occurredAt: string;
+    }
+  | {
+      type: "tool_end";
+      toolName: string;
+      toolCallId: string;
+      output?: unknown;
+      isError: boolean;
+      durationMs?: number;
+      occurredAt: string;
+    };
 
 export interface LocalPromptResult {
   session: LocalSessionSummary;
@@ -69,9 +88,49 @@ function lastAssistant(messages: readonly AgentMessage[]): AssistantMessage | un
   return message?.role === "assistant" ? message : undefined;
 }
 
-function normalizeEvent(event: AgentEvent): LocalRuntimeEvent | undefined {
+const maximumTimelinePayloadCharacters = 6_000;
+
+export function toTimelinePayload(value: unknown): unknown {
+  const redacted = redactSensitive(value);
+  try {
+    const serialized = JSON.stringify(redacted);
+    if (serialized === undefined || serialized.length <= maximumTimelinePayloadCharacters) return redacted;
+    return `${serialized.slice(0, maximumTimelinePayloadCharacters)}…`;
+  } catch {
+    return "[Unserializable tool payload]";
+  }
+}
+
+export function toPublicTranscript(messages: readonly AgentMessage[]): readonly AgentMessage[] {
+  return messages.map((message) => {
+    const redacted = redactSensitive(structuredClone(message)) as AgentMessage;
+    if (redacted.role === "assistant") {
+      return {
+        ...redacted,
+        content: redacted.content
+          .filter((part) => part.type !== "thinking")
+          .map((part) => part.type === "toolCall"
+            ? { ...part, arguments: toTimelinePayload(part.arguments) }
+            : part),
+      } as AgentMessage;
+    }
+    if (redacted.role === "toolResult") {
+      return {
+        ...redacted,
+        content: redacted.content.map((part) => part.type === "text"
+          ? { ...part, text: String(toTimelinePayload(part.text)) }
+          : part),
+        details: toTimelinePayload(redacted.details),
+      } as AgentMessage;
+    }
+    return redacted;
+  });
+}
+
+function normalizeEvent(event: AgentEvent, toolStartedAt: Map<string, number>): LocalRuntimeEvent | undefined {
+  const occurredAt = new Date().toISOString();
   if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-    return { type: "text_delta", delta: event.assistantMessageEvent.delta };
+    return { type: "text_delta", delta: event.assistantMessageEvent.delta, occurredAt };
   }
   if (
     event.type === "agent_start" ||
@@ -81,17 +140,29 @@ function normalizeEvent(event: AgentEvent): LocalRuntimeEvent | undefined {
     event.type === "message_start" ||
     event.type === "message_end"
   ) {
-    return { type: event.type };
+    return { type: event.type, occurredAt };
   }
   if (event.type === "tool_execution_start") {
-    return { type: "tool_start", toolName: event.toolName, toolCallId: event.toolCallId };
+    toolStartedAt.set(event.toolCallId, Date.now());
+    return {
+      type: "tool_start",
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      input: toTimelinePayload(event.args),
+      occurredAt,
+    };
   }
   if (event.type === "tool_execution_end") {
+    const startedAt = toolStartedAt.get(event.toolCallId);
+    toolStartedAt.delete(event.toolCallId);
     return {
       type: "tool_end",
       toolName: event.toolName,
       toolCallId: event.toolCallId,
+      output: toTimelinePayload(event.result),
       isError: event.isError,
+      ...(startedAt === undefined ? {} : { durationMs: Date.now() - startedAt }),
+      occurredAt,
     };
   }
   return undefined;
@@ -190,7 +261,7 @@ export class LocalAgentRuntime {
 
   async getTranscript(sessionId: string): Promise<readonly AgentMessage[] | undefined> {
     const active = await this.#getActive(sessionId);
-    return active ? structuredClone(active.agent.state.messages) : undefined;
+    return active ? toPublicTranscript(active.agent.state.messages) : undefined;
   }
 
   async prompt(
@@ -208,8 +279,9 @@ export class LocalAgentRuntime {
     }
 
     const events: LocalRuntimeEvent[] = [];
+    const toolStartedAt = new Map<string, number>();
     const unsubscribe = active.agent.subscribe((event) => {
-      const normalized = normalizeEvent(event);
+      const normalized = normalizeEvent(event, toolStartedAt);
       if (normalized) {
         events.push(normalized);
         onEvent?.(normalized);

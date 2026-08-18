@@ -393,22 +393,441 @@ function messageText(message) {
     .join("\n");
 }
 
+function appendInlineMarkdown(container, source) {
+  const pattern = /(`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\))/gu;
+  let cursor = 0;
+  let match;
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > cursor) container.appendChild(document.createTextNode(source.slice(cursor, match.index)));
+    if (match[2] !== undefined) {
+      const code = document.createElement("code");
+      code.textContent = match[2];
+      container.appendChild(code);
+    } else if (match[3] !== undefined || match[4] !== undefined) {
+      const strong = document.createElement("strong");
+      appendInlineMarkdown(strong, match[3] || match[4]);
+      container.appendChild(strong);
+    } else if (match[5] !== undefined) {
+      const emphasis = document.createElement("em");
+      appendInlineMarkdown(emphasis, match[5]);
+      container.appendChild(emphasis);
+    } else {
+      const link = document.createElement("a");
+      link.textContent = match[6];
+      link.href = match[7];
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      container.appendChild(link);
+    }
+    cursor = pattern.lastIndex;
+  }
+  if (cursor < source.length) container.appendChild(document.createTextNode(source.slice(cursor)));
+}
+
+function tableCells(line) {
+  return line.trim().replace(/^\|/u, "").replace(/\|$/u, "").split("|").map(function (cell) { return cell.trim(); });
+}
+
+function isTableSeparator(line) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(line);
+}
+
+function isMarkdownBlockStart(lines, index) {
+  const line = lines[index] || "";
+  return /^\s*```/u.test(line)
+    || /^\s{0,3}#{1,6}\s+/u.test(line)
+    || /^\s{0,3}>\s?/u.test(line)
+    || /^\s*[-+*]\s+/u.test(line)
+    || /^\s*\d+[.)]\s+/u.test(line)
+    || /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/u.test(line)
+    || (line.includes("|") && isTableSeparator(lines[index + 1] || ""));
+}
+
+function renderMarkdown(container, source) {
+  container.replaceChildren();
+  container.classList.add("markdown-body");
+  const lines = String(source || "").replace(/\r\n?/gu, "\n").split("\n");
+  let index = 0;
+  while (index < lines.length) {
+    if (!lines[index].trim()) { index += 1; continue; }
+    const fence = lines[index].match(/^\s*```([^\s`]*)\s*$/u);
+    if (fence) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```\s*$/u.test(lines[index])) codeLines.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      if (fence[1]) code.dataset.language = fence[1];
+      code.textContent = codeLines.join("\n");
+      pre.appendChild(code);
+      container.appendChild(pre);
+      continue;
+    }
+    const heading = lines[index].match(/^\s{0,3}(#{1,6})\s+(.+)$/u);
+    if (heading) {
+      const node = document.createElement("h" + heading[1].length);
+      appendInlineMarkdown(node, heading[2].replace(/\s+#+\s*$/u, ""));
+      container.appendChild(node);
+      index += 1;
+      continue;
+    }
+    if (/^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/u.test(lines[index])) {
+      container.appendChild(document.createElement("hr"));
+      index += 1;
+      continue;
+    }
+    if (/^\s{0,3}>\s?/u.test(lines[index])) {
+      const quote = document.createElement("blockquote");
+      const quoteLines = [];
+      while (index < lines.length && /^\s{0,3}>\s?/u.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s{0,3}>\s?/u, ""));
+        index += 1;
+      }
+      renderMarkdown(quote, quoteLines.join("\n"));
+      container.appendChild(quote);
+      continue;
+    }
+    const unordered = lines[index].match(/^\s*[-+*]\s+(.+)$/u);
+    const ordered = lines[index].match(/^\s*\d+[.)]\s+(.+)$/u);
+    if (unordered || ordered) {
+      const list = document.createElement(unordered ? "ul" : "ol");
+      const itemPattern = unordered ? /^\s*[-+*]\s+(.+)$/u : /^\s*\d+[.)]\s+(.+)$/u;
+      let item;
+      while (index < lines.length && (item = lines[index].match(itemPattern))) {
+        const listItem = document.createElement("li");
+        appendInlineMarkdown(listItem, item[1]);
+        list.appendChild(listItem);
+        index += 1;
+      }
+      container.appendChild(list);
+      continue;
+    }
+    if (lines[index].includes("|") && isTableSeparator(lines[index + 1] || "")) {
+      const headers = tableCells(lines[index]);
+      index += 2;
+      const table = document.createElement("table");
+      const head = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      headers.forEach(function (header) {
+        const cell = document.createElement("th");
+        appendInlineMarkdown(cell, header);
+        headRow.appendChild(cell);
+      });
+      head.appendChild(headRow);
+      table.appendChild(head);
+      const body = document.createElement("tbody");
+      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
+        const row = document.createElement("tr");
+        tableCells(lines[index]).forEach(function (value) {
+          const cell = document.createElement("td");
+          appendInlineMarkdown(cell, value);
+          row.appendChild(cell);
+        });
+        body.appendChild(row);
+        index += 1;
+      }
+      table.appendChild(body);
+      const wrapper = document.createElement("div");
+      wrapper.className = "markdown-table-wrap";
+      wrapper.appendChild(table);
+      container.appendChild(wrapper);
+      continue;
+    }
+    const paragraphLines = [];
+    while (index < lines.length && lines[index].trim() && (paragraphLines.length === 0 || !isMarkdownBlockStart(lines, index))) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    const paragraph = document.createElement("p");
+    paragraphLines.forEach(function (line, lineIndex) {
+      if (lineIndex > 0) paragraph.appendChild(document.createElement("br"));
+      appendInlineMarkdown(paragraph, line);
+    });
+    container.appendChild(paragraph);
+  }
+}
+
 function appendMessage(role, text, pending) {
   if (elements.welcome) elements.welcome.hidden = true;
   const row = document.createElement("article");
   row.className = "message " + role + (pending ? " pending" : "");
   const bubble = document.createElement("div");
   bubble.className = "message-bubble";
-  bubble.textContent = text;
+  if (role === "assistant" && !pending) renderMarkdown(bubble, text);
+  else bubble.textContent = text;
   row.appendChild(bubble);
   elements.messages.appendChild(row);
   elements.messages.scrollTop = elements.messages.scrollHeight;
   return row;
 }
 
+const toolLabels = {
+  get_vehicle_snapshot: "读取车型事实快照",
+  validate_vehicle_claims: "校验车型宣传表述",
+  generate_strategy: "生成卖点策略",
+  validate_strategy: "校验卖点策略",
+  request_strategy_approval: "提交人工审批",
+};
+
+function elapsedSeconds(startedAt) {
+  return Math.max(1, Math.round((performance.now() - startedAt) / 1000));
+}
+
+function payloadText(value) {
+  if (value === undefined) return "—";
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value, null, 2); }
+  catch { return "[无法显示此结果]"; }
+}
+
+function appendTimelineEvent(turn, className) {
+  const event = document.createElement("div");
+  event.className = "timeline-event " + className;
+  const dot = document.createElement("span");
+  dot.className = "timeline-dot";
+  dot.setAttribute("aria-hidden", "true");
+  const content = document.createElement("div");
+  content.className = "timeline-content";
+  event.append(dot, content);
+  turn.root.appendChild(event);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+  return content;
+}
+
+function appendThinkingEvent(turn) {
+  if (turn.thinking) return;
+  const content = appendTimelineEvent(turn, "thinking-event active");
+  const details = document.createElement("details");
+  details.className = "thinking-details";
+  const row = document.createElement("summary");
+  row.className = "thinking-row";
+  const spinner = document.createElement("span");
+  spinner.className = "thinking-spinner";
+  spinner.setAttribute("aria-hidden", "true");
+  const label = document.createElement("span");
+  label.textContent = "正在思考…";
+  row.append(spinner, label);
+  const safeSummary = document.createElement("p");
+  safeSummary.textContent = "模型正在规划下一步动作；隐藏思维链不会展示。";
+  details.append(row, safeSummary);
+  content.appendChild(details);
+  turn.thinking = { content, details, label, safeSummary, startedAt: performance.now() };
+}
+
+function finishThinkingEvent(turn) {
+  if (!turn.thinking) return;
+  const seconds = elapsedSeconds(turn.thinking.startedAt);
+  turn.thinking.label.textContent = "思考了 " + seconds + " 秒";
+  turn.thinking.safeSummary.textContent = "已完成响应规划与工具选择；为保护安全与隐私，不展示隐藏思维链。";
+  turn.thinking.content.parentElement.classList.remove("active");
+  const spinner = turn.thinking.content.querySelector(".thinking-spinner");
+  if (spinner) spinner.remove();
+  turn.thinking = null;
+}
+
+function createAgentTurn(startLiveThinking) {
+  if (elements.welcome) elements.welcome.hidden = true;
+  const root = document.createElement("article");
+  root.className = "agent-turn";
+  elements.messages.appendChild(root);
+  const turn = { root, thinking: null, tools: new Map() };
+  if (startLiveThinking !== false) appendThinkingEvent(turn);
+  return turn;
+}
+
+function appendHistoricalThinkingEvent(turn) {
+  const content = appendTimelineEvent(turn, "thinking-event historical");
+  const details = document.createElement("details");
+  details.className = "thinking-details";
+  const summary = document.createElement("summary");
+  summary.className = "thinking-row";
+  const label = document.createElement("span");
+  label.textContent = "思考完成 · 历史记录";
+  const safeSummary = document.createElement("p");
+  safeSummary.textContent = "该节点由持久化会话记录重建；隐藏思维链不会展示。";
+  summary.appendChild(label);
+  details.append(summary, safeSummary);
+  content.appendChild(details);
+}
+
+function addToolEvent(turn, event) {
+  finishThinkingEvent(turn);
+  const content = appendTimelineEvent(turn, "tool-event active");
+  const details = document.createElement("details");
+  details.className = "tool-call";
+  details.open = true;
+  const summary = document.createElement("summary");
+  const heading = document.createElement("span");
+  heading.className = "tool-heading";
+  const title = document.createElement("strong");
+  title.textContent = toolLabels[event.toolName] || event.toolName;
+  const name = document.createElement("code");
+  name.textContent = event.toolName;
+  heading.append(title, name);
+  const status = document.createElement("span");
+  status.className = "tool-status";
+  status.textContent = "运行中";
+  summary.append(heading, status);
+  const io = document.createElement("div");
+  io.className = "tool-io";
+  const inputRow = document.createElement("div");
+  inputRow.className = "tool-io-row";
+  const inputLabel = document.createElement("span");
+  inputLabel.textContent = "IN";
+  const input = document.createElement("pre");
+  input.textContent = payloadText(event.input);
+  inputRow.append(inputLabel, input);
+  const outputRow = document.createElement("div");
+  outputRow.className = "tool-io-row output";
+  const outputLabel = document.createElement("span");
+  outputLabel.textContent = "OUT";
+  const output = document.createElement("pre");
+  output.textContent = "等待工具返回…";
+  outputRow.append(outputLabel, output);
+  io.append(inputRow, outputRow);
+  details.append(summary, io);
+  content.appendChild(details);
+  turn.tools.set(event.toolCallId, { content, details, status, output });
+}
+
+function finishToolEvent(turn, event, resumeThinking) {
+  const tool = turn.tools.get(event.toolCallId);
+  if (!tool) return;
+  tool.content.parentElement.classList.remove("active");
+  tool.content.parentElement.classList.toggle("failed", Boolean(event.isError));
+  const outputText = payloadText(event.output);
+  const errorStatus = /(?:POLICY|策略.{0,8}(?:阻止|拒绝)|blocked|not allowed)/iu.test(outputText)
+    ? "被策略阻止"
+    : /(?:not found|未找到)/iu.test(outputText)
+      ? "未找到"
+      : "失败";
+  tool.status.textContent = event.isError
+    ? errorStatus
+    : event.historical
+      ? "已完成 · 历史"
+    : event.durationMs === undefined
+      ? "完成"
+      : (event.durationMs / 1000).toFixed(1) + "s";
+  tool.output.textContent = outputText;
+  if (!event.isError) tool.details.open = false;
+  if (resumeThinking !== false) appendThinkingEvent(turn);
+}
+
+function finishAgentTurn(turn, text) {
+  finishThinkingEvent(turn);
+  const content = appendTimelineEvent(turn, "answer-event");
+  const answer = document.createElement("div");
+  answer.className = "timeline-answer";
+  renderMarkdown(answer, text || "Agent 未返回文本内容。");
+  content.appendChild(answer);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
+}
+
+function failAgentTurn(turn, message) {
+  finishThinkingEvent(turn);
+  const content = appendTimelineEvent(turn, "failure-event failed");
+  const failure = document.createElement("div");
+  failure.className = "timeline-failure";
+  failure.textContent = message;
+  content.appendChild(failure);
+}
+
+async function streamAgentMessage(path, message, onRuntimeEvent) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream" },
+    body: JSON.stringify({ message: message }),
+  });
+  if (!response.ok || !response.body) {
+    let errorMessage = "请求失败（HTTP " + response.status + "）";
+    try {
+      const body = await response.json();
+      if (body && typeof body.message === "string") errorMessage = body.message;
+    } catch {}
+    throw new Error(errorMessage);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let completion;
+  while (true) {
+    const chunk = await reader.read();
+    buffer += decoder.decode(chunk.value || new Uint8Array(), { stream: !chunk.done }).replace(/\r\n/g, "\n");
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() || "";
+    frames.forEach(function (frame) {
+      let eventName = "message";
+      const data = [];
+      frame.split("\n").forEach(function (line) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+      });
+      if (data.length === 0) return;
+      const payload = JSON.parse(data.join("\n"));
+      if (eventName === "runtime") onRuntimeEvent(payload);
+      if (eventName === "complete") completion = payload;
+      if (eventName === "error") throw new Error(payload.message || "Agent 流式请求失败。");
+    });
+    if (chunk.done) break;
+  }
+  if (!completion) throw new Error("Agent 流在完成前意外结束。");
+  return completion;
+}
+
 function clearMessages() {
-  elements.messages.querySelectorAll(".message").forEach(function (node) { node.remove(); });
+  elements.messages.querySelectorAll(".message, .agent-turn").forEach(function (node) { node.remove(); });
   if (elements.welcome) elements.welcome.hidden = false;
+}
+
+function assistantToolCalls(message) {
+  if (!message || !Array.isArray(message.content)) return [];
+  return message.content.filter(function (part) {
+    return part && part.type === "toolCall" && typeof part.id === "string" && typeof part.name === "string";
+  });
+}
+
+function restoreTranscriptTimeline(messages) {
+  clearMessages();
+  let turn = null;
+  messages.forEach(function (message) {
+    if (message.role === "user") {
+      const text = messageText(message);
+      if (text) appendMessage("user", text, false);
+      turn = createAgentTurn(false);
+      return;
+    }
+    if (message.role === "assistant") {
+      if (!turn) turn = createAgentTurn(false);
+      const calls = assistantToolCalls(message);
+      appendHistoricalThinkingEvent(turn);
+      if (calls.length > 0) {
+        calls.forEach(function (call) {
+          addToolEvent(turn, {
+            toolName: call.name,
+            toolCallId: call.id,
+            input: call.arguments,
+            historical: true,
+          });
+        });
+        return;
+      }
+      const text = messageText(message);
+      if (text) finishAgentTurn(turn, text);
+      turn = null;
+      return;
+    }
+    if (message.role === "toolResult" && turn) {
+      finishToolEvent(turn, {
+        toolName: message.toolName,
+        toolCallId: message.toolCallId,
+        output: message.details === undefined ? message.content : message.details,
+        isError: Boolean(message.isError),
+        historical: true,
+      }, false);
+    }
+  });
 }
 
 function updateSession(summary) {
@@ -455,13 +874,7 @@ async function restoreSession() {
     }
     updateSession(session.session);
     const transcript = await api("/v1/sessions/" + encodeURIComponent(saved) + "/transcript");
-    clearMessages();
-    transcript.messages.forEach(function (message) {
-      if (message.role === "user" || message.role === "assistant") {
-        const text = messageText(message);
-        if (text) appendMessage(message.role, text, false);
-      }
-    });
+    restoreTranscriptTimeline(transcript.messages);
   } catch {
     localStorage.removeItem("firefly.sessionId");
     await createSession();
@@ -502,18 +915,20 @@ async function sendMessage(text) {
   appendMessage("user", message, false);
   elements.prompt.value = "";
   elements.prompt.style.height = "auto";
-  const pending = appendMessage("assistant", "Agent 正在处理…", true);
+  const turn = createAgentTurn();
   try {
-    const result = await api("/v1/sessions/" + encodeURIComponent(state.sessionId) + "/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ message: message }),
-    });
-    pending.remove();
-    appendMessage("assistant", result.assistantText || "Agent 未返回文本内容。", false);
+    const result = await streamAgentMessage(
+      "/v1/sessions/" + encodeURIComponent(state.sessionId) + "/messages-stream",
+      message,
+      function (event) {
+        if (event.type === "tool_start") addToolEvent(turn, event);
+        if (event.type === "tool_end") finishToolEvent(turn, event);
+      },
+    );
+    finishAgentTurn(turn, result.assistantText);
     updateSession(result.session);
   } catch (error) {
-    pending.remove();
+    failAgentTurn(turn, error instanceof Error ? error.message : "Agent 请求失败。");
     showError(error);
   } finally {
     setBusy(false);

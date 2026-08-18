@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 
 import {
@@ -13,10 +13,40 @@ import {
   LocalAgentRuntime,
   LocalSessionStore,
   loadLocalAgentConfig,
+  toPublicTranscript,
+  toTimelinePayload,
   toPublicLocalAgentConfig,
   type LocalAgentConfig,
   type LocalModelRuntime,
 } from "../src/index.ts";
+
+test("timeline payloads are redacted and bounded before leaving the runtime", () => {
+  assert.deepEqual(
+    toTimelinePayload({ apiKey: "credential-placeholder", nested: { safe: "ok" } }),
+    { apiKey: "[REDACTED]", nested: { safe: "ok" } },
+  );
+  const bounded = toTimelinePayload({ value: "x".repeat(7_000) });
+  assert.equal(typeof bounded, "string");
+  assert.ok((bounded as string).length <= 6_001);
+});
+
+test("public transcripts remove hidden reasoning and sanitize tool payloads", () => {
+  const transcript = toPublicTranscript([
+    {
+      role: "assistant",
+      content: [
+        { type: "thinking", thinking: "hidden reasoning", thinkingSignature: "reasoning_content" },
+        { type: "text", text: "可见回答" },
+        { type: "toolCall", id: "call_1", name: "safe_tool", arguments: { apiKey: "credential-placeholder" } },
+      ],
+    },
+  ] as unknown as AgentMessage[]);
+  const serialized = JSON.stringify(transcript);
+  assert.doesNotMatch(serialized, /hidden reasoning/u);
+  assert.doesNotMatch(serialized, /credential-placeholder/u);
+  assert.match(serialized, /可见回答/u);
+  assert.match(serialized, /\[REDACTED\]/u);
+});
 
 test("local configuration defaults the main Agent to DeepSeek without exposing credentials", () => {
   const config = loadLocalAgentConfig({});
