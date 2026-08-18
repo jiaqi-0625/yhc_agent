@@ -52,9 +52,9 @@ test("health and metadata endpoints expose the current bounded vertical slice", 
   assert.deepEqual(meta.domainTools, [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
-    "generate_strategy",
+    "propose_strategy_generation",
     "validate_strategy",
-    "request_strategy_approval",
+    "propose_strategy_approval",
   ]);
   assert.deepEqual(meta.boundaries, {
     publishesAds: false,
@@ -79,7 +79,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /studio-v5-persisted-timeline/u);
+  assert.match(page, /studio-v6-action-proposals/u);
 
   const [styleResponse, scriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
@@ -97,6 +97,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /markdown-table-wrap/u);
   assert.match(script, /function restoreTranscriptTimeline/u);
   assert.match(script, /思考完成 · 历史记录/u);
+  assert.match(script, /function executeActionProposal/u);
+  assert.match(script, /确认生成策略/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {

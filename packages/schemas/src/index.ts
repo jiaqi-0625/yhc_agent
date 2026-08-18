@@ -219,6 +219,46 @@ export const StrategyApprovalRequestSchema = Type.Object(
 );
 export type StrategyApprovalRequest = Static<typeof StrategyApprovalRequestSchema>;
 
+export const ProposeStrategyGenerationRequestSchema = Type.Object(
+  {
+    audience: NonEmptyString,
+    theme: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+export type ProposeStrategyGenerationRequest = Static<typeof ProposeStrategyGenerationRequestSchema>;
+
+export const ProposeStrategyApprovalRequestSchema = Type.Object({}, { additionalProperties: false });
+export type ProposeStrategyApprovalRequest = Static<typeof ProposeStrategyApprovalRequestSchema>;
+
+export const StrategyActionProposalSchema = Type.Union([
+  Type.Object(
+    {
+      schemaVersion: Type.Literal(1),
+      kind: Type.Literal("action_proposal"),
+      action: Type.Literal("generate_strategy"),
+      label: Type.Literal("生成卖点策略草稿"),
+      summary: NonEmptyString,
+      expectedRevision: Type.Integer({ minimum: 1 }),
+      payload: GenerateStrategyRequestSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      schemaVersion: Type.Literal(1),
+      kind: Type.Literal("action_proposal"),
+      action: Type.Literal("request_strategy_approval"),
+      label: Type.Literal("提交卖点策略人工审批"),
+      summary: NonEmptyString,
+      expectedRevision: Type.Integer({ minimum: 1 }),
+      payload: StrategyApprovalRequestSchema,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type StrategyActionProposal = Static<typeof StrategyActionProposalSchema>;
+
 export const ValidateStrategyRequestSchema = Type.Object({}, { additionalProperties: false });
 export type ValidateStrategyRequest = Static<typeof ValidateStrategyRequestSchema>;
 

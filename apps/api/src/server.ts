@@ -157,9 +157,9 @@ async function handleRequest(
       domainTools: [
         "get_vehicle_snapshot",
         "validate_vehicle_claims",
-        "generate_strategy",
+        "propose_strategy_generation",
         "validate_strategy",
-        "request_strategy_approval",
+        "propose_strategy_approval",
       ],
       agentDomainToolsLoaded: runtime.domainToolsAvailable,
       model: runtime.publicConfig(),

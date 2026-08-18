@@ -15,7 +15,7 @@ Local-first Agent framework built on Pi Agent Core for the automotive informatio
 - Persistent business works stored separately from Agent transcripts.
 - A built-in fictional golden vehicle sample with sourced fixed/extended claims and prohibited expressions.
 - Versioned strategy generation, validation, human editing/locking, regeneration, approval request, rejection, and approval.
-- Optional `generate_strategy`, `validate_strategy`, and `request_strategy_approval` Agent tools; the model has no approval-decision tool.
+- Agent tools propose strategy generation or approval through explicit action cards; only read-only validation runs directly, and the model has no approval-decision tool.
 - Restricted vehicle snapshot and claim validation tools remain available as a separate optional business assembly.
 - Unit and integration tests that require no model credentials.
 
@@ -138,7 +138,7 @@ Product UI
        -> work-bound session: policy-gated vehicle and strategy tools
 ```
 
-Read [docs/architecture.md](docs/architecture.md) for component responsibilities and [docs/decisions/open-decisions.md](docs/decisions/open-decisions.md) for decisions that need business or infrastructure input before external model integration.
+Read [docs/architecture.md](docs/architecture.md) for component responsibilities, [docs/tracks/agent-dialog-track-todo.md](docs/tracks/agent-dialog-track-todo.md) for the Agent dialog development track, and [docs/decisions/open-decisions.md](docs/decisions/open-decisions.md) for decisions that need business or infrastructure input before external model integration.
 
 ## Security model
 

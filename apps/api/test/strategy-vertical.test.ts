@@ -218,9 +218,9 @@ test("work-bound Agent sessions load only the advertising domain tools", async (
   assert.deepEqual(sessionBody.session.toolNames, [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
-    "generate_strategy",
+    "propose_strategy_generation",
     "validate_strategy",
-    "request_strategy_approval",
+    "propose_strategy_approval",
   ]);
   assert.doesNotMatch(sessionBody.session.toolNames.join(","), /bash|shell|http|browser|approve_strategy/u);
 

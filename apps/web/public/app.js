@@ -141,6 +141,7 @@ function setWorkflowBusy(busy) {
     elements.stateNewWork,
   ].forEach(function (button) { button.disabled = busy; });
   elements.workList.querySelectorAll("button").forEach(function (button) { button.disabled = busy; });
+  refreshActionProposalAvailability();
 }
 
 function shortWorkId(workId) {
@@ -272,6 +273,7 @@ function renderWork(view) {
     elements.agentContextName.textContent = "尚未绑定项目";
     updateStages(null);
     renderWorkList();
+    refreshActionProposalAvailability();
     return;
   }
   const work = view.work;
@@ -313,6 +315,7 @@ function renderWork(view) {
     elements.strategySetup.hidden = false;
     elements.strategyEditor.hidden = true;
     renderWorkList();
+    refreshActionProposalAvailability();
     return;
   }
   const editable = work.status === "strategy_draft";
@@ -339,6 +342,7 @@ function renderWork(view) {
         ? "策略已冻结，等待审核人员决策。"
         : "锁定的卖点在模型重新生成时不会被覆盖。";
   renderWorkList();
+  refreshActionProposalAvailability();
 }
 
 function collectStrategyItems() {
@@ -565,9 +569,9 @@ function appendMessage(role, text, pending) {
 const toolLabels = {
   get_vehicle_snapshot: "读取车型事实快照",
   validate_vehicle_claims: "校验车型宣传表述",
-  generate_strategy: "生成卖点策略",
+  propose_strategy_generation: "建议生成卖点策略",
   validate_strategy: "校验卖点策略",
-  request_strategy_approval: "提交人工审批",
+  propose_strategy_approval: "建议提交人工审批",
 };
 
 function elapsedSeconds(startedAt) {
@@ -688,7 +692,152 @@ function addToolEvent(turn, event) {
   io.append(inputRow, outputRow);
   details.append(summary, io);
   content.appendChild(details);
-  turn.tools.set(event.toolCallId, { content, details, status, output });
+  turn.tools.set(event.toolCallId, {
+    content,
+    details,
+    status,
+    output,
+    toolName: event.toolName,
+    input: event.input,
+  });
+}
+
+function extractActionProposal(value) {
+  const candidates = [value, value && typeof value === "object" ? value.details : undefined];
+  if (value && typeof value === "object" && Array.isArray(value.content)) {
+    value.content.forEach(function (part) {
+      if (!part || part.type !== "text" || typeof part.text !== "string") return;
+      try { candidates.push(JSON.parse(part.text)); } catch {}
+    });
+  }
+  return candidates.find(function (candidate) {
+    return candidate
+      && typeof candidate === "object"
+      && candidate.schemaVersion === 1
+      && candidate.kind === "action_proposal"
+      && (candidate.action === "generate_strategy" || candidate.action === "request_strategy_approval")
+      && Number.isInteger(candidate.expectedRevision)
+      && candidate.payload
+      && typeof candidate.payload === "object";
+  });
+}
+
+function proposalEndpoint(proposal) {
+  if (!state.work) return null;
+  const workId = encodeURIComponent(state.work.work.id);
+  return proposal.action === "generate_strategy"
+    ? "/v1/works/" + workId + "/strategy/generate"
+    : "/v1/works/" + workId + "/strategy/approval-request";
+}
+
+function proposalResultText(proposal, view) {
+  const strategy = view.strategy;
+  if (proposal.action === "generate_strategy") {
+    if (!strategy) return "后端已接受操作，但尚未返回策略产物；请刷新作品后重试。";
+    return "已生成策略 v" + strategy.version + " · " + strategy.items.length + " 条卖点 · 作品 revision " + view.work.revision;
+  }
+  return "已提交人工审批 · 当前状态 " + (statusLabels[view.work.status] || view.work.status) + " · 作品 revision " + view.work.revision;
+}
+
+async function executeActionProposal(card, proposal) {
+  const button = card.querySelector("button");
+  const status = card.querySelector(".agent-action-status");
+  const result = card.querySelector(".agent-action-result");
+  const endpoint = proposalEndpoint(proposal);
+  if (!button || !status || !result || !endpoint || !state.work) return;
+  if (state.work.work.revision !== proposal.expectedRevision) {
+    status.textContent = "已失效";
+    result.textContent = "作品已更新到 revision " + state.work.work.revision + "，请让 Agent 基于最新状态重新建议。";
+    button.disabled = true;
+    card.classList.add("stale");
+    return;
+  }
+  clearWorkflowError();
+  setWorkflowBusy(true);
+  button.disabled = true;
+  status.textContent = "执行中…";
+  try {
+    const view = await api(endpoint, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(proposal.payload),
+    });
+    renderWork(view);
+    await refreshWorkList();
+    status.textContent = "已执行";
+    result.textContent = proposalResultText(proposal, view);
+    result.hidden = false;
+    card.dataset.executed = "true";
+    card.classList.add("completed");
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+  } catch (error) {
+    status.textContent = "执行失败";
+    result.textContent = error instanceof Error ? error.message : "操作执行失败。";
+    result.hidden = false;
+    card.classList.add("failed");
+    showWorkflowError(error);
+    button.disabled = false;
+  } finally {
+    setWorkflowBusy(false);
+  }
+}
+
+function appendActionProposal(turn, proposal) {
+  const content = appendTimelineEvent(turn, "action-event");
+  const card = document.createElement("section");
+  card.className = "agent-action-card";
+  card.dataset.action = proposal.action;
+  card.dataset.expectedRevision = String(proposal.expectedRevision);
+  const header = document.createElement("div");
+  header.className = "agent-action-header";
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("span");
+  eyebrow.textContent = "需要负责人确认";
+  const title = document.createElement("strong");
+  title.textContent = proposal.label;
+  copy.append(eyebrow, title);
+  const status = document.createElement("span");
+  status.className = "agent-action-status";
+  status.textContent = "待确认";
+  header.append(copy, status);
+  const summary = document.createElement("p");
+  summary.textContent = proposal.summary;
+  const meta = document.createElement("p");
+  meta.className = "agent-action-meta";
+  meta.textContent = "基于作品 revision " + proposal.expectedRevision + "；点击前不会写入任何产物。";
+  const result = document.createElement("p");
+  result.className = "agent-action-result";
+  result.hidden = true;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "button primary agent-action-button";
+  button.textContent = proposal.action === "generate_strategy" ? "确认生成策略" : "确认提交人工审批";
+  button.addEventListener("click", function () { void executeActionProposal(card, proposal); });
+  card.append(header, summary, meta, result, button);
+  content.appendChild(card);
+  refreshActionProposalAvailability();
+}
+
+function refreshActionProposalAvailability() {
+  document.querySelectorAll(".agent-action-card").forEach(function (card) {
+    if (card.dataset.executed === "true") return;
+    const button = card.querySelector("button");
+    const status = card.querySelector(".agent-action-status");
+    const result = card.querySelector(".agent-action-result");
+    if (!button || !status || !result) return;
+    const expectedRevision = Number(card.dataset.expectedRevision);
+    const currentRevision = state.work?.work.revision;
+    const stale = currentRevision === undefined || currentRevision !== expectedRevision;
+    button.disabled = stale || state.workflowBusy;
+    card.classList.toggle("stale", stale);
+    if (stale) {
+      status.textContent = "已失效";
+      result.textContent = currentRevision === undefined
+        ? "当前未绑定作品。"
+        : "作品当前为 revision " + currentRevision + "，请重新获取操作建议。";
+      result.hidden = false;
+    }
+  });
 }
 
 function finishToolEvent(turn, event, resumeThinking) {
@@ -711,6 +860,13 @@ function finishToolEvent(turn, event, resumeThinking) {
       : (event.durationMs / 1000).toFixed(1) + "s";
   tool.output.textContent = outputText;
   if (!event.isError) tool.details.open = false;
+  const isProposalTool = tool.toolName === "propose_strategy_generation"
+    || tool.toolName === "propose_strategy_approval";
+  const proposal = event.isError || !isProposalTool ? undefined : extractActionProposal(event.output);
+  const proposalMatchesTool = proposal
+    && ((tool.toolName === "propose_strategy_generation" && proposal.action === "generate_strategy")
+      || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval"));
+  if (proposalMatchesTool) appendActionProposal(turn, proposal);
   if (resumeThinking !== false) appendThinkingEvent(turn);
 }
 

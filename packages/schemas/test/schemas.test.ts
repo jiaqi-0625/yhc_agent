@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { ClaimSchema, VehicleSnapshotSchema, WorkSchema } from "../src/index.ts";
+import { ClaimSchema, StrategyActionProposalSchema, VehicleSnapshotSchema, WorkSchema } from "../src/index.ts";
 
 const fixedClaim = {
   id: "claim_range",
@@ -72,4 +72,18 @@ test("work schema validates revisioned workflow state", () => {
     }),
     false,
   );
+});
+
+test("strategy action proposals are versioned and reject untrusted fields", () => {
+  const proposal = {
+    schemaVersion: 1,
+    kind: "action_proposal",
+    action: "generate_strategy",
+    label: "生成卖点策略草稿",
+    summary: "面向家庭用户生成周末出行策略",
+    expectedRevision: 2,
+    payload: { expectedRevision: 2, audience: "有孩家庭", theme: "周末出行" },
+  };
+  assert.equal(Value.Check(StrategyActionProposalSchema, proposal), true);
+  assert.equal(Value.Check(StrategyActionProposalSchema, { ...proposal, approved: true }), false);
 });

@@ -64,6 +64,7 @@ export function generateDeterministicStrategy(input: StrategyGenerationInput): S
 }
 
 export interface StrategyWorkflowPort {
+  currentRevision(): Promise<number>;
   generate(request: GenerateStrategyRequest): Promise<{ strategy: Strategy; validation: StrategyValidationResult }>;
   validate(): Promise<StrategyValidationResult>;
   requestApproval(expectedRevision: number): Promise<{ strategy: Strategy; revision: number }>;

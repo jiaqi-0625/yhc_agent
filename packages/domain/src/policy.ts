@@ -1,6 +1,6 @@
 import type { Role, WorkStatus } from "@firefly/schemas";
 
-export type ToolRisk = "read" | "draft" | "expensive" | "approval_request" | "export";
+export type ToolRisk = "read" | "proposal" | "draft" | "expensive" | "approval_request" | "export";
 
 export interface SessionScope {
   actorId: string;
@@ -64,13 +64,13 @@ export const toolPolicies: Readonly<Record<string, ToolPolicy>> = {
     allowedStatuses: ["strategy_draft", "awaiting_strategy_approval", "strategy_approved"],
     allowedRoles: ["creator", "reviewer", "content_admin"],
   },
-  generate_strategy: {
-    risk: "draft",
+  propose_strategy_generation: {
+    risk: "proposal",
     allowedStatuses: ["created", "strategy_draft"],
     allowedRoles: creatorsAndAdmins,
   },
-  request_strategy_approval: {
-    risk: "approval_request",
+  propose_strategy_approval: {
+    risk: "proposal",
     allowedStatuses: ["strategy_draft"],
     allowedRoles: creatorsAndAdmins,
   },

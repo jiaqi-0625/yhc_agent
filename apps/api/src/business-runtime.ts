@@ -117,6 +117,7 @@ export class LocalBusinessRuntime {
 
   bindStrategyWorkflow(workId: string): StrategyWorkflowPort {
     return {
+      currentRevision: async () => (await this.getWork(workId)).work.revision,
       generate: async (request) => {
         const view = await this.generateStrategy(workId, request);
         if (!view.strategy || !view.validation) throw new Error("Strategy generation returned no strategy.");

@@ -18,6 +18,16 @@ test("policy allows an allowlisted read tool in the correct state", () => {
     risk: "read",
   });
 });
+
+test("policy allows non-mutating action proposals but rejects model-callable state changes", () => {
+  assert.deepEqual(evaluateToolPolicy({ toolName: "propose_strategy_generation", status: "created", scope }), {
+    allowed: true,
+    risk: "proposal",
+  });
+  const mutation = evaluateToolPolicy({ toolName: "generate_strategy", status: "created", scope });
+  assert.equal(mutation.allowed, false);
+  if (!mutation.allowed) assert.equal(mutation.code, "AIC-AUTH-UNKNOWN_TOOL");
+});
 test("policy blocks generic and unknown tools", () => {
   assert.equal(evaluateToolPolicy({ toolName: "bash", status: "created", scope }).allowed, false);
   assert.equal(evaluateToolPolicy({ toolName: "arbitrary_network_call", status: "created", scope }).allowed, false);
