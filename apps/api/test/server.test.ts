@@ -80,7 +80,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /workspace-agent-dialog-v2/u);
+  assert.match(page, /workspace-agent-dialog-v3/u);
   assert.match(page, /type="module"/u);
 
   const [
@@ -124,6 +124,12 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(workspaceApiScript, /generateStrategy/u);
   assert.match(await workspaceShellResponse.text(), /bindWorkspaceShell/u);
   assert.match(script, /读取车型事实快照/u);
+  assert.match(script, /function friendlyToolInput/u);
+  assert.match(script, /function friendlyToolResult/u);
+  assert.match(script, /当前策略已经进入人工审核，无需重复生成/u);
+  assert.doesNotMatch(script, /inputLabel\.textContent = "IN"/u);
+  assert.doesNotMatch(script, /outputLabel\.textContent = "OUT"/u);
+  assert.doesNotMatch(script, /绑定当前任务 · revision/u);
   assert.match(script, /function renderMarkdown/u);
   assert.match(script, /markdown-table-wrap/u);
   assert.match(script, /function restoreTranscriptTimeline/u);

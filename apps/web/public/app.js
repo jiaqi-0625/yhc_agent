@@ -588,11 +588,63 @@ function elapsedSeconds(startedAt) {
   return Math.max(1, Math.round((performance.now() - startedAt) / 1000));
 }
 
-function payloadText(value) {
-  if (value === undefined) return "—";
+function friendlyToolInput(toolName, input) {
+  if (toolName === "propose_strategy_generation") {
+    const audience = typeof input?.audience === "string" ? input.audience.trim() : "目标人群";
+    const theme = typeof input?.theme === "string" ? input.theme.trim() : "当前主题";
+    return "正在为“" + audience + "”梳理“" + theme + "”主题的卖点策略。";
+  }
+  const descriptions = {
+    get_vehicle_snapshot: "正在读取当前车型的官方信息，确保后续内容有事实依据。",
+    validate_vehicle_claims: "正在核对宣传内容是否符合车型事实与表达规范。",
+    validate_strategy: "正在检查卖点策略的事实依据和表达风险。",
+    propose_strategy_approval: "正在确认当前策略是否具备提交人工审核的条件。",
+  };
+  return descriptions[toolName] || "正在处理这一步，请稍候。";
+}
+
+function toolOutputText(value) {
   if (typeof value === "string") return value;
-  try { return JSON.stringify(value, null, 2); }
-  catch { return "[无法显示此结果]"; }
+  if (!value || typeof value !== "object") return "";
+  const parts = [value.code, value.message, value.error]
+    .filter(function (part) { return typeof part === "string"; });
+  if (Array.isArray(value.content)) {
+    value.content.forEach(function (part) {
+      if (part && typeof part === "object" && typeof part.text === "string") parts.push(part.text);
+    });
+  }
+  return parts.join(" ");
+}
+
+function friendlyToolResult(toolName, event) {
+  if (event.status === "cancelled") return "操作已取消，没有产生新的内容。";
+  if (event.isError) {
+    const output = toolOutputText(event.output);
+    if (/awaiting_strategy_approval|等待策略审批/iu.test(output)) {
+      return "当前策略已经进入人工审核，无需重复生成。请先完成审核，或退回修改后再重新生成。";
+    }
+    if (/revision|版本.{0,4}(?:冲突|过期)|stale/iu.test(output)) {
+      return "任务内容已经更新，请获取最新状态后再试一次。";
+    }
+    if (/AIC-AUTH|permission|权限|越权/iu.test(output)) {
+      return "当前账号暂时不能执行这一步，请联系任务负责人。";
+    }
+    if (/not found|未找到/iu.test(output)) {
+      return "没有找到这一步需要的内容，请刷新任务后重试。";
+    }
+    if (event.status === "blocked" || /TOOL_NOT_ALLOWED|blocked|not allowed|策略.{0,8}(?:阻止|拒绝)/iu.test(output)) {
+      return "当前任务状态还不能执行这一步。请先完成页面中提示的前置操作。";
+    }
+    return "这一步暂时没有完成，请稍后重试。";
+  }
+  const descriptions = {
+    get_vehicle_snapshot: "车型信息已读取，后续内容将以这些官方事实为准。",
+    validate_vehicle_claims: "宣传内容检查已完成，请查看 Agent 接下来的说明。",
+    propose_strategy_generation: "策略建议已准备好，请在下方确认后再执行。",
+    validate_strategy: "策略检查已完成，请查看 Agent 接下来的说明。",
+    propose_strategy_approval: "提交审核的建议已准备好，请在下方确认后再执行。",
+  };
+  return descriptions[toolName] || "这一步已经完成。";
 }
 
 function appendTimelineEvent(turn, className) {
@@ -668,47 +720,30 @@ function appendHistoricalThinkingEvent(turn) {
 function addToolEvent(turn, event) {
   finishThinkingEvent(turn);
   const content = appendTimelineEvent(turn, "tool-event active");
-  const details = document.createElement("details");
-  details.className = "tool-call";
-  details.open = true;
-  const summary = document.createElement("summary");
+  const card = document.createElement("section");
+  card.className = "tool-call";
+  const summary = document.createElement("div");
+  summary.className = "tool-summary";
   const heading = document.createElement("span");
   heading.className = "tool-heading";
   const title = document.createElement("strong");
   title.textContent = toolLabels[event.toolName] || event.toolName;
-  const name = document.createElement("code");
-  name.textContent = event.toolName;
-  heading.append(title, name);
+  heading.appendChild(title);
   const status = document.createElement("span");
   status.className = "tool-status";
-  status.textContent = "运行中";
+  status.textContent = "处理中";
   summary.append(heading, status);
-  const io = document.createElement("div");
-  io.className = "tool-io";
-  const inputRow = document.createElement("div");
-  inputRow.className = "tool-io-row";
-  const inputLabel = document.createElement("span");
-  inputLabel.textContent = "IN";
-  const input = document.createElement("pre");
-  input.textContent = payloadText(event.input);
-  inputRow.append(inputLabel, input);
-  const outputRow = document.createElement("div");
-  outputRow.className = "tool-io-row output";
-  const outputLabel = document.createElement("span");
-  outputLabel.textContent = "OUT";
-  const output = document.createElement("pre");
-  output.textContent = "等待工具返回…";
-  outputRow.append(outputLabel, output);
-  io.append(inputRow, outputRow);
-  details.append(summary, io);
-  content.appendChild(details);
+  const description = document.createElement("p");
+  description.className = "tool-description";
+  description.textContent = friendlyToolInput(event.toolName, event.input);
+  card.append(summary, description);
+  content.appendChild(card);
   turn.tools.set(event.toolCallId, {
     content,
-    details,
+    card,
     status,
-    output,
+    description,
     toolName: event.toolName,
-    input: event.input,
   });
 }
 
@@ -753,9 +788,9 @@ function proposalResultText(proposal, view) {
   const strategy = view.strategy;
   if (proposal.action === "generate_strategy") {
     if (!strategy) return "后端已接受操作，但尚未返回策略产物；请刷新作品后重试。";
-    return "已生成策略 v" + strategy.version + " · " + strategy.items.length + " 条卖点 · 作品 revision " + view.work.revision;
+    return "已生成策略 v" + strategy.version + "，共 " + strategy.items.length + " 条卖点，任务内容已同步更新。";
   }
-  return "已提交人工审批 · 当前状态 " + (statusLabels[view.work.status] || view.work.status) + " · 作品 revision " + view.work.revision;
+  return "已提交人工审批，当前状态：" + (statusLabels[view.work.status] || view.work.status) + "。";
 }
 
 async function executeActionProposal(card, proposal) {
@@ -774,7 +809,7 @@ async function executeActionProposal(card, proposal) {
   }
   if (state.work.work.revision !== proposal.expectedRevision) {
     status.textContent = "已失效";
-    result.textContent = "作品已更新到 revision " + state.work.work.revision + "，请让 Agent 基于最新状态重新建议。";
+    result.textContent = "任务内容已经更新，请让 Agent 基于最新状态重新建议。";
     button.disabled = true;
     card.classList.add("stale");
     return;
@@ -837,8 +872,7 @@ function appendActionProposal(turn, proposal) {
     : proposal.cost?.kind === "estimate_required"
       ? " · 执行前需重新估价"
       : " · 免费";
-  meta.textContent = "绑定当前任务 · revision " + proposal.expectedRevision + costText
-    + "；点击前不会写入任何产物。";
+  meta.textContent = "已绑定当前任务" + costText + "；点击前不会写入任何内容。";
   const result = document.createElement("p");
   result.className = "agent-action-result";
   result.hidden = true;
@@ -871,7 +905,7 @@ function refreshActionProposalAvailability() {
         ? "该卡片属于其他视频任务，请切回对应任务或重新获取建议。"
         : currentRevision === undefined
         ? "当前未绑定作品。"
-        : "作品当前为 revision " + currentRevision + "，请重新获取操作建议。";
+        : "任务内容已经更新，请重新获取操作建议。";
       result.hidden = false;
     }
   });
@@ -882,25 +916,18 @@ function finishToolEvent(turn, event, resumeThinking) {
   if (!tool) return;
   tool.content.parentElement.classList.remove("active");
   tool.content.parentElement.classList.toggle("failed", Boolean(event.isError));
-  const outputText = payloadText(event.output);
-  const errorStatus = /(?:POLICY|策略.{0,8}(?:阻止|拒绝)|blocked|not allowed)/iu.test(outputText)
-    ? "被策略阻止"
-    : /(?:not found|未找到)/iu.test(outputText)
-      ? "未找到"
-      : "失败";
   tool.status.textContent = event.status === "blocked"
-    ? "被策略阻止"
+    ? "暂未执行"
     : event.status === "cancelled"
       ? "已取消"
     : event.isError
-    ? errorStatus
+    ? "未完成"
     : event.historical
-      ? "已完成 · 历史"
+      ? "已完成"
     : event.durationMs === undefined
-      ? "完成"
-      : (event.durationMs / 1000).toFixed(1) + "s";
-  tool.output.textContent = outputText;
-  if (!event.isError) tool.details.open = false;
+      ? "已完成"
+      : "已完成";
+  tool.description.textContent = friendlyToolResult(tool.toolName, event);
   const isProposalTool = tool.toolName === "propose_strategy_generation"
     || tool.toolName === "propose_strategy_approval";
   const proposal = event.isError || !isProposalTool ? undefined : extractActionProposal(event.output);
@@ -1020,7 +1047,7 @@ function updateSession(summary) {
     elements.agentContextName.textContent = context.brand.name + " · " + context.vehicle.displayName + " · " + context.videoTask.name;
     elements.agentContextName.title = context.batchProject.name + " / " + context.videoTask.name;
     elements.agentContextStage.textContent = taskStageLabels[context.videoTask.currentStage] || context.videoTask.currentStage;
-    elements.agentContextRevision.textContent = "r" + context.videoTask.revision;
+    elements.agentContextRevision.textContent = "任务版本 " + context.videoTask.revision;
   } else {
     elements.agentContextName.textContent = "尚未绑定任务";
     elements.agentContextName.title = "";

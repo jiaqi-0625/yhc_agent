@@ -85,6 +85,8 @@ test("business assembly adds strategy tools without exposing an approval decisio
   assert.match(agent.state.systemPrompt, /策略人工审批请求建议/u);
   assert.match(agent.state.systemPrompt, /点击卡片/u);
   assert.match(agent.state.systemPrompt, /不得向用户索要 videoTaskId、vehicleId、revision/u);
+  assert.match(agent.state.systemPrompt, /面向非技术人员表达/u);
+  assert.match(agent.state.systemPrompt, /不得展示内部工具名、错误码、Schema、JSON/u);
   assert.match(agent.state.systemPrompt, /人工审批决策尚未注册/u);
   assert.doesNotMatch(
     agent.state.tools.map((tool) => tool.name).join(","),

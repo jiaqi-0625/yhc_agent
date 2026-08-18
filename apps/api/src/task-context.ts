@@ -1,4 +1,10 @@
-import type { TaskContext, VideoTaskStage, VideoTaskStatus, WorkStatus } from "@firefly/schemas";
+import type {
+  TaskContext,
+  VideoTaskStage,
+  VideoTaskStageStatus,
+  VideoTaskStatus,
+  WorkStatus,
+} from "@firefly/schemas";
 
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 
@@ -27,6 +33,12 @@ function taskStatusForLegacyStatus(status: WorkStatus): VideoTaskStatus {
   return status === "exported" ? "completed" : "active";
 }
 
+function stageStatusForLegacyStatus(status: WorkStatus): VideoTaskStageStatus {
+  if (status === "exported") return "confirmed";
+  if (status.startsWith("awaiting_") || status === "final_review") return "awaiting_confirmation";
+  return "in_progress";
+}
+
 export async function resolveLocalTaskContext(
   business: LocalBusinessRuntime,
   videoTaskId: string,
@@ -53,6 +65,7 @@ export async function resolveLocalTaskContext(
       name: `${snapshot.series} ${snapshot.trim} 广告任务`,
       status: taskStatusForLegacyStatus(view.work.status),
       currentStage: stageForLegacyStatus(view.work.status),
+      stageStatus: stageStatusForLegacyStatus(view.work.status),
       revision: view.work.revision,
       ...(view.work.vehicleSnapshotId === undefined
         ? {}
