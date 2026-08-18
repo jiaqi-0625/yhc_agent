@@ -62,6 +62,124 @@ export const ClaimSchema = Type.Object(
 );
 export type Claim = Static<typeof ClaimSchema>;
 
+export const CatalogRecordStatusSchema = Type.Union([
+  Type.Literal("active"),
+  Type.Literal("archived"),
+]);
+export type CatalogRecordStatus = Static<typeof CatalogRecordStatusSchema>;
+
+export const BrandSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+    status: CatalogRecordStatusSchema,
+    revision: Type.Integer({ minimum: 1 }),
+    defaultVisualStylePresetId: Identifier,
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type Brand = Static<typeof BrandSchema>;
+
+export const VehicleSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    brandId: Identifier,
+    version: Type.Integer({ minimum: 1 }),
+    status: CatalogRecordStatusSchema,
+    series: Type.String({ minLength: 1, maxLength: 120 }),
+    modelYear: Type.Integer({ minimum: 2000, maximum: 2100 }),
+    trim: Type.String({ minLength: 1, maxLength: 120 }),
+    parameters: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
+    fixedClaims: Type.Array(ClaimSchema),
+    optionalClaims: Type.Array(ClaimSchema),
+    prohibitedClaims: Type.Array(NonEmptyString),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type Vehicle = Static<typeof VehicleSchema>;
+
+export const AspectRatioSchema = Type.String({
+  minLength: 3,
+  maxLength: 11,
+  pattern: "^[1-9][0-9]*:[1-9][0-9]*$",
+});
+export type AspectRatio = Static<typeof AspectRatioSchema>;
+
+export const BatchProjectSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    brandId: Identifier,
+    vehicleId: Identifier,
+    name: Type.String({ minLength: 1, maxLength: 240 }),
+    batchName: Type.String({ minLength: 1, maxLength: 120 }),
+    aspectRatio: AspectRatioSchema,
+    visualStylePresetId: Identifier,
+    customStylePrompt: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+    status: CatalogRecordStatusSchema,
+    revision: Type.Integer({ minimum: 1 }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type BatchProject = Static<typeof BatchProjectSchema>;
+
+export const VideoTaskStageSchema = Type.Union([
+  Type.Literal("strategy"),
+  Type.Literal("asset_matching"),
+  Type.Literal("script"),
+  Type.Literal("storyboard"),
+  Type.Literal("video_preview"),
+  Type.Literal("delivery"),
+]);
+export type VideoTaskStage = Static<typeof VideoTaskStageSchema>;
+
+export const VideoTaskStatusSchema = Type.Union([
+  Type.Literal("active"),
+  Type.Literal("completed"),
+  Type.Literal("cancelled"),
+  Type.Literal("archived"),
+]);
+export type VideoTaskStatus = Static<typeof VideoTaskStatusSchema>;
+
+export const VideoTaskSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    name: Type.String({ minLength: 1, maxLength: 160 }),
+    ownerAccountId: Identifier,
+    status: VideoTaskStatusSchema,
+    currentStage: VideoTaskStageSchema,
+    revision: Type.Integer({ minimum: 1 }),
+    vehicleSnapshotId: Type.Optional(Identifier),
+    audience: Type.String({ minLength: 1, maxLength: 500 }),
+    theme: Type.String({ minLength: 1, maxLength: 500 }),
+    durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+    scriptInput: Type.Optional(Type.String({ minLength: 1, maxLength: 20000 })),
+    platformTags: Type.Array(Identifier, { maxItems: 20, uniqueItems: true }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type VideoTask = Static<typeof VideoTaskSchema>;
+
 export const VehicleSnapshotSchema = Type.Object(
   {
     id: Identifier,
@@ -86,6 +204,7 @@ export const VehicleSnapshotSchema = Type.Object(
 );
 export type VehicleSnapshot = Static<typeof VehicleSnapshotSchema>;
 
+/** @deprecated Use BatchProjectSchema for Workspace V2 writes. */
 export const ProjectSchema = Type.Object(
   {
     id: Identifier,
@@ -99,6 +218,7 @@ export const ProjectSchema = Type.Object(
 );
 export type Project = Static<typeof ProjectSchema>;
 
+/** @deprecated Use VideoTaskSchema for Workspace V2 writes. */
 export const WorkSchema = Type.Object(
   {
     id: Identifier,
