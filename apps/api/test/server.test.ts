@@ -80,7 +80,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /studio-v7-task-agent/u);
+  assert.match(page, /studio-v8-dialog-no-layout/u);
 
   const [styleResponse, scriptResponse, panelStyleResponse, panelScriptResponse] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
@@ -110,7 +110,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /videoTaskId/u);
   assert.match(script, /cancel-generation/u);
   assert.match(panelScript, /streamAgentMessage/u);
-  assert.match(panelScript, /createAgentPanelLayoutController/u);
+  assert.doesNotMatch(panelScript, /createAgentPanelLayoutController/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {

@@ -1,6 +1,6 @@
 "use strict";
 
-import { createAgentPanelLayoutController, streamAgentMessage } from "./agent-panel.js?build=studio-v7-task-agent-a11y2";
+import { streamAgentMessage } from "./agent-panel.js?build=studio-v8-dialog-no-layout";
 
 const state = {
   sessionId: null,
@@ -32,8 +32,6 @@ const elements = {
   resetSession: document.querySelector("#reset-session"),
   retryMessage: document.querySelector("#retry-message"),
   cancelGeneration: document.querySelector("#cancel-generation"),
-  collapseAgent: document.querySelector("#collapse-agent"),
-  agentResizer: document.querySelector("#agent-resizer"),
   chatView: document.querySelector("#chat-view"),
   workStatus: document.querySelector("#work-status"),
   workRevision: document.querySelector("#work-revision"),
@@ -76,13 +74,6 @@ const elements = {
   agentContextStage: document.querySelector("#agent-context-stage"),
   agentContextRevision: document.querySelector("#agent-context-revision"),
 };
-
-createAgentPanelLayoutController({
-  shell: elements.workspaceShell,
-  panel: elements.chatView,
-  resizer: elements.agentResizer,
-  collapseButton: elements.collapseAgent,
-});
 
 const statusLabels = {
   created: "已创建车型快照",

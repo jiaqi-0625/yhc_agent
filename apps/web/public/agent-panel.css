@@ -1,35 +1,3 @@
-.workspace-shell {
-  --agent-panel-width: 380px;
-  grid-template-columns: 260px minmax(540px, 1fr) 6px var(--agent-panel-width);
-}
-
-.agent-resizer {
-  position: relative;
-  z-index: 2;
-  width: 6px;
-  padding: 0;
-  border: 0;
-  border-left: 1px solid var(--border);
-  border-right: 1px solid transparent;
-  background: var(--card);
-  cursor: col-resize;
-}
-
-.agent-resizer::after {
-  position: absolute;
-  top: 50%;
-  left: 1px;
-  width: 3px;
-  height: 44px;
-  border-radius: 999px;
-  background: var(--border);
-  content: "";
-  transform: translateY(-50%);
-}
-
-.agent-resizer:hover::after,
-.agent-resizer:focus-visible::after { background: var(--primary); }
-.chat-panel { border-left: 0; }
 .chat-header-actions { display: flex; align-items: center; gap: 4px; }
 .agent-context { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; }
 .agent-context-copy { min-width: 0; }
@@ -40,27 +8,3 @@
 .streaming-answer:empty::after { color: var(--muted-foreground); content: "等待首个响应片段…"; }
 .cancel-button { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 10%, var(--card)); }
 .retry-button { color: var(--primary) !important; }
-
-.workspace-shell[data-agent-collapsed="true"] {
-  grid-template-columns: 260px minmax(540px, 1fr) 0 58px;
-}
-.workspace-shell[data-agent-collapsed="true"] .agent-resizer {
-  width: 0;
-  visibility: hidden;
-  pointer-events: none;
-}
-.workspace-shell[data-agent-collapsed="true"] .chat-panel > :not(.chat-header) { display: none; }
-.workspace-shell[data-agent-collapsed="true"] .chat-header { justify-content: center; padding: 0; }
-.workspace-shell[data-agent-collapsed="true"] .agent-identity,
-.workspace-shell[data-agent-collapsed="true"] #new-session { display: none; }
-
-@media (max-width: 1180px) and (min-width: 981px) {
-  .workspace-shell { grid-template-columns: 220px minmax(480px,1fr) 6px min(var(--agent-panel-width), 360px); }
-  .workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 220px minmax(480px,1fr) 0 58px; }
-}
-
-@media (max-width: 980px) {
-  .workspace-shell { display: block; }
-  .agent-resizer { display: none; }
-  #collapse-agent { display: none; }
-}
