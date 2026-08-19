@@ -53,6 +53,7 @@ export function takeOverVideoTask(
     expectedTaskRevision: request.expectedTaskRevision,
     reason: request.reason,
     source: "human_action",
+    actorAccountId: context.actorAccountId,
     occurredAt: context.occurredAt,
   };
 

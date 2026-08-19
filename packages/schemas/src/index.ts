@@ -320,6 +320,31 @@ export const VideoTaskSchema = Type.Object(
 );
 export type VideoTask = Static<typeof VideoTaskSchema>;
 
+export const CreateVideoTaskRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    name: Type.String({ minLength: 1, maxLength: 160 }),
+    audience: Type.String({ minLength: 1, maxLength: 500 }),
+    theme: Type.String({ minLength: 1, maxLength: 500 }),
+    durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+    platformTags: Type.Array(Identifier, { maxItems: 20, uniqueItems: true }),
+    scriptInput: Type.Optional(Type.String({ minLength: 1, maxLength: 20000 })),
+    ownerAccountId: Type.Optional(Identifier),
+  },
+  { additionalProperties: false },
+);
+export type CreateVideoTaskRequest = Static<typeof CreateVideoTaskRequestSchema>;
+
+export const AssignVideoTaskOwnerRequestSchema = Type.Object(
+  {
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    targetOwnerAccountId: Identifier,
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type AssignVideoTaskOwnerRequest = Static<typeof AssignVideoTaskOwnerRequestSchema>;
+
 export const TakeOverVideoTaskRequestSchema = Type.Object(
   {
     expectedTaskRevision: Type.Integer({ minimum: 1 }),
@@ -340,6 +365,7 @@ export const VideoTaskOwnershipTransferSchema = Type.Object(
     expectedTaskRevision: Type.Integer({ minimum: 1 }),
     reason: Type.String({ minLength: 1, maxLength: 2000 }),
     source: Type.Literal("human_action"),
+    actorAccountId: Type.Optional(Identifier),
     occurredAt: IsoDateTime,
   },
   { additionalProperties: false },

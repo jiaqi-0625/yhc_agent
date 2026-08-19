@@ -73,6 +73,7 @@ test("takeover changes the sole owner, increments revision, and appends a human 
       expectedTaskRevision: 7,
       reason: "继续完成脚本制作",
       source: "human_action",
+      actorAccountId: "account_member",
       occurredAt: "2026-08-19T04:00:00.000Z",
     },
   ]);

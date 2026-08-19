@@ -8,5 +8,6 @@ export * from "./stage-rollback.ts";
 export * from "./strategy.ts";
 export * from "./task-ownership.ts";
 export * from "./temporary-assets.ts";
+export * from "./video-task.ts";
 export * from "./workflow.ts";
 export * from "./workspace-access.ts";

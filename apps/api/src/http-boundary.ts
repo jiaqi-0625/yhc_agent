@@ -9,6 +9,9 @@ import {
   AssetPoolError,
   BatchProjectCreationError,
   RevisionConflictError,
+  TaskTakeoverDeniedError,
+  VideoTaskAssignmentDeniedError,
+  VideoTaskCreationError,
   WorkspaceAccessDeniedError,
 } from "@firefly/domain";
 import {
@@ -83,6 +86,14 @@ export function errorStatus(error: Error): number {
   if (error instanceof CompanyAssetCatalogAccessError) return 403;
   if (error instanceof LocalAgentCredentialsError) return 503;
   if (
+    error instanceof VideoTaskAssignmentDeniedError ||
+    error instanceof TaskTakeoverDeniedError ||
+    (error instanceof VideoTaskCreationError &&
+      error.code === "AIC-VIDEO-TASK-CREATION-PROJECT_INACTIVE")
+  ) {
+    return 409;
+  }
+  if (
     error instanceof RevisionConflictError ||
     error instanceof AccountBudgetError ||
     error instanceof AccountHighCostTaskRunningError ||
@@ -108,6 +119,9 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AccountRunLockTokenMismatchError ||
       normalized instanceof AssetPoolError ||
       normalized instanceof BatchProjectCreationError ||
+      normalized instanceof VideoTaskCreationError ||
+      normalized instanceof VideoTaskAssignmentDeniedError ||
+      normalized instanceof TaskTakeoverDeniedError ||
       normalized instanceof LocalAgentRunError ||
       normalized instanceof LocalAgentCredentialsError ||
       normalized instanceof CompanyAssetCatalogAccessError ||

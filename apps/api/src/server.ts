@@ -14,6 +14,9 @@ import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import { handleProjectCreationRoute } from "./project-creation-routes.ts";
 import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
+import { handleVideoTaskRoute } from "./video-task-routes.ts";
+import { VideoTaskRuntime } from "./video-task-runtime.ts";
+import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
@@ -77,6 +80,7 @@ async function handleRequest(
   workspaceSessions: WorkspaceSessionRuntime,
   workspaceAdmin: WorkspaceAdminRuntime | undefined,
   projectCreation: ProjectCreationRuntime | undefined,
+  videoTasks: VideoTaskRuntime | undefined,
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
 ): Promise<void> {
@@ -154,6 +158,21 @@ async function handleRequest(
     )
   ) return;
   if (
+    videoTasks === undefined &&
+    url.pathname.startsWith("/v1/workspace/batch-projects/") &&
+    url.pathname.includes("/video-tasks")
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-VIDEO-TASK-RUNTIME_NOT_CONFIGURED",
+      "Video task APIs must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    videoTasks !== undefined &&
+    await handleVideoTaskRoute(request, response, url, videoTasks, workspaceSessions)
+  ) return;
+  if (
     workspaceAdmin === undefined &&
     (url.pathname.startsWith("/v1/admin/") || url.pathname === "/v1/workspace/me/budget")
   ) {
@@ -203,9 +222,13 @@ export function createApiServer(
   legacyLocalAccessEnabled = false,
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
   projectCreation: ProjectCreationRuntime | undefined = undefined,
+  videoTasks: VideoTaskRuntime | undefined = undefined,
 ): Server {
-  if (workspaceSessions === undefined && workspaceAdmin !== undefined) {
-    throw new Error("A custom workspace administration runtime requires its matching session runtime.");
+  if (
+    workspaceSessions === undefined &&
+    (workspaceAdmin !== undefined || projectCreation !== undefined || videoTasks !== undefined)
+  ) {
+    throw new Error("A custom workspace runtime requires its matching session runtime.");
   }
   const adminStore = workspaceSessions === undefined
     ? new LocalWorkspaceAdminStore(
@@ -240,12 +263,21 @@ export function createApiServer(
     companyAssetProvider,
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
+  const batchProjectStore = adminStore === undefined ? undefined : new LocalBatchProjectStore(
+    process.env.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
+  );
   const activeProjectCreation = projectCreation ?? (adminStore === undefined ? undefined : new ProjectCreationRuntime(
     adminStore,
-    new LocalBatchProjectStore(
-      process.env.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
-    ),
+    batchProjectStore!,
     companyAssetProvider,
+  ));
+  const activeVideoTasks = videoTasks ?? (adminStore === undefined ? undefined : new VideoTaskRuntime(
+    adminStore,
+    batchProjectStore!,
+    new LocalVideoTaskProductionStore(
+      process.env.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
+    ),
+    () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   const activeIdentityResolver = resolveAgentIdentity ??
@@ -260,6 +292,7 @@ export function createApiServer(
       activeWorkspaceSessions,
       activeWorkspaceAdmin,
       activeProjectCreation,
+      activeVideoTasks,
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
     ).catch((error: unknown) => {
@@ -279,6 +312,7 @@ export async function startApiServer(
   legacyLocalAccessEnabled = developmentAccountsAllowed(host),
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
   projectCreation: ProjectCreationRuntime | undefined = undefined,
+  videoTasks: VideoTaskRuntime | undefined = undefined,
 ): Promise<Server> {
   const server = createApiServer(
     runtime,
@@ -289,6 +323,7 @@ export async function startApiServer(
     legacyLocalAccessEnabled,
     workspaceAdmin,
     projectCreation,
+    videoTasks,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
