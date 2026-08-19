@@ -19,7 +19,7 @@ function record(
   batchProjectId = "project_e5_launch",
 ): VideoTaskProductionRecord {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id,
       tenantId,
@@ -50,6 +50,7 @@ function record(
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
@@ -321,7 +322,7 @@ function recordWithArtifactGraph(): VideoTaskProductionRecord {
       videoTaskId: value.videoTask.id,
       stage: "script",
       artifactVersionId: "artifact_script_v1",
-      reason: "上游策略已回退",
+      reason: "恢复首版策略",
       invalidatedDependency: {
         kind: "stage_artifact",
         stage: "strategy",
@@ -341,7 +342,7 @@ function recordWithArtifactGraph(): VideoTaskProductionRecord {
       videoTaskId: value.videoTask.id,
       stage: "storyboard",
       artifactVersionId: "artifact_storyboard_v1",
-      reason: "上游脚本已失效",
+      reason: "恢复首版策略",
       invalidatedDependency: {
         kind: "stage_artifact",
         stage: "script",
@@ -355,6 +356,71 @@ function recordWithArtifactGraph(): VideoTaskProductionRecord {
       occurredAt: "2026-08-19T08:05:00.000Z",
     },
   ];
+  return value;
+}
+
+function recordWithStageMutationReceipts(): VideoTaskProductionRecord {
+  const value = recordWithArtifactGraph();
+  value.stageMutationReceipts = value.stageConfirmations.map((confirmation, index) => ({
+    schemaVersion: 1,
+    id: `stage_receipt_confirmation_${index + 1}`,
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    actorAccountId: confirmation.actorAccountId,
+    requestId: `request_stage_confirmation_${index + 1}`,
+    payloadHash: (index + 5).toString(16).repeat(64),
+    action: "confirm_stage",
+    expectedTaskRevision: confirmation.expectedTaskRevision,
+    resultingTaskRevision: confirmation.expectedTaskRevision + 1,
+    result: {
+      kind: "stage_confirmed",
+      stage: confirmation.stage,
+      confirmationId: confirmation.id,
+      artifactVersionId: confirmation.artifactVersionId,
+    },
+    occurredAt: confirmation.occurredAt,
+  }));
+  const rollback = value.stageRollbacks[0]!;
+  value.stageMutationReceipts.push({
+    schemaVersion: 1,
+    id: "stage_receipt_rollback_1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    actorAccountId: rollback.requestedBy,
+    requestId: "request_stage_rollback_1",
+    payloadHash: "f".repeat(64),
+    action: "rollback_stage",
+    expectedTaskRevision: rollback.expectedTaskRevision,
+    resultingTaskRevision: rollback.expectedTaskRevision + 1,
+    result: {
+      kind: "stage_rolled_back",
+      stage: rollback.stage,
+      stageRollbackId: rollback.id,
+      invalidationIds: structuredClone(rollback.invalidationIds),
+    },
+    occurredAt: rollback.occurredAt,
+  });
+  return value;
+}
+
+function recordWithAllMutationReceipts(): VideoTaskProductionRecord {
+  const value = recordWithStageMutationReceipts();
+  const commandState = recordWithCommandState();
+  value.strategyDrafts = structuredClone(commandState.strategyDrafts);
+  if (commandState.activeStrategyDraftId !== undefined) {
+    value.activeStrategyDraftId = commandState.activeStrategyDraftId;
+  }
+  value.stageConfirmationRequests = structuredClone(commandState.stageConfirmationRequests);
+  value.commandReceipts = structuredClone(commandState.commandReceipts);
+  value.stageConfirmations.forEach((confirmation, index) => {
+    confirmation.expectedTaskRevision = index + 3;
+    const receipt = value.stageMutationReceipts[index];
+    assert.ok(receipt?.action === "confirm_stage");
+    receipt.expectedTaskRevision = confirmation.expectedTaskRevision;
+    receipt.resultingTaskRevision = confirmation.expectedTaskRevision + 1;
+  });
   return value;
 }
 
@@ -389,7 +455,7 @@ test("video task store creates, scopes, sorts, and returns defensive copies", as
   assert.equal((await store.list("tenant_missing")).length, 0);
 });
 
-test("v5 command state accepts warnings and preserves its complete reference graph", async (context) => {
+test("v6 command state accepts warnings and preserves its complete reference graph", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-command-state-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const store = new LocalVideoTaskProductionStore(directory);
@@ -401,7 +467,7 @@ test("v5 command state accepts warnings and preserves its complete reference gra
   );
 });
 
-test("v5 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {
+test("v6 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["draft scope", (candidate) => { candidate.strategyDrafts[0]!.tenantId = "tenant_attacker"; }],
     ["vehicle scope", (candidate) => { candidate.taskVehicleSnapshots[0]!.projectId = "project_attacker"; }],
@@ -488,7 +554,7 @@ test("v5 command state fails closed on invalid scope, pointers, revisions, and r
   }
 });
 
-test("v5 artifact graph accepts a complete rollback invalidation closure", async (context) => {
+test("v6 artifact graph accepts a complete rollback invalidation closure", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-artifact-graph-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const input = recordWithArtifactGraph();
@@ -499,7 +565,7 @@ test("v5 artifact graph accepts a complete rollback invalidation closure", async
   );
 });
 
-test("v5 artifact graph fails closed on invalid dependencies and provenance", async () => {
+test("v6 artifact graph fails closed on invalid dependencies and provenance", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["missing dependency artifact", (candidate) => {
       candidate.stageArtifactVersions[2]!.dependencies[0] = {
@@ -551,6 +617,18 @@ test("v5 artifact graph fails closed on invalid dependencies and provenance", as
     ["confirmation stage mismatch", (candidate) => {
       candidate.stageConfirmations[2]!.stage = "storyboard";
     }],
+    ["confirmation actor mismatch", (candidate) => {
+      candidate.stageConfirmations[0]!.actorAccountId = "account_other";
+    }],
+    ["confirmation time mismatch", (candidate) => {
+      candidate.stageConfirmations[0]!.occurredAt = "2026-08-19T08:01:30.000Z";
+    }],
+    ["confirmation migrated provenance", (candidate) => {
+      candidate.stageArtifactVersions[0]!.provenance = {
+        kind: "migrated_confirmation",
+        legacyApprovalId: "legacy_confirmation_strategy_v1",
+      };
+    }],
   ];
   for (const [label, mutate] of cases) {
     const candidate = recordWithArtifactGraph();
@@ -564,7 +642,7 @@ test("v5 artifact graph fails closed on invalid dependencies and provenance", as
   }
 });
 
-test("v5 artifact graph fails closed on invalid rollback and invalidation closure", async () => {
+test("v6 artifact graph fails closed on invalid rollback and invalidation closure", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["missing rollback source", (candidate) => {
       candidate.stageRollbacks[0]!.fromArtifactVersionId = "artifact_missing";
@@ -612,9 +690,20 @@ test("v5 artifact graph fails closed on invalid rollback and invalidation closur
     ["rollback invalidation extra", (candidate) => {
       candidate.stageRollbacks[0]!.invalidationIds.push("invalidation_missing");
     }],
+    ["recursive invalidation branch omission", (candidate) => {
+      candidate.stageRollbacks[0]!.invalidationIds = [];
+      candidate.stageArtifactInvalidations = [];
+      candidate.activeStageArtifactVersionIds.script = "artifact_script_v1";
+    }],
     ["duplicate invalidated artifact", (candidate) => {
       candidate.stageArtifactInvalidations[1]!.artifactVersionId = "artifact_script_v1";
       candidate.stageArtifactInvalidations[1]!.stage = "script";
+    }],
+    ["invalidation reason differs from rollback", (candidate) => {
+      candidate.stageArtifactInvalidations[0]!.reason = "伪造的失效原因";
+    }],
+    ["invalidation time differs from rollback", (candidate) => {
+      candidate.stageArtifactInvalidations[1]!.occurredAt = "2026-08-19T08:05:30.000Z";
     }],
   ];
   for (const [label, mutate] of cases) {
@@ -629,36 +718,342 @@ test("v5 artifact graph fails closed on invalid rollback and invalidation closur
   }
 });
 
-test("persisted v1 through v4 aggregates upgrade to empty v5 command state", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-upgrade-"));
+test("v6 mutation receipts preserve a complete command and stage audit graph", async () => {
+  const input = recordWithAllMutationReceipts();
+  const store = new LocalVideoTaskProductionStore(".data/test-video-task-v6-receipt-graph", false);
+  await store.save(input);
+  assert.deepEqual(await store.load(input.videoTask.id), input);
+});
+
+test("v6 mutation receipts reserve IDs, actor requests, and revisions across collections", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void, RegExp]> = [
+    ["receipt ID", (candidate) => {
+      candidate.stageMutationReceipts[0]!.id = candidate.commandReceipts[0]!.id;
+    }, /duplicate mutation receipt identities/u],
+    ["actor request", (candidate) => {
+      candidate.stageMutationReceipts[0]!.actorAccountId = candidate.commandReceipts[0]!.actorAccountId;
+      candidate.stageMutationReceipts[0]!.requestId = candidate.commandReceipts[0]!.requestId;
+    }, /duplicate mutation request identities/u],
+    ["resulting revision", (candidate) => {
+      candidate.stageMutationReceipts[0]!.resultingTaskRevision =
+        candidate.commandReceipts[0]!.resultingTaskRevision;
+    }, /duplicate mutation result revisions/u],
+  ];
+  for (const [label, mutate, expected] of cases) {
+    const candidate = recordWithAllMutationReceipts();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v6-cross-receipt-${label}`, false)
+        .save(candidate),
+      expected,
+      label,
+    );
+  }
+});
+
+test("v6 confirmation receipts fail closed on mismatched result and audit details", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["confirmation ID", (candidate) => {
+      const receipt = candidate.stageMutationReceipts[0];
+      assert.ok(receipt?.action === "confirm_stage");
+      receipt.result.confirmationId = candidate.stageConfirmations[1]!.id;
+    }],
+    ["artifact ID", (candidate) => {
+      const receipt = candidate.stageMutationReceipts[0];
+      assert.ok(receipt?.action === "confirm_stage");
+      receipt.result.artifactVersionId = candidate.stageArtifactVersions[1]!.id;
+    }],
+    ["stage", (candidate) => {
+      const receipt = candidate.stageMutationReceipts[0];
+      assert.ok(receipt?.action === "confirm_stage");
+      receipt.result.stage = "script";
+    }],
+    ["revision", (candidate) => {
+      const receipt = candidate.stageMutationReceipts[0];
+      assert.ok(receipt?.action === "confirm_stage");
+      receipt.expectedTaskRevision = 8;
+      receipt.resultingTaskRevision = 9;
+    }],
+    ["actor", (candidate) => {
+      candidate.stageMutationReceipts[0]!.actorAccountId = "account_other";
+    }],
+    ["time", (candidate) => {
+      candidate.stageMutationReceipts[0]!.occurredAt = "2026-08-19T08:01:30.000Z";
+    }],
+    ["duplicate result target", (candidate) => {
+      const first = candidate.stageMutationReceipts[0];
+      const second = candidate.stageMutationReceipts[1];
+      assert.ok(first?.action === "confirm_stage");
+      assert.ok(second?.action === "confirm_stage");
+      second.result = structuredClone(first.result);
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithStageMutationReceipts();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v6-confirm-receipt-${label}`, false)
+        .save(candidate),
+      /invalid stage confirmation receipt graph|invalid stage mutation receipt revision/u,
+      label,
+    );
+  }
+});
+
+test("v6 rollback receipts fail closed on mismatched result and audit details", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["rollback ID", (candidate) => {
+      const receipt = candidate.stageMutationReceipts.at(-1);
+      assert.ok(receipt?.action === "rollback_stage");
+      receipt.result.stageRollbackId = "rollback_missing";
+    }],
+    ["stage", (candidate) => {
+      const receipt = candidate.stageMutationReceipts.at(-1);
+      assert.ok(receipt?.action === "rollback_stage");
+      receipt.result.stage = "script";
+    }],
+    ["revision", (candidate) => {
+      const receipt = candidate.stageMutationReceipts.at(-1);
+      assert.ok(receipt?.action === "rollback_stage");
+      receipt.expectedTaskRevision = 9;
+      receipt.resultingTaskRevision = 10;
+    }],
+    ["actor", (candidate) => {
+      candidate.stageMutationReceipts.at(-1)!.actorAccountId = "account_other";
+    }],
+    ["time", (candidate) => {
+      candidate.stageMutationReceipts.at(-1)!.occurredAt = "2026-08-19T08:05:30.000Z";
+    }],
+    ["invalidation order", (candidate) => {
+      const receipt = candidate.stageMutationReceipts.at(-1);
+      assert.ok(receipt?.action === "rollback_stage");
+      receipt.result.invalidationIds.reverse();
+    }],
+    ["duplicate result target", (candidate) => {
+      const receipt = candidate.stageMutationReceipts.at(-1);
+      assert.ok(receipt?.action === "rollback_stage");
+      candidate.stageMutationReceipts.push({
+        ...structuredClone(receipt),
+        id: "stage_receipt_rollback_duplicate",
+        requestId: "request_stage_rollback_duplicate",
+        expectedTaskRevision: 9,
+        resultingTaskRevision: 10,
+      });
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithStageMutationReceipts();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v6-rollback-receipt-${label}`, false)
+        .save(candidate),
+      /invalid stage rollback receipt graph|invalid stage mutation receipt revision/u,
+      label,
+    );
+  }
+});
+
+test("transactions preserve immutable audit history and require an audited active pointer change", async () => {
+  const immutableCases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["artifact rewrite", (candidate) => {
+      candidate.stageArtifactVersions[0]!.content.contentHashSha256 = "a".repeat(64);
+    }],
+    ["receipt deletion", (candidate) => {
+      candidate.stageMutationReceipts.pop();
+    }],
+    ["invalidation reorder", (candidate) => {
+      candidate.stageArtifactInvalidations.reverse();
+    }],
+  ];
+  for (const [index, [label, mutate]] of immutableCases.entries()) {
+    const store = new LocalVideoTaskProductionStore(
+      `.data/test-video-task-v6-immutable-${index}`,
+      false,
+    );
+    await store.save(recordWithStageMutationReceipts());
+    await assert.rejects(
+      store.transact("task_launch_hero", (current) => {
+        assert.ok(current);
+        const next = structuredClone(current);
+        next.videoTask.revision += 1;
+        mutate(next);
+        return next;
+      }),
+      /cannot rewrite immutable/u,
+      label,
+    );
+  }
+
+  const pointerStore = new LocalVideoTaskProductionStore(
+    ".data/test-video-task-v6-unaudited-pointer",
+    false,
+  );
+  await pointerStore.save(recordWithArtifactGraph());
+  await assert.rejects(
+    pointerStore.transact("task_launch_hero", (current) => {
+      assert.ok(current);
+      const next = structuredClone(current);
+      next.videoTask.revision += 1;
+      next.activeStageArtifactVersionIds.strategy = "artifact_strategy_v2";
+      return next;
+    }),
+    /cannot change an active stage artifact without confirmation, rollback, or invalidation audit/u,
+  );
+
+  const mismatchedRollbackSeed = recordWithArtifactGraph();
+  mismatchedRollbackSeed.stageArtifactVersions.push({
+    ...structuredClone(mismatchedRollbackSeed.stageArtifactVersions[1]!),
+    id: "artifact_strategy_v3",
+    version: 3,
+    provenance: {
+      kind: "legacy_inferred",
+      migrationId: "migration_strategy_v3",
+      note: "用于验证回退审计必须绑定实际选择变化。",
+    },
+  });
+  const mismatchedRollbackStore = new LocalVideoTaskProductionStore(
+    ".data/test-video-task-v6-mismatched-rollback-pointer",
+    false,
+  );
+  await mismatchedRollbackStore.save(mismatchedRollbackSeed);
+  await assert.rejects(
+    mismatchedRollbackStore.transact("task_launch_hero", (current) => {
+      assert.ok(current);
+      const next = structuredClone(current);
+      next.videoTask.revision += 1;
+      next.activeStageArtifactVersionIds.strategy = "artifact_strategy_v3";
+      next.stageRollbacks.push({
+        id: "rollback_strategy_mismatched_source",
+        tenantId: next.videoTask.tenantId,
+        batchProjectId: next.videoTask.batchProjectId,
+        videoTaskId: next.videoTask.id,
+        stage: "strategy",
+        fromArtifactVersionId: "artifact_strategy_v2",
+        toArtifactVersionId: "artifact_strategy_v3",
+        expectedTaskRevision: 12,
+        reason: "伪造的回退来源",
+        requestedBy: "account_creator",
+        invalidationIds: [],
+        occurredAt: "2026-08-19T08:06:00.000Z",
+      });
+      return next;
+    }),
+    /rollback must exactly explain its active stage selection change/u,
+  );
+
+  const inertRollbackStore = new LocalVideoTaskProductionStore(
+    ".data/test-video-task-v6-inert-rollback",
+    false,
+  );
+  await inertRollbackStore.save(recordWithArtifactGraph());
+  await assert.rejects(
+    inertRollbackStore.transact("task_launch_hero", (current) => {
+      assert.ok(current);
+      const next = structuredClone(current);
+      next.videoTask.revision += 1;
+      next.stageRollbacks.push({
+        id: "rollback_strategy_without_selection_change",
+        tenantId: next.videoTask.tenantId,
+        batchProjectId: next.videoTask.batchProjectId,
+        videoTaskId: next.videoTask.id,
+        stage: "strategy",
+        fromArtifactVersionId: "artifact_strategy_v1",
+        toArtifactVersionId: "artifact_strategy_v2",
+        expectedTaskRevision: 12,
+        reason: "没有改变选择的伪回退",
+        requestedBy: "account_creator",
+        invalidationIds: [],
+        occurredAt: "2026-08-19T08:06:00.000Z",
+      });
+      return next;
+    }),
+    /rollback must exactly explain its active stage selection change/u,
+  );
+});
+
+test("transactions reject receipt backfills but allow an exact idempotent replay", async () => {
+  const receiptSource = recordWithStageMutationReceipts();
+  for (const [index, receipt] of [
+    receiptSource.stageMutationReceipts[0]!,
+    receiptSource.stageMutationReceipts.at(-1)!,
+  ].entries()) {
+    const store = new LocalVideoTaskProductionStore(
+      `.data/test-video-task-v6-receipt-backfill-${index}`,
+      false,
+    );
+    await store.save(recordWithArtifactGraph());
+    await assert.rejects(
+      store.transact("task_launch_hero", (current) => {
+        assert.ok(current);
+        const next = structuredClone(current);
+        next.videoTask.revision += 1;
+        next.stageMutationReceipts.push(structuredClone(receipt));
+        return next;
+      }),
+      /cannot backfill a stage (?:confirmation|rollback) receipt/u,
+    );
+  }
+
+  const store = new LocalVideoTaskProductionStore(".data/test-video-task-v6-replay", false);
+  const original = record();
+  await store.save(original);
+  await assert.rejects(
+    store.transact(original.videoTask.id, (current) => {
+      assert.ok(current);
+      return {
+        ...structuredClone(current),
+        videoTask: { ...structuredClone(current.videoTask), name: "同 revision 改写" },
+      };
+    }),
+    /must increment its revision exactly once/u,
+  );
+  assert.deepEqual(
+    await store.transact(original.videoTask.id, (current) => {
+      assert.ok(current);
+      return structuredClone(current);
+    }),
+    original,
+  );
+});
+
+test("persisted v1 through v5 aggregates upgrade explicitly to v6", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v6-upgrade-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
-  for (const version of [1, 2, 3, 4] as const) {
-    const current = record(`task_legacy_v${version}`);
-    current.stageArtifactVersions = [{
-      id: `artifact_legacy_v${version}`,
-      tenantId: current.videoTask.tenantId,
-      batchProjectId: current.videoTask.batchProjectId,
-      videoTaskId: current.videoTask.id,
-      stage: "strategy",
-      version: 1,
-      content: {
-        artifactId: `content_legacy_v${version}`,
-        schemaName: "marketing_strategy",
-        schemaVersion: 1,
-        contentHashSha256: version.toString().repeat(64),
-      },
-      dependencies: [{
-        kind: "vehicle_snapshot",
-        vehicleSnapshotId: `external_vehicle_snapshot_v${version}`,
-      }],
-      provenance: {
-        kind: "human_confirmation",
-        confirmationId: `legacy_confirmation_v${version}`,
-      },
-      createdAt: "2026-08-19T08:00:00.000Z",
-      createdBy: "account_creator",
-    }];
-    current.activeStageArtifactVersionIds = { strategy: `artifact_legacy_v${version}` };
+  for (const version of [1, 2, 3, 4, 5] as const) {
+    const current = version === 5
+      ? recordWithCommandState()
+      : record(`task_legacy_v${version}`);
+    if (version !== 5) {
+      current.stageArtifactVersions = [{
+        id: `artifact_legacy_v${version}`,
+        tenantId: current.videoTask.tenantId,
+        batchProjectId: current.videoTask.batchProjectId,
+        videoTaskId: current.videoTask.id,
+        stage: "strategy",
+        version: 1,
+        content: {
+          artifactId: `content_legacy_v${version}`,
+          schemaName: "marketing_strategy",
+          schemaVersion: 1,
+          contentHashSha256: version.toString().repeat(64),
+        },
+        dependencies: [{
+          kind: "vehicle_snapshot",
+          vehicleSnapshotId: `external_vehicle_snapshot_v${version}`,
+        }],
+        provenance: {
+          kind: "human_confirmation",
+          confirmationId: `legacy_confirmation_v${version}`,
+        },
+        createdAt: "2026-08-19T08:00:00.000Z",
+        createdBy: "account_creator",
+      }];
+      current.activeStageArtifactVersionIds = { strategy: `artifact_legacy_v${version}` };
+    }
+    const {
+      stageMutationReceipts: _stageMutationReceipts,
+      ...withoutV6
+    } = current;
     const {
       taskVehicleSnapshots: _taskVehicleSnapshots,
       strategyDrafts: _strategyDrafts,
@@ -666,28 +1061,39 @@ test("persisted v1 through v4 aggregates upgrade to empty v5 command state", asy
       stageConfirmationRequests: _stageConfirmationRequests,
       commandReceipts: _commandReceipts,
       ...withoutV5
-    } = current;
+    } = withoutV6;
     const { taskAssetSnapshots: _taskAssetSnapshots, ...withoutV4 } = withoutV5;
     const { ownershipTransfers: _ownershipTransfers, ...withoutV3 } = withoutV4;
-    const persisted = version === 4
-      ? { ...withoutV5, schemaVersion: 4 }
-      : version === 3
-        ? { ...withoutV4, schemaVersion: 3 }
-        : version === 2
-          ? { ...withoutV3, schemaVersion: 2 }
-          : {
-              schemaVersion: 1,
-              videoTask: current.videoTask,
-              stageArtifactVersions: current.stageArtifactVersions,
-              stageConfirmations: current.stageConfirmations,
-            };
+    const persisted = version === 5
+      ? { ...withoutV6, schemaVersion: 5 }
+      : version === 4
+        ? { ...withoutV5, schemaVersion: 4 }
+        : version === 3
+          ? { ...withoutV4, schemaVersion: 3 }
+          : version === 2
+            ? { ...withoutV3, schemaVersion: 2 }
+            : {
+                schemaVersion: 1,
+                videoTask: current.videoTask,
+                stageArtifactVersions: current.stageArtifactVersions,
+                stageConfirmations: current.stageConfirmations,
+              };
     await writeFile(
       join(directory, `${current.videoTask.id}.json`),
       `${JSON.stringify(persisted)}\n`,
       "utf8",
     );
     const upgraded = await new LocalVideoTaskProductionStore(directory).load(current.videoTask.id);
-    assert.equal(upgraded?.schemaVersion, 5);
+    assert.equal(upgraded?.schemaVersion, 6);
+    assert.deepEqual(upgraded?.stageMutationReceipts, []);
+    if (version === 5) {
+      assert.deepEqual(upgraded?.taskVehicleSnapshots, current.taskVehicleSnapshots);
+      assert.deepEqual(upgraded?.strategyDrafts, current.strategyDrafts);
+      assert.equal(upgraded?.activeStrategyDraftId, current.activeStrategyDraftId);
+      assert.deepEqual(upgraded?.stageConfirmationRequests, current.stageConfirmationRequests);
+      assert.deepEqual(upgraded?.commandReceipts, current.commandReceipts);
+      continue;
+    }
     assert.deepEqual(upgraded?.taskVehicleSnapshots, []);
     assert.deepEqual(upgraded?.strategyDrafts, []);
     assert.equal(upgraded?.activeStrategyDraftId, undefined);

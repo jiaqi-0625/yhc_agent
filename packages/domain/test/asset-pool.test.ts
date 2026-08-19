@@ -114,7 +114,7 @@ function pool(overrides: Partial<ProjectAssetPool> = {}): ProjectAssetPool {
 
 function record(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: "task_asset_lock",
       tenantId: project.tenantId,
@@ -146,6 +146,7 @@ function record(): VideoTaskProductionRecord {
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
@@ -310,7 +311,7 @@ test("lockVideoTaskAssetSnapshot atomically appends an immutable snapshot and ad
   const sourcePool = pool();
   const result = lockVideoTaskAssetSnapshot(source, project, sourcePool, 5, context());
 
-  assert.equal(result.schemaVersion, 5);
+  assert.equal(result.schemaVersion, 6);
   assert.equal(result.videoTask.assetSnapshotId, "asset_snapshot_created");
   assert.equal(result.videoTask.revision, 6);
   assert.equal(result.videoTask.updatedAt, "2026-08-19T06:00:00.000Z");

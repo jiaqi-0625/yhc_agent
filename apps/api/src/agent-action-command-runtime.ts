@@ -337,6 +337,19 @@ export class AgentActionCommandRuntime {
           replayed = true;
           return structuredClone(current);
         }
+        if (
+          current.stageMutationReceipts.some(
+            (candidate) =>
+              candidate.actorAccountId === scope.actorAccountId &&
+              candidate.requestId === input.requestId,
+          )
+        ) {
+          throw runtimeError(
+            "AIC-AGENT-COMMAND-IDEMPOTENCY_CONFLICT",
+            "The command request ID was already used by another stage mutation.",
+            409,
+          );
+        }
         if (project.status !== "active") {
           throw runtimeError(
             "AIC-AGENT-COMMAND-STATE_CONFLICT",

@@ -6,6 +6,7 @@ import type {
   StageArtifactInvalidation,
   StageArtifactVersion,
   StageConfirmation,
+  StageMutationReceipt,
   StageRollbackRecord,
   TaskAssetSnapshot,
   VehicleSnapshot,
@@ -15,10 +16,10 @@ import type {
   VideoTaskStrategyDraft,
 } from "@firefly/schemas";
 
-import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
+import { assertRevision, nextVideoTaskWorkflowState, videoTaskStageOrder } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 5;
+  schemaVersion: 6;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
@@ -32,6 +33,7 @@ export interface VideoTaskProductionRecord {
   activeStrategyDraftId?: string;
   stageConfirmationRequests: StageConfirmationRequest[];
   commandReceipts: AgentActionCommandReceipt[];
+  stageMutationReceipts: StageMutationReceipt[];
 }
 
 export interface ConfirmStageCommand {
@@ -59,6 +61,95 @@ export class StageConfirmationDeniedError extends Error {
   }
 }
 
+function sameDependency(
+  left: Readonly<StageArtifactDependency>,
+  right: Readonly<StageArtifactDependency>,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "vehicle_snapshot":
+      return right.kind === "vehicle_snapshot" && left.vehicleSnapshotId === right.vehicleSnapshotId;
+    case "asset_snapshot":
+      return right.kind === "asset_snapshot" && left.assetSnapshotId === right.assetSnapshotId;
+    case "stage_artifact":
+      return right.kind === "stage_artifact" &&
+        left.stage === right.stage &&
+        left.artifactVersionId === right.artifactVersionId;
+  }
+}
+
+/**
+ * Derives the only dependency set accepted for a human stage confirmation.
+ * Snapshot pointers and the direct upstream version are server-owned facts;
+ * callers may not omit, replace, or add dependencies.
+ */
+export function deriveStageConfirmationDependencies(
+  record: Readonly<VideoTaskProductionRecord>,
+  stage: VideoTaskStage,
+): StageArtifactDependency[] {
+  const { videoTask } = record;
+  const vehicleSnapshotId = videoTask.vehicleSnapshotId;
+  const assetSnapshotId = videoTask.assetSnapshotId;
+  const vehicleSnapshot = record.taskVehicleSnapshots.find(
+    (snapshot) =>
+      snapshot.id === vehicleSnapshotId && snapshot.projectId === videoTask.batchProjectId,
+  );
+  const assetSnapshot = record.taskAssetSnapshots.find(
+    (snapshot) =>
+      snapshot.id === assetSnapshotId &&
+      snapshot.tenantId === videoTask.tenantId &&
+      snapshot.batchProjectId === videoTask.batchProjectId &&
+      snapshot.videoTaskId === videoTask.id &&
+      snapshot.vehicleSnapshotId === vehicleSnapshotId,
+  );
+  if (
+    vehicleSnapshotId === undefined ||
+    assetSnapshotId === undefined ||
+    vehicleSnapshot === undefined ||
+    assetSnapshot === undefined
+  ) {
+    throw new StageConfirmationDeniedError(
+      "A stage confirmation requires the task's exact locked vehicle and asset snapshots.",
+    );
+  }
+
+  const dependencies: StageArtifactDependency[] = [
+    { kind: "vehicle_snapshot", vehicleSnapshotId },
+    { kind: "asset_snapshot", assetSnapshotId },
+  ];
+  if (stage === "strategy") return dependencies;
+
+  const stageIndex = videoTaskStageOrder.indexOf(stage);
+  const upstreamStage = videoTaskStageOrder[stageIndex - 1];
+  if (upstreamStage === undefined) {
+    throw new StageConfirmationDeniedError("The requested confirmation stage is invalid.");
+  }
+  const upstreamArtifactVersionId = record.activeStageArtifactVersionIds[upstreamStage];
+  const upstreamArtifact = record.stageArtifactVersions.find(
+    (artifact) =>
+      artifact.id === upstreamArtifactVersionId &&
+      artifact.stage === upstreamStage &&
+      artifact.tenantId === videoTask.tenantId &&
+      artifact.batchProjectId === videoTask.batchProjectId &&
+      artifact.videoTaskId === videoTask.id,
+  );
+  const upstreamInvalidated = upstreamArtifact !== undefined &&
+    record.stageArtifactInvalidations.some(
+      (invalidation) => invalidation.artifactVersionId === upstreamArtifact.id,
+    );
+  if (upstreamArtifact === undefined || upstreamInvalidated) {
+    throw new StageConfirmationDeniedError(
+      "A stage confirmation requires the current valid direct upstream version.",
+    );
+  }
+  dependencies.push({
+    kind: "stage_artifact",
+    stage: upstreamStage,
+    artifactVersionId: upstreamArtifact.id,
+  });
+  return dependencies;
+}
+
 function assertConfirmationScope(
   record: Readonly<VideoTaskProductionRecord>,
   command: Readonly<ConfirmStageCommand>,
@@ -77,27 +168,16 @@ function assertConfirmationScope(
   if (videoTask.currentStage !== command.stage || videoTask.stageStatus !== "awaiting_confirmation") {
     throw new StageConfirmationDeniedError("Only the current stage awaiting confirmation can be confirmed.");
   }
-  if (command.dependencies.length === 0) {
-    throw new StageConfirmationDeniedError("A confirmed artifact must record at least one dependency.");
-  }
-  for (const dependency of command.dependencies) {
-    if (dependency.kind !== "stage_artifact") continue;
-    const dependencyVersion = record.stageArtifactVersions.find(
-      (item) => item.id === dependency.artifactVersionId && item.stage === dependency.stage,
+  const expectedDependencies = deriveStageConfirmationDependencies(record, command.stage);
+  if (
+    command.dependencies.length !== expectedDependencies.length ||
+    command.dependencies.some(
+      (dependency, index) => !sameDependency(dependency, expectedDependencies[index]!),
+    )
+  ) {
+    throw new StageConfirmationDeniedError(
+      "Stage confirmation dependencies must exactly match the server-derived snapshot and upstream versions.",
     );
-    if (!dependencyVersion) {
-      throw new StageConfirmationDeniedError("A stage dependency does not belong to this video task.");
-    }
-    if (
-      record.stageArtifactInvalidations.some(
-        (invalidation) => invalidation.artifactVersionId === dependency.artifactVersionId,
-      )
-    ) {
-      throw new StageConfirmationDeniedError("An invalidated stage artifact cannot be used as a dependency.");
-    }
-    if (record.activeStageArtifactVersionIds[dependency.stage] !== dependency.artifactVersionId) {
-      throw new StageConfirmationDeniedError("A stage dependency is not the currently selected version.");
-    }
   }
 }
 
@@ -153,7 +233,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -180,5 +260,6 @@ export function confirmVideoTaskStage(
       : { activeStrategyDraftId: record.activeStrategyDraftId }),
     stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
     commandReceipts: structuredClone(record.commandReceipts),
+    stageMutationReceipts: structuredClone(record.stageMutationReceipts),
   };
 }

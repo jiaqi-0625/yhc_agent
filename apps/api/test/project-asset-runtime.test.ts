@@ -129,7 +129,7 @@ class MutableCompanyAssetProvider implements CompanyAssetProvider {
 
 function productionRecord(videoTaskId: string): VideoTaskProductionRecord {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: videoTaskId,
       tenantId: project.tenantId,
@@ -161,6 +161,7 @@ function productionRecord(videoTaskId: string): VideoTaskProductionRecord {
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 

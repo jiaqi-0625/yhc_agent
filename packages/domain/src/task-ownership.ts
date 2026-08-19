@@ -58,7 +58,7 @@ export function takeOverVideoTask(
   };
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: context.actorAccountId,
@@ -80,5 +80,6 @@ export function takeOverVideoTask(
       : { activeStrategyDraftId: record.activeStrategyDraftId }),
     stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
     commandReceipts: structuredClone(record.commandReceipts),
+    stageMutationReceipts: structuredClone(record.stageMutationReceipts),
   };
 }

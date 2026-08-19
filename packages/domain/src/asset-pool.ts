@@ -237,7 +237,7 @@ export function lockVideoTaskAssetSnapshot(
   };
   return {
     ...structuredClone(record),
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(task),
       assetSnapshotId: snapshot.id,

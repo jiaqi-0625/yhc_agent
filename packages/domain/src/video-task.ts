@@ -139,7 +139,7 @@ export function createVideoTask(
   const timestamp = context.occurredAt;
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: context.taskId,
       tenantId: context.tenantId,
@@ -171,6 +171,7 @@ export function createVideoTask(
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
@@ -221,7 +222,7 @@ export function assignVideoTaskOwner(
   };
 
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: request.targetOwnerAccountId,
@@ -243,5 +244,6 @@ export function assignVideoTaskOwner(
       : { activeStrategyDraftId: record.activeStrategyDraftId }),
     stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
     commandReceipts: structuredClone(record.commandReceipts),
+    stageMutationReceipts: structuredClone(record.stageMutationReceipts),
   };
 }

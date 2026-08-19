@@ -874,6 +874,130 @@ export const StageArtifactInvalidationSchema = Type.Object(
 );
 export type StageArtifactInvalidation = Static<typeof StageArtifactInvalidationSchema>;
 
+export const ConfirmVideoTaskStageRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    artifact: Type.Optional(StageArtifactContentReferenceSchema),
+    comment: Type.Optional(Type.String({ maxLength: 2000 })),
+  },
+  { additionalProperties: false },
+);
+export type ConfirmVideoTaskStageRequest = Static<typeof ConfirmVideoTaskStageRequestSchema>;
+
+export const RollbackVideoTaskStageRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    targetArtifactVersionId: Identifier,
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type RollbackVideoTaskStageRequest = Static<typeof RollbackVideoTaskStageRequestSchema>;
+
+export const StageConfirmedMutationResultSchema = Type.Object(
+  {
+    kind: Type.Literal("stage_confirmed"),
+    stage: VideoTaskStageSchema,
+    confirmationId: Identifier,
+    artifactVersionId: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type StageConfirmedMutationResult = Static<typeof StageConfirmedMutationResultSchema>;
+
+export const StageRolledBackMutationResultSchema = Type.Object(
+  {
+    kind: Type.Literal("stage_rolled_back"),
+    stage: VideoTaskStageSchema,
+    stageRollbackId: Identifier,
+    invalidationIds: Type.Array(Identifier, { maxItems: 500, uniqueItems: true }),
+  },
+  { additionalProperties: false },
+);
+export type StageRolledBackMutationResult = Static<typeof StageRolledBackMutationResultSchema>;
+
+export const StageMutationResultSchema = Type.Union([
+  StageConfirmedMutationResultSchema,
+  StageRolledBackMutationResultSchema,
+]);
+export type StageMutationResult = Static<typeof StageMutationResultSchema>;
+
+const StageMutationReceiptBaseFields = {
+  schemaVersion: Type.Literal(1),
+  id: Identifier,
+  tenantId: Identifier,
+  batchProjectId: Identifier,
+  videoTaskId: Identifier,
+  actorAccountId: Identifier,
+  requestId: Identifier,
+  payloadHash: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+  expectedTaskRevision: Type.Integer({ minimum: 1 }),
+  resultingTaskRevision: Type.Integer({ minimum: 1 }),
+  occurredAt: IsoDateTime,
+};
+
+export const ConfirmStageMutationReceiptSchema = Type.Object(
+  {
+    ...StageMutationReceiptBaseFields,
+    action: Type.Literal("confirm_stage"),
+    result: StageConfirmedMutationResultSchema,
+  },
+  { additionalProperties: false },
+);
+export type ConfirmStageMutationReceipt = Static<typeof ConfirmStageMutationReceiptSchema>;
+
+export const RollbackStageMutationReceiptSchema = Type.Object(
+  {
+    ...StageMutationReceiptBaseFields,
+    action: Type.Literal("rollback_stage"),
+    result: StageRolledBackMutationResultSchema,
+  },
+  { additionalProperties: false },
+);
+export type RollbackStageMutationReceipt = Static<typeof RollbackStageMutationReceiptSchema>;
+
+export const StageMutationReceiptSchema = Type.Union([
+  ConfirmStageMutationReceiptSchema,
+  RollbackStageMutationReceiptSchema,
+]);
+export type StageMutationReceipt = Static<typeof StageMutationReceiptSchema>;
+
+export const ConfirmVideoTaskStageResponseSchema = Type.Object(
+  {
+    replayed: Type.Boolean(),
+    receipt: ConfirmStageMutationReceiptSchema,
+    videoTask: VideoTaskSchema,
+    confirmation: StageConfirmationSchema,
+    artifactVersion: StageArtifactVersionSchema,
+  },
+  { additionalProperties: false },
+);
+export type ConfirmVideoTaskStageResponse = Static<typeof ConfirmVideoTaskStageResponseSchema>;
+
+export const RollbackVideoTaskStageResponseSchema = Type.Object(
+  {
+    replayed: Type.Boolean(),
+    receipt: RollbackStageMutationReceiptSchema,
+    videoTask: VideoTaskSchema,
+    rollback: StageRollbackRecordSchema,
+    invalidations: Type.Array(StageArtifactInvalidationSchema),
+  },
+  { additionalProperties: false },
+);
+export type RollbackVideoTaskStageResponse = Static<typeof RollbackVideoTaskStageResponseSchema>;
+
+export const VideoTaskStageAuditResponseSchema = Type.Object(
+  {
+    videoTask: VideoTaskSchema,
+    rollbacks: Type.Array(StageRollbackRecordSchema),
+    invalidations: Type.Array(StageArtifactInvalidationSchema),
+  },
+  { additionalProperties: false },
+);
+export type VideoTaskStageAuditResponse = Static<typeof VideoTaskStageAuditResponseSchema>;
+
 export const VehicleSnapshotSchema = Type.Object(
   {
     id: Identifier,
@@ -1280,6 +1404,21 @@ export const StageConfirmationRequestSchema = Type.Object(
   { additionalProperties: false },
 );
 export type StageConfirmationRequest = Static<typeof StageConfirmationRequestSchema>;
+
+export const VideoTaskStageVersionsResponseSchema = Type.Object(
+  {
+    videoTask: VideoTaskSchema,
+    activeArtifactVersionId: Type.Optional(Identifier),
+    versions: Type.Array(StageArtifactVersionSchema),
+    confirmations: Type.Array(StageConfirmationSchema),
+    rollbacks: Type.Array(StageRollbackRecordSchema),
+    invalidations: Type.Array(StageArtifactInvalidationSchema),
+    activeStrategyDraft: Type.Optional(VideoTaskStrategyDraftSchema),
+    confirmationRequest: Type.Optional(StageConfirmationRequestSchema),
+  },
+  { additionalProperties: false },
+);
+export type VideoTaskStageVersionsResponse = Static<typeof VideoTaskStageVersionsResponseSchema>;
 
 export const AgentActionCommandActionSchema = Type.Union([
   Type.Literal("generate_strategy"),

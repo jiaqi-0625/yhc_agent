@@ -82,7 +82,7 @@ function pool(): ProjectAssetPool {
 
 function task(videoTaskId: string): VideoTaskProductionRecord {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: videoTaskId,
       tenantId: project.tenantId,
@@ -114,6 +114,7 @@ function task(videoTaskId: string): VideoTaskProductionRecord {
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 

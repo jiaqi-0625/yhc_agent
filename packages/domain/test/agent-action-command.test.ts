@@ -131,7 +131,7 @@ test("strategy generation atomically locks snapshots, projects facts, and record
   }, project, pool, vehicleSnapshot, commandContext);
 
   assert.equal(source.videoTask.vehicleSnapshotId, undefined);
-  assert.equal(result.schemaVersion, 5);
+  assert.equal(result.schemaVersion, 6);
   assert.equal(result.videoTask.revision, 2);
   assert.equal(result.taskVehicleSnapshots.length, 1);
   assert.equal(result.taskAssetSnapshots.length, 1);

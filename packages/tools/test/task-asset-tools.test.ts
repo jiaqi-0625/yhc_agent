@@ -66,7 +66,7 @@ const taskContext = {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: "task_1",
       tenantId: "tenant_1",
@@ -110,6 +110,7 @@ function productionRecord(): VideoTaskProductionRecord {
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 

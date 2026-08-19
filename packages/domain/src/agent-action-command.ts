@@ -343,7 +343,7 @@ export function generateVideoTaskStrategy(
 
   return {
     ...structuredClone(record),
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -431,7 +431,7 @@ export function requestVideoTaskStrategyApproval(
 
   return {
     ...structuredClone(record),
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,

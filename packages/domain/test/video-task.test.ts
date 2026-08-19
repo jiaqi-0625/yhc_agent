@@ -48,10 +48,10 @@ const creationContext = {
   taskId: "task_family",
 };
 
-test("createVideoTask derives a clean schema-v5 aggregate from active project and server scope", () => {
+test("createVideoTask derives a clean schema-v6 aggregate from active project and server scope", () => {
   const record = createVideoTask(project, creationInput, creationContext);
 
-  assert.equal(record.schemaVersion, 5);
+  assert.equal(record.schemaVersion, 6);
   assert.deepEqual(record.videoTask, {
     id: "task_family",
     tenantId: "tenant_firefly",
@@ -78,7 +78,13 @@ test("createVideoTask derives a clean schema-v5 aggregate from active project an
   assert.deepEqual(record.stageRollbacks, []);
   assert.deepEqual(record.stageArtifactInvalidations, []);
   assert.deepEqual(record.ownershipTransfers, []);
+  assert.deepEqual(record.taskVehicleSnapshots, []);
   assert.deepEqual(record.taskAssetSnapshots, []);
+  assert.deepEqual(record.strategyDrafts, []);
+  assert.equal(record.activeStrategyDraftId, undefined);
+  assert.deepEqual(record.stageConfirmationRequests, []);
+  assert.deepEqual(record.commandReceipts, []);
+  assert.deepEqual(record.stageMutationReceipts, []);
 });
 
 test("createVideoTask rejects archived/cross-tenant projects and malformed direct domain input", () => {

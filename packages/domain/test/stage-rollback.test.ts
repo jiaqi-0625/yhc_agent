@@ -12,6 +12,7 @@ import {
   StageConfirmationDeniedError,
   StageRollbackDeniedError,
   confirmVideoTaskStage,
+  deriveStageConfirmationDependencies,
   rollbackVideoTaskStage,
   type ConfirmStageCommand,
   type VideoTaskProductionRecord,
@@ -61,7 +62,7 @@ function completedRecord(): VideoTaskProductionRecord {
     artifact("script_unrelated", "script", 2, "strategy_v1", "strategy"),
   ];
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: "task_rollback",
       tenantId: "tenant_firefly",
@@ -73,6 +74,7 @@ function completedRecord(): VideoTaskProductionRecord {
       stageStatus: "confirmed",
       revision: 12,
       vehicleSnapshotId: "vehicle_snapshot_1",
+      assetSnapshotId: "asset_snapshot_1",
       audience: "年轻家庭",
       theme: "城市出行",
       durationSeconds: 30,
@@ -83,7 +85,19 @@ function completedRecord(): VideoTaskProductionRecord {
       updatedBy: "account_owner",
     },
     stageArtifactVersions: versions,
-    stageConfirmations: [],
+    stageConfirmations: versions.map((version, index) => ({
+      id: `${version.id}_confirmation`,
+      tenantId: "tenant_firefly",
+      batchProjectId: "project_launch",
+      videoTaskId: "task_rollback",
+      stage: version.stage,
+      artifactVersionId: version.id,
+      decision: "confirmed",
+      source: "human_action",
+      expectedTaskRevision: index + 1,
+      actorAccountId: version.createdBy,
+      occurredAt: version.createdAt,
+    })),
     activeStageArtifactVersionIds: {
       strategy: "strategy_v2",
       asset_matching: "asset_v1",
@@ -95,11 +109,47 @@ function completedRecord(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
-    taskVehicleSnapshots: [],
-    taskAssetSnapshots: [],
+    taskVehicleSnapshots: [{
+      id: "vehicle_snapshot_1",
+      projectId: "project_launch",
+      vehicleId: "vehicle_e5",
+      vehicleVersion: 1,
+      brandId: "brand_firefly",
+      brand: "萤火汽车",
+      series: "E5",
+      modelYear: 2026,
+      trim: "长续航版",
+      parameters: {},
+      fixedClaims: [],
+      optionalClaims: [],
+      prohibitedClaims: [],
+      referenceAssetIds: [],
+      createdAt: "2026-08-18T08:00:00.000Z",
+      createdBy: "account_owner",
+    }],
+    taskAssetSnapshots: [{
+      id: "asset_snapshot_1",
+      tenantId: "tenant_firefly",
+      batchProjectId: "project_launch",
+      videoTaskId: "task_rollback",
+      version: 1,
+      sourceProjectAssetPoolRevision: 1,
+      vehicleSnapshotId: "vehicle_snapshot_1",
+      assets: [{
+        assetId: "asset_vehicle_1",
+        version: 1,
+        source: "company_catalog",
+        sourceProvider: "mock_company_assets",
+        category: "vehicle",
+        vehicleId: "vehicle_e5",
+      }],
+      createdAt: "2026-08-18T08:01:00.000Z",
+      createdBy: "account_owner",
+    }],
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
@@ -312,6 +362,7 @@ test("new confirmations cannot reuse an invalidated or unselected stage artifact
 test("regenerated downstream work can be confirmed only against the selected rollback target", () => {
   const rolledBack = rollbackVideoTaskStage(completedRecord(), request(), context());
   rolledBack.videoTask.stageStatus = "awaiting_confirmation";
+  const dependencies = deriveStageConfirmationDependencies(rolledBack, "asset_matching");
   const result = confirmVideoTaskStage(
     rolledBack,
     {
@@ -323,13 +374,7 @@ test("regenerated downstream work can be confirmed only against the selected rol
         schemaVersion: 1,
         contentHashSha256: "e".repeat(64),
       },
-      dependencies: [
-        {
-          kind: "stage_artifact",
-          stage: "strategy",
-          artifactVersionId: "strategy_v1",
-        },
-      ],
+      dependencies,
     },
     {
       tenantId: "tenant_firefly",

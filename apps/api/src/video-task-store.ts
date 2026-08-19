@@ -20,6 +20,7 @@ import {
   StageArtifactVersionSchema,
   StageConfirmationSchema,
   StageConfirmationRequestSchema,
+  StageMutationReceiptSchema,
   StageRollbackRecordSchema,
   TaskAssetSnapshotSchema,
   VehicleSnapshotSchema,
@@ -29,6 +30,7 @@ import {
   VideoTaskStageSchema,
   type StageArtifactVersion,
   type StageConfirmation,
+  type StageMutationReceipt,
   type VideoTask,
   type VideoTaskStage,
 } from "@firefly/schemas";
@@ -42,8 +44,13 @@ interface LegacyVideoTaskProductionRecord {
   stageConfirmations: StageConfirmation[];
 }
 
-type LegacyVideoTaskProductionRecordV4 = Omit<
+type LegacyVideoTaskProductionRecordV5 = Omit<
   VideoTaskProductionRecord,
+  "schemaVersion" | "stageMutationReceipts"
+> & { schemaVersion: 5 };
+
+type LegacyVideoTaskProductionRecordV4 = Omit<
+  LegacyVideoTaskProductionRecordV5,
   | "schemaVersion"
   | "taskVehicleSnapshots"
   | "strategyDrafts"
@@ -119,7 +126,7 @@ const ActiveStageArtifactVersionIdsSchema = Type.Partial(
 
 const VideoTaskProductionRecordSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(5),
+    schemaVersion: Type.Literal(6),
     videoTask: VideoTaskSchema,
     stageArtifactVersions: Type.Array(StageArtifactVersionSchema),
     stageConfirmations: Type.Array(StageConfirmationSchema),
@@ -133,6 +140,7 @@ const VideoTaskProductionRecordSchema = Type.Object(
     activeStrategyDraftId: Type.Optional(IdentifierSchema),
     stageConfirmationRequests: Type.Array(StageConfirmationRequestSchema),
     commandReceipts: Type.Array(AgentActionCommandReceiptSchema),
+    stageMutationReceipts: Type.Array(StageMutationReceiptSchema),
   },
   { additionalProperties: false },
 );
@@ -224,6 +232,7 @@ function validateRecord(
     ...record.strategyDrafts,
     ...record.stageConfirmationRequests,
     ...record.commandReceipts,
+    ...record.stageMutationReceipts,
   ];
   if (
     scoped.some(
@@ -251,6 +260,7 @@ function validateRecord(
     record.strategyDrafts,
     record.stageConfirmationRequests,
     record.commandReceipts,
+    record.stageMutationReceipts,
   ] as const;
   if (
     collections.some(
@@ -381,8 +391,11 @@ function validateRecord(
     if (
       artifact === undefined ||
       artifact.stage !== confirmation.stage ||
-      (artifact.provenance.kind === "human_confirmation" &&
-        artifact.provenance.confirmationId !== confirmation.id)
+      artifact.createdBy !== confirmation.actorAccountId ||
+      artifact.createdAt !== confirmation.occurredAt ||
+      confirmation.expectedTaskRevision > record.videoTask.revision ||
+      artifact.provenance.kind !== "human_confirmation" ||
+      artifact.provenance.confirmationId !== confirmation.id
     ) {
       throw new Error("Persisted video task has an invalid stage confirmation graph.");
     }
@@ -473,14 +486,20 @@ function validateRecord(
     if (!rollbacksById.has(current.cause.rollbackId)) {
       throw new Error("Persisted video task has an invalid rollback invalidation cause.");
     }
+    const rootRollback = rollbacksById.get(current.cause.rollbackId)!;
+    if (
+      invalidation.reason !== rootRollback.reason ||
+      invalidation.occurredAt !== rootRollback.occurredAt
+    ) {
+      throw new Error("Persisted video task has inconsistent rollback invalidation audit details.");
+    }
     rollbackRootByInvalidationId.set(invalidation.id, current.cause.rollbackId);
   }
   for (const rollback of record.stageRollbacks) {
-    const rootedInvalidationIds = new Set(
-      record.stageArtifactInvalidations
-        .filter((invalidation) => rollbackRootByInvalidationId.get(invalidation.id) === rollback.id)
-        .map(({ id: invalidationId }) => invalidationId),
+    const rootedInvalidations = record.stageArtifactInvalidations.filter(
+      (invalidation) => rollbackRootByInvalidationId.get(invalidation.id) === rollback.id,
     );
+    const rootedInvalidationIds = new Set(rootedInvalidations.map(({ id: invalidationId }) => invalidationId));
     const listedInvalidationIds = new Set(rollback.invalidationIds);
     if (
       rootedInvalidationIds.size !== listedInvalidationIds.size ||
@@ -489,6 +508,66 @@ function validateRecord(
       )
     ) {
       throw new Error("Persisted video task has an incomplete stage rollback invalidation graph.");
+    }
+
+    const existedAtRollback = (artifact: StageArtifactVersion): boolean => {
+      if (artifact.provenance.kind === "human_confirmation") {
+        const confirmation = confirmationsById.get(artifact.provenance.confirmationId);
+        if (confirmation !== undefined) {
+          return confirmation.expectedTaskRevision < rollback.expectedTaskRevision;
+        }
+      }
+      return artifact.createdAt.localeCompare(rollback.occurredAt, "en") <= 0;
+    };
+    const wasInvalidatedBeforeRollback = (artifactId: string): boolean => {
+      const invalidation = record.stageArtifactInvalidations.find(
+        (candidate) => candidate.artifactVersionId === artifactId,
+      );
+      if (invalidation === undefined) return false;
+      const rootId = rollbackRootByInvalidationId.get(invalidation.id);
+      const root = rootId === undefined ? undefined : rollbacksById.get(rootId);
+      return root !== undefined && (
+        root.expectedTaskRevision < rollback.expectedTaskRevision ||
+        (root.expectedTaskRevision === rollback.expectedTaskRevision &&
+          root.occurredAt.localeCompare(rollback.occurredAt, "en") < 0)
+      );
+    };
+    const affectedArtifactIds = new Set([rollback.fromArtifactVersionId]);
+    const expectedInvalidatedArtifactIds = new Set<string>();
+    let expanded = true;
+    while (expanded) {
+      expanded = false;
+      for (const artifact of record.stageArtifactVersions) {
+        if (
+          affectedArtifactIds.has(artifact.id) ||
+          videoTaskStageRank[artifact.stage] <= videoTaskStageRank[rollback.stage] ||
+          !existedAtRollback(artifact) ||
+          wasInvalidatedBeforeRollback(artifact.id)
+        ) {
+          continue;
+        }
+        const dependsOnAffectedArtifact = artifact.dependencies.some(
+          (dependency) =>
+            dependency.kind === "stage_artifact" &&
+            affectedArtifactIds.has(dependency.artifactVersionId),
+        );
+        if (!dependsOnAffectedArtifact) continue;
+        affectedArtifactIds.add(artifact.id);
+        expectedInvalidatedArtifactIds.add(artifact.id);
+        expanded = true;
+      }
+    }
+    const rootedArtifactIds = new Set(
+      rootedInvalidations.map(({ artifactVersionId }) => artifactVersionId),
+    );
+    const activeArtifactIds = new Set(Object.values(record.activeStageArtifactVersionIds));
+    if (
+      rootedArtifactIds.size !== expectedInvalidatedArtifactIds.size ||
+      [...expectedInvalidatedArtifactIds].some(
+        (artifactId) => !rootedArtifactIds.has(artifactId) || activeArtifactIds.has(artifactId),
+      )
+    ) {
+      throw new Error("Persisted video task has an incomplete recursive rollback invalidation closure.");
     }
   }
   const confirmationRequests = new Map(
@@ -505,17 +584,24 @@ function validateRecord(
   ) {
     throw new Error("Persisted video task has an invalid stage confirmation request pointer.");
   }
-  const receiptRequestKeys = record.commandReceipts.map(
+  const allMutationReceipts = [
+    ...record.commandReceipts,
+    ...record.stageMutationReceipts,
+  ];
+  if (new Set(allMutationReceipts.map(({ id: receiptId }) => receiptId)).size !== allMutationReceipts.length) {
+    throw new Error("Persisted video task has duplicate mutation receipt identities.");
+  }
+  const receiptRequestKeys = allMutationReceipts.map(
     (receipt) => `${receipt.actorAccountId}:${receipt.requestId}`,
   );
   if (new Set(receiptRequestKeys).size !== receiptRequestKeys.length) {
-    throw new Error("Persisted video task has duplicate command request identities.");
+    throw new Error("Persisted video task has duplicate mutation request identities.");
   }
-  const receiptResultingRevisions = record.commandReceipts.map(
+  const receiptResultingRevisions = allMutationReceipts.map(
     ({ resultingTaskRevision }) => resultingTaskRevision,
   );
   if (new Set(receiptResultingRevisions).size !== receiptResultingRevisions.length) {
-    throw new Error("Persisted video task has duplicate command result revisions.");
+    throw new Error("Persisted video task has duplicate mutation result revisions.");
   }
   const referencedConfirmationRequestIds = new Set<string>();
   for (const receipt of record.commandReceipts) {
@@ -585,6 +671,59 @@ function validateRecord(
   if (referencedConfirmationRequestIds.size !== record.stageConfirmationRequests.length) {
     throw new Error("Persisted video task has an unreferenced stage confirmation request.");
   }
+  const referencedStageConfirmationIds = new Set<string>();
+  const referencedStageArtifactIds = new Set<string>();
+  const referencedStageRollbackIds = new Set<string>();
+  for (const receipt of record.stageMutationReceipts) {
+    if (
+      receipt.resultingTaskRevision !== receipt.expectedTaskRevision + 1 ||
+      receipt.resultingTaskRevision > record.videoTask.revision
+    ) {
+      throw new Error("Persisted video task has an invalid stage mutation receipt revision.");
+    }
+    if (receipt.action === "confirm_stage") {
+      const confirmation = confirmationsById.get(receipt.result.confirmationId);
+      const artifact = artifactsById.get(receipt.result.artifactVersionId);
+      if (
+        confirmation === undefined ||
+        artifact === undefined ||
+        receipt.result.stage !== confirmation.stage ||
+        receipt.result.stage !== artifact.stage ||
+        confirmation.artifactVersionId !== artifact.id ||
+        confirmation.expectedTaskRevision !== receipt.expectedTaskRevision ||
+        confirmation.actorAccountId !== receipt.actorAccountId ||
+        confirmation.occurredAt !== receipt.occurredAt ||
+        artifact.createdBy !== receipt.actorAccountId ||
+        artifact.createdAt !== receipt.occurredAt ||
+        artifact.provenance.kind !== "human_confirmation" ||
+        artifact.provenance.confirmationId !== confirmation.id ||
+        referencedStageConfirmationIds.has(confirmation.id) ||
+        referencedStageArtifactIds.has(artifact.id)
+      ) {
+        throw new Error("Persisted video task has an invalid stage confirmation receipt graph.");
+      }
+      referencedStageConfirmationIds.add(confirmation.id);
+      referencedStageArtifactIds.add(artifact.id);
+      continue;
+    }
+
+    const rollback = rollbacksById.get(receipt.result.stageRollbackId);
+    if (
+      rollback === undefined ||
+      receipt.result.stage !== rollback.stage ||
+      rollback.expectedTaskRevision !== receipt.expectedTaskRevision ||
+      rollback.requestedBy !== receipt.actorAccountId ||
+      rollback.occurredAt !== receipt.occurredAt ||
+      rollback.invalidationIds.length !== receipt.result.invalidationIds.length ||
+      rollback.invalidationIds.some(
+        (invalidationId, index) => invalidationId !== receipt.result.invalidationIds[index],
+      ) ||
+      referencedStageRollbackIds.has(rollback.id)
+    ) {
+      throw new Error("Persisted video task has an invalid stage rollback receipt graph.");
+    }
+    referencedStageRollbackIds.add(rollback.id);
+  }
   const generatedDraftIds = record.commandReceipts.flatMap((receipt) =>
     receipt.action === "generate_strategy" && receipt.result.kind === "strategy_generated"
       ? [receipt.result.strategyDraftId]
@@ -595,6 +734,184 @@ function validateRecord(
     generatedDraftIds.length !== record.strategyDrafts.length
   ) {
     throw new Error("Persisted video task has an invalid strategy command receipt graph.");
+  }
+}
+
+function recordsEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function assertImmutablePrefix<T>(
+  label: string,
+  current: readonly T[],
+  next: readonly T[],
+): void {
+  if (
+    next.length < current.length ||
+    current.some((item, index) => !recordsEqual(item, next[index]))
+  ) {
+    throw new Error(`A video task transaction cannot rewrite immutable ${label} history.`);
+  }
+}
+
+function validateTransition(
+  current: Readonly<VideoTaskProductionRecord>,
+  next: Readonly<VideoTaskProductionRecord>,
+): void {
+  if (recordsEqual(current, next)) return;
+  if (next.videoTask.revision !== current.videoTask.revision + 1) {
+    throw new Error("A video task transaction must increment its revision exactly once.");
+  }
+
+  assertImmutablePrefix(
+    "stage artifact version",
+    current.stageArtifactVersions,
+    next.stageArtifactVersions,
+  );
+  assertImmutablePrefix(
+    "stage confirmation",
+    current.stageConfirmations,
+    next.stageConfirmations,
+  );
+  assertImmutablePrefix("stage rollback", current.stageRollbacks, next.stageRollbacks);
+  assertImmutablePrefix(
+    "stage artifact invalidation",
+    current.stageArtifactInvalidations,
+    next.stageArtifactInvalidations,
+  );
+  assertImmutablePrefix("ownership transfer", current.ownershipTransfers, next.ownershipTransfers);
+  assertImmutablePrefix("vehicle snapshot", current.taskVehicleSnapshots, next.taskVehicleSnapshots);
+  assertImmutablePrefix("asset snapshot", current.taskAssetSnapshots, next.taskAssetSnapshots);
+  assertImmutablePrefix(
+    "stage confirmation request",
+    current.stageConfirmationRequests,
+    next.stageConfirmationRequests,
+  );
+  assertImmutablePrefix("Agent command receipt", current.commandReceipts, next.commandReceipts);
+  assertImmutablePrefix(
+    "stage mutation receipt",
+    current.stageMutationReceipts,
+    next.stageMutationReceipts,
+  );
+
+  const newConfirmations = next.stageConfirmations.slice(current.stageConfirmations.length);
+  const newArtifacts = next.stageArtifactVersions.slice(current.stageArtifactVersions.length);
+  const newRollbacks = next.stageRollbacks.slice(current.stageRollbacks.length);
+  const newInvalidations = next.stageArtifactInvalidations.slice(
+    current.stageArtifactInvalidations.length,
+  );
+  const newStageReceipts = next.stageMutationReceipts.slice(
+    current.stageMutationReceipts.length,
+  );
+  for (const artifact of newArtifacts) {
+    const confirmationId = artifact.provenance.kind === "human_confirmation"
+      ? artifact.provenance.confirmationId
+      : undefined;
+    if (
+      confirmationId === undefined ||
+      !newConfirmations.some(
+        (confirmation) =>
+          confirmation.id === confirmationId &&
+          confirmation.artifactVersionId === artifact.id,
+      )
+    ) {
+      throw new Error(
+        "A video task transaction must create each stage artifact with its new human confirmation.",
+      );
+    }
+  }
+  for (const confirmation of newConfirmations) {
+    const previousId = current.activeStageArtifactVersionIds[confirmation.stage];
+    const nextId = next.activeStageArtifactVersionIds[confirmation.stage];
+    if (
+      confirmation.expectedTaskRevision !== current.videoTask.revision ||
+      previousId === nextId ||
+      nextId !== confirmation.artifactVersionId ||
+      !newArtifacts.some((artifact) => artifact.id === confirmation.artifactVersionId)
+    ) {
+      throw new Error(
+        "A video task transaction confirmation must select its new artifact at the current revision.",
+      );
+    }
+  }
+  for (const receipt of newStageReceipts) {
+    if (receipt.action === "confirm_stage") {
+      if (
+        !newConfirmations.some(
+          (confirmation) => confirmation.id === receipt.result.confirmationId,
+        ) ||
+        !newArtifacts.some(
+          (artifact) => artifact.id === receipt.result.artifactVersionId,
+        )
+      ) {
+        throw new Error(
+          "A video task transaction cannot backfill a stage confirmation receipt.",
+        );
+      }
+      if (
+        receipt.expectedTaskRevision !== current.videoTask.revision ||
+        receipt.resultingTaskRevision !== next.videoTask.revision
+      ) {
+        throw new Error(
+          "A video task transaction stage confirmation receipt has an invalid revision.",
+        );
+      }
+      continue;
+    }
+    if (
+      !newRollbacks.some(
+        (rollback) => rollback.id === receipt.result.stageRollbackId,
+      )
+    ) {
+      throw new Error("A video task transaction cannot backfill a stage rollback receipt.");
+    }
+    if (
+      receipt.expectedTaskRevision !== current.videoTask.revision ||
+      receipt.resultingTaskRevision !== next.videoTask.revision
+    ) {
+      throw new Error("A video task transaction stage rollback receipt has an invalid revision.");
+    }
+  }
+  const rollbackStages = new Set<VideoTaskStage>();
+  for (const rollback of newRollbacks) {
+    const previousId = current.activeStageArtifactVersionIds[rollback.stage];
+    const nextId = next.activeStageArtifactVersionIds[rollback.stage];
+    if (
+      rollbackStages.has(rollback.stage) ||
+      rollback.expectedTaskRevision !== current.videoTask.revision ||
+      previousId === nextId ||
+      rollback.fromArtifactVersionId !== previousId ||
+      rollback.toArtifactVersionId !== nextId
+    ) {
+      throw new Error(
+        "A video task transaction rollback must exactly explain its active stage selection change.",
+      );
+    }
+    rollbackStages.add(rollback.stage);
+  }
+  for (const stage of Object.keys(videoTaskStageRank) as VideoTaskStage[]) {
+    const previousId = current.activeStageArtifactVersionIds[stage];
+    const nextId = next.activeStageArtifactVersionIds[stage];
+    if (previousId === nextId) continue;
+    const confirmed = nextId !== undefined && newConfirmations.some(
+      (confirmation) =>
+        confirmation.stage === stage && confirmation.artifactVersionId === nextId,
+    );
+    const rolledBack = nextId !== undefined && newRollbacks.some(
+      (rollback) =>
+        rollback.stage === stage &&
+        rollback.fromArtifactVersionId === previousId &&
+        rollback.toArtifactVersionId === nextId,
+    );
+    const invalidated = nextId === undefined && previousId !== undefined && newInvalidations.some(
+      (invalidation) =>
+        invalidation.stage === stage && invalidation.artifactVersionId === previousId,
+    );
+    if (!confirmed && !rolledBack && !invalidated) {
+      throw new Error(
+        "A video task transaction cannot change an active stage artifact without confirmation, rollback, or invalidation audit.",
+      );
+    }
   }
 }
 
@@ -624,6 +941,7 @@ export interface VideoTaskCreationStore extends VideoTaskProductionStore {
 function upgradeRecord(
   parsed:
     | VideoTaskProductionRecord
+    | LegacyVideoTaskProductionRecordV5
     | LegacyVideoTaskProductionRecordV4
     | LegacyVideoTaskProductionRecordV3
     | LegacyVideoTaskProductionRecordV2
@@ -633,34 +951,43 @@ function upgradeRecord(
   if (parsed.videoTask.id !== videoTaskId) {
     throw new Error("Persisted video task has an invalid format or scope.");
   }
-  if (parsed.schemaVersion === 5) return structuredClone(parsed);
+  if (parsed.schemaVersion === 6) return structuredClone(parsed);
+  if (parsed.schemaVersion === 5) {
+    return {
+      ...structuredClone(parsed),
+      schemaVersion: 6,
+      stageMutationReceipts: [],
+    };
+  }
   if (parsed.schemaVersion === 4) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 5,
+      schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
       taskVehicleSnapshots: [],
       strategyDrafts: [],
       stageConfirmationRequests: [],
       commandReceipts: [],
+      stageMutationReceipts: [],
     };
   }
   if (parsed.schemaVersion === 3) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 5,
+      schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
       taskAssetSnapshots: [],
       taskVehicleSnapshots: [],
       strategyDrafts: [],
       stageConfirmationRequests: [],
       commandReceipts: [],
+      stageMutationReceipts: [],
     };
   }
   if (parsed.schemaVersion === 2) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 5,
+      schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
       ownershipTransfers: [],
       taskAssetSnapshots: [],
@@ -668,6 +995,7 @@ function upgradeRecord(
       strategyDrafts: [],
       stageConfirmationRequests: [],
       commandReceipts: [],
+      stageMutationReceipts: [],
     };
   }
   if ((parsed as { schemaVersion: number }).schemaVersion !== 1) {
@@ -682,7 +1010,7 @@ function upgradeRecord(
     }
   }
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: structuredClone(parsed.videoTask),
     stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
     stageConfirmations: structuredClone(parsed.stageConfirmations),
@@ -695,6 +1023,7 @@ function upgradeRecord(
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
@@ -944,6 +1273,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
       const record = upgradeRecord(
         rawRecord as
           | VideoTaskProductionRecord
+          | LegacyVideoTaskProductionRecordV5
           | LegacyVideoTaskProductionRecordV4
           | LegacyVideoTaskProductionRecordV3
           | LegacyVideoTaskProductionRecordV2
@@ -1237,6 +1567,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
       ) {
         throw new Error("A video task transaction cannot change the aggregate scope.");
       }
+      if (current !== undefined) validateTransition(current.record, next);
       if (fileLock === undefined) {
         await this.#write(next, current?.creation, false);
       } else {

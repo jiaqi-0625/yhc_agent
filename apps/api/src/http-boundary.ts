@@ -10,6 +10,7 @@ import {
   AssetPoolError,
   BatchProjectCreationError,
   RevisionConflictError,
+  StageConfirmationDeniedError,
   StageRollbackDeniedError,
   TaskTakeoverDeniedError,
   VideoTaskAssignmentDeniedError,
@@ -91,6 +92,7 @@ export function errorStatus(error: Error): number {
     error instanceof VideoTaskAssignmentDeniedError ||
     error instanceof TaskTakeoverDeniedError ||
     error instanceof AgentActionCommandError ||
+    error instanceof StageConfirmationDeniedError ||
     error instanceof StageRollbackDeniedError ||
     (error instanceof VideoTaskCreationError &&
       error.code === "AIC-VIDEO-TASK-CREATION-PROJECT_INACTIVE")
@@ -124,6 +126,7 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AssetPoolError ||
       normalized instanceof AgentActionCommandError ||
       normalized instanceof BatchProjectCreationError ||
+      normalized instanceof StageConfirmationDeniedError ||
       normalized instanceof StageRollbackDeniedError ||
       normalized instanceof VideoTaskCreationError ||
       normalized instanceof VideoTaskAssignmentDeniedError ||

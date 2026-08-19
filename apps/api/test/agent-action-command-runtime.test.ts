@@ -596,16 +596,10 @@ test("a locked task regenerates from its asset snapshot after the current pool a
 
 test("legacy locked snapshot pointers fail with an explicit migration error", async () => {
   const { commandRuntime, creator, taskId, tasks } = await fixture();
-  await tasks.transact(taskId, (current) => {
-    assert.ok(current);
-    return {
-      ...structuredClone(current),
-      videoTask: {
-        ...structuredClone(current.videoTask),
-        vehicleSnapshotId: "legacy_vehicle_snapshot",
-      },
-    };
-  });
+  const legacy = await tasks.load(taskId);
+  assert.ok(legacy);
+  legacy.videoTask.vehicleSnapshotId = "legacy_vehicle_snapshot";
+  await tasks.save(legacy);
   await assert.rejects(
     commandRuntime.execute(project.id, taskId, {
       requestId: "command_legacy_snapshot",

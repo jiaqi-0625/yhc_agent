@@ -75,7 +75,7 @@ function productionRecord(stage: "script" | "storyboard" | "delivery"): VideoTas
   const currentIndex = stageOrder.indexOf(stage);
   const upstream = stageOrder.slice(0, currentIndex).map(artifact);
   return {
-    schemaVersion: 5,
+    schemaVersion: 6,
     videoTask: {
       id: "task_1",
       tenantId: "tenant_1",
@@ -120,6 +120,7 @@ function productionRecord(stage: "script" | "storyboard" | "delivery"): VideoTas
     strategyDrafts: [],
     stageConfirmationRequests: [],
     commandReceipts: [],
+    stageMutationReceipts: [],
   };
 }
 
