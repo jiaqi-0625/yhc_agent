@@ -61,7 +61,7 @@ function completedRecord(): VideoTaskProductionRecord {
     artifact("script_unrelated", "script", 2, "strategy_v1", "strategy"),
   ];
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     videoTask: {
       id: "task_rollback",
       tenantId: "tenant_firefly",
@@ -94,6 +94,7 @@ function completedRecord(): VideoTaskProductionRecord {
     },
     stageRollbacks: [],
     stageArtifactInvalidations: [],
+    ownershipTransfers: [],
   };
 }
 

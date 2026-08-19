@@ -2,13 +2,19 @@ import { randomUUID } from "node:crypto";
 
 import {
   assertCanOperateVideoTask,
+  assertCanTakeOverVideoTask,
   confirmVideoTaskStage,
   rollbackVideoTaskStage,
+  takeOverVideoTask,
   type ConfirmStageCommand,
   type VideoTaskProductionRecord,
   type WorkspaceSessionScope,
 } from "@firefly/domain";
-import type { BatchProject, RollbackStageRequest } from "@firefly/schemas";
+import type {
+  BatchProject,
+  RollbackStageRequest,
+  TakeOverVideoTaskRequest,
+} from "@firefly/schemas";
 
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
 
@@ -17,6 +23,7 @@ const idPrefixes = {
   confirmation: "sc",
   rollback: "sr",
   invalidation: "sai",
+  ownership_transfer: "vot",
 } as const;
 
 export class VideoTaskNotFoundError extends Error {
@@ -33,7 +40,12 @@ export class StageConfirmationRuntime {
     private readonly store: VideoTaskProductionStore,
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: (
-      kind: "artifact_version" | "confirmation" | "rollback" | "invalidation",
+      kind:
+        | "artifact_version"
+        | "confirmation"
+        | "rollback"
+        | "invalidation"
+        | "ownership_transfer",
     ) => string = (kind) => `${idPrefixes[kind]}_${randomUUID()}`,
   ) {}
 
@@ -43,18 +55,17 @@ export class StageConfirmationRuntime {
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<VideoTaskProductionRecord> {
-    const current = await this.store.load(videoTaskId);
-    if (!current) throw new VideoTaskNotFoundError(videoTaskId);
-    assertCanOperateVideoTask(session, project, current.videoTask);
-    const next = confirmVideoTaskStage(current, command, {
-      tenantId: session.tenantId,
-      batchProjectId: project.id,
-      actorAccountId: session.actorAccountId,
-      occurredAt: this.now(),
-      createId: this.createId,
+    return this.store.transact(videoTaskId, (current) => {
+      if (!current) throw new VideoTaskNotFoundError(videoTaskId);
+      assertCanOperateVideoTask(session, project, current.videoTask);
+      return confirmVideoTaskStage(current, command, {
+        tenantId: session.tenantId,
+        batchProjectId: project.id,
+        actorAccountId: session.actorAccountId,
+        occurredAt: this.now(),
+        createId: this.createId,
+      });
     });
-    await this.store.save(next);
-    return structuredClone(next);
   }
 
   async rollbackStage(
@@ -63,17 +74,35 @@ export class StageConfirmationRuntime {
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<VideoTaskProductionRecord> {
-    const current = await this.store.load(videoTaskId);
-    if (!current) throw new VideoTaskNotFoundError(videoTaskId);
-    assertCanOperateVideoTask(session, project, current.videoTask);
-    const next = rollbackVideoTaskStage(current, request, {
-      tenantId: session.tenantId,
-      batchProjectId: project.id,
-      actorAccountId: session.actorAccountId,
-      occurredAt: this.now(),
-      createId: this.createId,
+    return this.store.transact(videoTaskId, (current) => {
+      if (!current) throw new VideoTaskNotFoundError(videoTaskId);
+      assertCanOperateVideoTask(session, project, current.videoTask);
+      return rollbackVideoTaskStage(current, request, {
+        tenantId: session.tenantId,
+        batchProjectId: project.id,
+        actorAccountId: session.actorAccountId,
+        occurredAt: this.now(),
+        createId: this.createId,
+      });
     });
-    await this.store.save(next);
-    return structuredClone(next);
+  }
+
+  async takeOverTask(
+    videoTaskId: string,
+    request: Readonly<TakeOverVideoTaskRequest>,
+    project: Readonly<BatchProject>,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<VideoTaskProductionRecord> {
+    return this.store.transact(videoTaskId, (current) => {
+      if (!current) throw new VideoTaskNotFoundError(videoTaskId);
+      assertCanTakeOverVideoTask(session, project, current.videoTask);
+      return takeOverVideoTask(current, request, {
+        tenantId: session.tenantId,
+        batchProjectId: project.id,
+        actorAccountId: session.actorAccountId,
+        occurredAt: this.now(),
+        createId: () => this.createId("ownership_transfer"),
+      });
+    });
   }
 }

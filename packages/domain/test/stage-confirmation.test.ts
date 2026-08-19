@@ -15,7 +15,7 @@ const occurredAt = "2026-08-18T09:30:00.000Z";
 
 function record(stage: VideoTaskStage = "strategy"): VideoTaskProductionRecord {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     videoTask: {
       id: "task_ws_102",
       tenantId: "tenant_firefly",
@@ -42,6 +42,7 @@ function record(stage: VideoTaskStage = "strategy"): VideoTaskProductionRecord {
     activeStageArtifactVersionIds: {},
     stageRollbacks: [],
     stageArtifactInvalidations: [],
+    ownershipTransfers: [],
   };
 }
 

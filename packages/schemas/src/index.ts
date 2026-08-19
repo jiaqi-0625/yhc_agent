@@ -232,6 +232,32 @@ export const VideoTaskSchema = Type.Object(
 );
 export type VideoTask = Static<typeof VideoTaskSchema>;
 
+export const TakeOverVideoTaskRequestSchema = Type.Object(
+  {
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type TakeOverVideoTaskRequest = Static<typeof TakeOverVideoTaskRequestSchema>;
+
+export const VideoTaskOwnershipTransferSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    fromOwnerAccountId: Identifier,
+    toOwnerAccountId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+    source: Type.Literal("human_action"),
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type VideoTaskOwnershipTransfer = Static<typeof VideoTaskOwnershipTransferSchema>;
+
 export const AssetCategorySchema = Type.Union([
   Type.Literal("vehicle"),
   Type.Literal("person"),

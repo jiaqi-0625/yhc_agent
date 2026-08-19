@@ -16,7 +16,7 @@ import {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     videoTask: {
       id: "task_persisted",
       tenantId: "tenant_firefly",
@@ -42,6 +42,7 @@ function productionRecord(): VideoTaskProductionRecord {
     activeStageArtifactVersionIds: {},
     stageRollbacks: [],
     stageArtifactInvalidations: [],
+    ownershipTransfers: [],
   };
 }
 
@@ -129,6 +130,21 @@ const session = {
   accessGrants: [projectGrant],
 };
 
+function projectMemberSession(actorAccountId: string) {
+  return {
+    tenantId: "tenant_firefly",
+    actorAccountId,
+    role: "creator" as const,
+    accessGrants: [
+      {
+        ...projectGrant,
+        id: `grant_${actorAccountId}_e5`,
+        accountId: actorAccountId,
+      },
+    ],
+  };
+}
+
 test("confirmation persists the task, immutable version, and audit event in one record", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-store-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
@@ -166,6 +182,11 @@ test("a failed atomic save leaves the previously loaded aggregate unchanged", as
     },
     async save() {
       throw new Error("simulated disk failure");
+    },
+    async transact(_videoTaskId, update) {
+      const next = await update(structuredClone(original));
+      await this.save(next);
+      return next;
     },
   };
   const runtime = new StageConfirmationRuntime(failingStore);
@@ -232,6 +253,11 @@ test("a failed rollback save does not partially update the loaded aggregate", as
     },
     async save() {
       throw new Error("simulated rollback disk failure");
+    },
+    async transact(_videoTaskId, update) {
+      const next = await update(structuredClone(original));
+      await this.save(next);
+      return next;
     },
   };
   const runtime = new StageConfirmationRuntime(failingStore);
@@ -331,8 +357,73 @@ test("store upgrades WS-102 schema v1 records and selects each stage's latest ve
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 2);
+  assert.equal(upgraded?.schemaVersion, 3);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
   assert.deepEqual(upgraded?.stageRollbacks, []);
   assert.deepEqual(upgraded?.stageArtifactInvalidations, []);
+  assert.deepEqual(upgraded?.ownershipTransfers, []);
+});
+
+test("store upgrades WS-103 schema v2 records with an empty ownership audit", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v2-store-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const current = rollbackRecord();
+  const legacy = {
+    ...current,
+    schemaVersion: 2,
+  };
+  delete (legacy as Partial<VideoTaskProductionRecord>).ownershipTransfers;
+  await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
+
+  const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
+  assert.equal(upgraded?.schemaVersion, 3);
+  assert.deepEqual(upgraded?.ownershipTransfers, []);
+  assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
+});
+
+test("two concurrent takeover requests with the same revision produce exactly one new owner", async () => {
+  const store = new LocalVideoTaskProductionStore(".data/test-concurrent-takeover", false);
+  await store.save(rollbackRecord());
+  let sequence = 0;
+  const runtime = new StageConfirmationRuntime(
+    store,
+    () => "2026-08-19T05:00:00.000Z",
+    (kind) => `${kind}_${++sequence}`,
+  );
+  const takeoverRequest = {
+    expectedTaskRevision: 7,
+    reason: "并发接管测试",
+  };
+
+  const outcomes = await Promise.allSettled([
+    runtime.takeOverTask(
+      "task_persisted",
+      takeoverRequest,
+      project,
+      projectMemberSession("account_member_a"),
+    ),
+    runtime.takeOverTask(
+      "task_persisted",
+      takeoverRequest,
+      project,
+      projectMemberSession("account_member_b"),
+    ),
+  ]);
+  const fulfilled = outcomes.filter(
+    (outcome): outcome is PromiseFulfilledResult<VideoTaskProductionRecord> =>
+      outcome.status === "fulfilled",
+  );
+  const rejected = outcomes.filter(
+    (outcome): outcome is PromiseRejectedResult => outcome.status === "rejected",
+  );
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.ok(rejected[0]?.reason instanceof RevisionConflictError);
+
+  const persisted = await store.load("task_persisted");
+  assert.ok(persisted);
+  assert.equal(persisted.videoTask.revision, 8);
+  assert.equal(persisted.videoTask.ownerAccountId, fulfilled[0]?.value.videoTask.ownerAccountId);
+  assert.equal(persisted.ownershipTransfers.length, 1);
+  assert.equal(persisted.ownershipTransfers[0]?.toOwnerAccountId, persisted.videoTask.ownerAccountId);
 });

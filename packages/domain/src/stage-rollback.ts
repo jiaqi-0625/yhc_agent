@@ -205,7 +205,7 @@ export function rollbackVideoTaskStage(
   const workflow = rollbackWorkflowState(request.stage);
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     videoTask: {
       ...structuredClone(record.videoTask),
       ...workflow,
@@ -221,5 +221,6 @@ export function rollbackVideoTaskStage(
       ...structuredClone(record.stageArtifactInvalidations),
       ...invalidations,
     ],
+    ownershipTransfers: structuredClone(record.ownershipTransfers),
   };
 }

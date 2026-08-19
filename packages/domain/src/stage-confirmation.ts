@@ -6,19 +6,21 @@ import type {
   StageConfirmation,
   StageRollbackRecord,
   VideoTask,
+  VideoTaskOwnershipTransfer,
   VideoTaskStage,
 } from "@firefly/schemas";
 
 import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 2;
+  schemaVersion: 3;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
   activeStageArtifactVersionIds: Partial<Record<VideoTaskStage, string>>;
   stageRollbacks: StageRollbackRecord[];
   stageArtifactInvalidations: StageArtifactInvalidation[];
+  ownershipTransfers: VideoTaskOwnershipTransfer[];
 }
 
 export interface ConfirmStageCommand {
@@ -140,7 +142,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -158,5 +160,6 @@ export function confirmVideoTaskStage(
     },
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
+    ownershipTransfers: structuredClone(record.ownershipTransfers),
   };
 }
