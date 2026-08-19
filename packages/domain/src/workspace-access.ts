@@ -159,6 +159,31 @@ export function assertCanViewBatchProject(
   }
 }
 
+export function assertCanManageBatchProjectAssets(
+  scope: Readonly<WorkspaceSessionScope>,
+  project: Readonly<BatchProject>,
+): void {
+  assertCanViewBatchProject(scope, project);
+  if (project.status !== "active") {
+    throw new WorkspaceAccessDeniedError(
+      "AIC-AUTH-PROJECT_SCOPE_DENIED",
+      "Only an active batch project can accept asset changes.",
+    );
+  }
+  if (scope.role !== "creator") {
+    throw new WorkspaceAccessDeniedError(
+      "AIC-AUTH-ROLE_DENIED",
+      "Only an authorized production account can manage project assets.",
+    );
+  }
+  if (!hasVehicleProjectGrant(scope, project.brandId, project.vehicleId)) {
+    throw new WorkspaceAccessDeniedError(
+      "AIC-AUTH-PROJECT_SCOPE_DENIED",
+      "The account does not have vehicle-project membership to manage project assets.",
+    );
+  }
+}
+
 function assertTaskBelongsToProject(
   project: Readonly<BatchProject>,
   task: Readonly<VideoTask>,

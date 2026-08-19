@@ -17,7 +17,12 @@ import type {
   CompanyAssetReference,
 } from "@firefly/tools";
 
+import {
+  defaultProjectAssetCoordinator,
+  type ProjectAssetCoordinator,
+} from "./project-asset-coordinator.ts";
 import type { ProjectAssetPoolStore } from "./project-asset-pool-store.ts";
+import type { TemporaryAssetStore } from "./temporary-asset-store.ts";
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
 
 export type ProjectAssetRuntimeErrorCode =
@@ -25,6 +30,7 @@ export type ProjectAssetRuntimeErrorCode =
   | "AIC-ASSET-POOL-NOT-FOUND"
   | "AIC-ASSET-POOL-PROJECT-LINK-INVALID"
   | "AIC-ASSET-POOL-CATALOG-REFERENCE-UNAVAILABLE"
+  | "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE"
   | "AIC-VIDEO-TASK-NOT-FOUND";
 
 export class ProjectAssetRuntimeError extends Error {
@@ -59,6 +65,8 @@ export class ProjectAssetRuntime {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: (kind: "task_asset_snapshot") => string = (kind) =>
       `${idPrefixes[kind]}_${randomUUID()}`,
+    private readonly temporaryAssetStore?: TemporaryAssetStore,
+    private readonly coordinator: ProjectAssetCoordinator = defaultProjectAssetCoordinator,
   ) {}
 
   #providerScope(
@@ -181,28 +189,30 @@ export class ProjectAssetRuntime {
     selectedReferences: readonly CompanyAssetReference[],
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<ProjectAssetPool> {
-    const normalized = await this.#normalizeSelectedReferences(
-      selectedReferences,
-      project,
-      session,
-    );
-    const occurredAt = this.now();
-    return this.poolStore.transact(project.id, (current) => {
-      if (current !== undefined) {
-        throw new ProjectAssetRuntimeError(
-          "AIC-ASSET-POOL-ALREADY-EXISTS",
-          `Batch project '${project.id}' already has an asset pool.`,
-        );
-      }
-      return createProjectAssetPool(
+    return this.coordinator.runExclusive(project.id, async () => {
+      const normalized = await this.#normalizeSelectedReferences(
+        selectedReferences,
         project,
-        normalized,
-        this.#mutationContext(session, occurredAt, project.assetPoolId),
+        session,
       );
+      const occurredAt = this.now();
+      return this.poolStore.transact(project.id, (current) => {
+        if (current !== undefined) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-POOL-ALREADY-EXISTS",
+            `Batch project '${project.id}' already has an asset pool.`,
+          );
+        }
+        return createProjectAssetPool(
+          project,
+          normalized,
+          this.#mutationContext(session, occurredAt, project.assetPoolId),
+        );
+      });
     });
   }
 
-  async getCurrentPool(
+  async #getCurrentPoolUncoordinated(
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<ProjectAssetPool> {
@@ -230,28 +240,83 @@ export class ProjectAssetRuntime {
     });
   }
 
+  async getCurrentPool(
+    project: Readonly<BatchProject>,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<ProjectAssetPool> {
+    return this.coordinator.runExclusive(project.id, () =>
+      this.#getCurrentPoolUncoordinated(project, session),
+    );
+  }
+
+  async #assertTemporaryReferencesUsable(
+    pool: Readonly<ProjectAssetPool>,
+    project: Readonly<BatchProject>,
+    occurredAt: string,
+  ): Promise<void> {
+    const references = pool.assets.filter((asset) => asset.source === "local_upload");
+    if (references.length === 0) return;
+    if (this.temporaryAssetStore === undefined) {
+      throw new ProjectAssetRuntimeError(
+        "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE",
+        "Temporary asset metadata is unavailable for snapshot validation.",
+      );
+    }
+    const assets = await this.temporaryAssetStore.loadProject(project.id);
+    const occurredAtTimestamp = Date.parse(occurredAt);
+    for (const reference of references) {
+      const asset = assets.find((candidate) => candidate.id === reference.assetId);
+      const expiresAtTimestamp =
+        asset?.expiresAt === undefined ? undefined : Date.parse(asset.expiresAt);
+      if (
+        asset === undefined ||
+        !Number.isFinite(occurredAtTimestamp) ||
+        asset.tenantId !== project.tenantId ||
+        asset.batchProjectId !== project.id ||
+        asset.vehicleId !== project.vehicleId ||
+        asset.version !== reference.version ||
+        asset.category !== reference.category ||
+        asset.checksumSha256.toLowerCase() !== reference.checksumSha256.toLowerCase() ||
+        asset.validationStatus !== "valid" ||
+        !asset.rightsConfirmed ||
+        asset.validationIssues.length > 0 ||
+        (expiresAtTimestamp !== undefined &&
+          (!Number.isFinite(expiresAtTimestamp) || expiresAtTimestamp <= occurredAtTimestamp))
+      ) {
+        throw new ProjectAssetRuntimeError(
+          "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE",
+          "A project-local asset is invalid, expired, or no longer matches its pool reference.",
+        );
+      }
+    }
+  }
+
   async lockTaskSnapshot(
     videoTaskId: string,
     expectedTaskRevision: number,
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<VideoTaskProductionRecord> {
-    const pool = await this.getCurrentPool(project, session);
-    return this.videoTaskStore.transact(videoTaskId, (current) => {
-      if (current === undefined) {
-        throw new ProjectAssetRuntimeError(
-          "AIC-VIDEO-TASK-NOT-FOUND",
-          `Video task '${videoTaskId}' was not found.`,
+    return this.coordinator.runExclusive(project.id, async () => {
+      const pool = await this.#getCurrentPoolUncoordinated(project, session);
+      const occurredAt = this.now();
+      await this.#assertTemporaryReferencesUsable(pool, project, occurredAt);
+      return this.videoTaskStore.transact(videoTaskId, (current) => {
+        if (current === undefined) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-VIDEO-TASK-NOT-FOUND",
+            `Video task '${videoTaskId}' was not found.`,
+          );
+        }
+        assertCanOperateVideoTask(session, project, current.videoTask);
+        return lockVideoTaskAssetSnapshot(
+          current,
+          project,
+          pool,
+          expectedTaskRevision,
+          this.#mutationContext(session, occurredAt),
         );
-      }
-      assertCanOperateVideoTask(session, project, current.videoTask);
-      return lockVideoTaskAssetSnapshot(
-        current,
-        project,
-        pool,
-        expectedTaskRevision,
-        this.#mutationContext(session, this.now()),
-      );
+      });
     });
   }
 }

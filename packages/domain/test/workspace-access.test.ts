@@ -12,6 +12,7 @@ import type {
 import {
   WorkspaceAccessDeniedError,
   assertCanCreateBatchProject,
+  assertCanManageBatchProjectAssets,
   assertCanManageBrand,
   assertCanOperateVideoTask,
   assertCanTakeOverVideoTask,
@@ -203,6 +204,45 @@ test("grants for another account or tenant never expand the authenticated scope"
   assert.equal(canViewBatchProject(forged, project), false);
   assert.equal(
     deniedCode(() => assertCanViewBatchProject(forged, project)),
+    "AIC-AUTH-PROJECT_SCOPE_DENIED",
+  );
+});
+
+test("only creator project members can manage project-scoped temporary assets", () => {
+  assert.doesNotThrow(() =>
+    assertCanManageBatchProjectAssets(scope("account_creator"), project),
+  );
+  const brandAdministrator = scope(
+    "account_admin",
+    "content_admin",
+    [grant("account_admin", { kind: "brand", brandId: brand.id })],
+  );
+  assert.doesNotThrow(() => assertCanViewBatchProject(brandAdministrator, project));
+  assert.equal(
+    deniedCode(() => assertCanManageBatchProjectAssets(brandAdministrator, project)),
+    "AIC-AUTH-ROLE_DENIED",
+  );
+  const reviewer = scope("account_reviewer", "reviewer");
+  assert.equal(
+    deniedCode(() => assertCanManageBatchProjectAssets(reviewer, project)),
+    "AIC-AUTH-ROLE_DENIED",
+  );
+  assert.equal(
+    deniedCode(() =>
+      assertCanManageBatchProjectAssets(
+        scope("account_creator", "creator", []),
+        project,
+      ),
+    ),
+    "AIC-AUTH-PROJECT_SCOPE_DENIED",
+  );
+  assert.equal(
+    deniedCode(() =>
+      assertCanManageBatchProjectAssets(
+        scope("account_creator"),
+        { ...project, status: "archived" },
+      ),
+    ),
     "AIC-AUTH-PROJECT_SCOPE_DENIED",
   );
 });

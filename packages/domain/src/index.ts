@@ -6,5 +6,6 @@ export * from "./stage-confirmation.ts";
 export * from "./stage-rollback.ts";
 export * from "./strategy.ts";
 export * from "./task-ownership.ts";
+export * from "./temporary-assets.ts";
 export * from "./workflow.ts";
 export * from "./workspace-access.ts";
