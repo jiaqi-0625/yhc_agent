@@ -17,8 +17,13 @@ interface LegacyVideoTaskProductionRecord {
   stageConfirmations: StageConfirmation[];
 }
 
-type LegacyVideoTaskProductionRecordV2 = Omit<
+type LegacyVideoTaskProductionRecordV3 = Omit<
   VideoTaskProductionRecord,
+  "schemaVersion" | "taskAssetSnapshots"
+> & { schemaVersion: 3 };
+
+type LegacyVideoTaskProductionRecordV2 = Omit<
+  LegacyVideoTaskProductionRecordV3,
   "schemaVersion" | "ownershipTransfers"
 > & { schemaVersion: 2 };
 
@@ -42,6 +47,7 @@ export interface VideoTaskProductionStore {
 function upgradeRecord(
   parsed:
     | VideoTaskProductionRecord
+    | LegacyVideoTaskProductionRecordV3
     | LegacyVideoTaskProductionRecordV2
     | LegacyVideoTaskProductionRecord,
   videoTaskId: string,
@@ -49,12 +55,20 @@ function upgradeRecord(
   if (parsed.videoTask.id !== videoTaskId) {
     throw new Error("Persisted video task has an invalid format.");
   }
-  if (parsed.schemaVersion === 3) return parsed;
+  if (parsed.schemaVersion === 4) return parsed;
+  if (parsed.schemaVersion === 3) {
+    return {
+      ...structuredClone(parsed),
+      schemaVersion: 4,
+      taskAssetSnapshots: [],
+    };
+  }
   if (parsed.schemaVersion === 2) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 3,
+      schemaVersion: 4,
       ownershipTransfers: [],
+      taskAssetSnapshots: [],
     };
   }
   if ((parsed as { schemaVersion: number }).schemaVersion !== 1) {
@@ -69,7 +83,7 @@ function upgradeRecord(
     }
   }
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     videoTask: structuredClone(parsed.videoTask),
     stageArtifactVersions: structuredClone(parsed.stageArtifactVersions),
     stageConfirmations: structuredClone(parsed.stageConfirmations),
@@ -77,6 +91,7 @@ function upgradeRecord(
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskAssetSnapshots: [],
   };
 }
 
@@ -105,6 +120,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskProductionStore {
     try {
       const parsed = JSON.parse(await readFile(this.#path(videoTaskId), "utf8")) as
         | VideoTaskProductionRecord
+        | LegacyVideoTaskProductionRecordV3
         | LegacyVideoTaskProductionRecordV2
         | LegacyVideoTaskProductionRecord;
       const upgraded = upgradeRecord(parsed, videoTaskId);

@@ -57,7 +57,7 @@ export function takeOverVideoTask(
   };
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: context.actorAccountId,
@@ -71,5 +71,6 @@ export function takeOverVideoTask(
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
     ownershipTransfers: [...structuredClone(record.ownershipTransfers), transfer],
+    taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
   };
 }

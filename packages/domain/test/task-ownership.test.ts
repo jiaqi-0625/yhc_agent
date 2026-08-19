@@ -10,7 +10,7 @@ import {
 
 function record(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     videoTask: {
       id: "task_takeover",
       tenantId: "tenant_firefly",
@@ -36,6 +36,7 @@ function record(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskAssetSnapshots: [],
   };
 }
 

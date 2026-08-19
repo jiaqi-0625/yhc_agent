@@ -16,7 +16,7 @@ import {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     videoTask: {
       id: "task_persisted",
       tenantId: "tenant_firefly",
@@ -43,6 +43,7 @@ function productionRecord(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskAssetSnapshots: [],
   };
 }
 
@@ -357,11 +358,12 @@ test("store upgrades WS-102 schema v1 records and selects each stage's latest ve
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 3);
+  assert.equal(upgraded?.schemaVersion, 4);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
   assert.deepEqual(upgraded?.stageRollbacks, []);
   assert.deepEqual(upgraded?.stageArtifactInvalidations, []);
   assert.deepEqual(upgraded?.ownershipTransfers, []);
+  assert.deepEqual(upgraded?.taskAssetSnapshots, []);
 });
 
 test("store upgrades WS-103 schema v2 records with an empty ownership audit", async (context) => {
@@ -373,11 +375,31 @@ test("store upgrades WS-103 schema v2 records with an empty ownership audit", as
     schemaVersion: 2,
   };
   delete (legacy as Partial<VideoTaskProductionRecord>).ownershipTransfers;
+  delete (legacy as Partial<VideoTaskProductionRecord>).taskAssetSnapshots;
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 3);
+  assert.equal(upgraded?.schemaVersion, 4);
   assert.deepEqual(upgraded?.ownershipTransfers, []);
+  assert.deepEqual(upgraded?.taskAssetSnapshots, []);
+  assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
+});
+
+test("store upgrades WS-202 schema v3 records with an empty task asset snapshot history", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v3-store-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const current = rollbackRecord();
+  const legacy = {
+    ...current,
+    schemaVersion: 3,
+  };
+  delete (legacy as Partial<VideoTaskProductionRecord>).taskAssetSnapshots;
+  await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
+
+  const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
+  assert.equal(upgraded?.schemaVersion, 4);
+  assert.deepEqual(upgraded?.taskAssetSnapshots, []);
+  assert.equal(upgraded?.ownershipTransfers.length, current.ownershipTransfers.length);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
 });
 

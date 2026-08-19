@@ -5,6 +5,7 @@ import type {
   StageArtifactVersion,
   StageConfirmation,
   StageRollbackRecord,
+  TaskAssetSnapshot,
   VideoTask,
   VideoTaskOwnershipTransfer,
   VideoTaskStage,
@@ -13,7 +14,7 @@ import type {
 import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 3;
+  schemaVersion: 4;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
@@ -21,6 +22,7 @@ export interface VideoTaskProductionRecord {
   stageRollbacks: StageRollbackRecord[];
   stageArtifactInvalidations: StageArtifactInvalidation[];
   ownershipTransfers: VideoTaskOwnershipTransfer[];
+  taskAssetSnapshots: TaskAssetSnapshot[];
 }
 
 export interface ConfirmStageCommand {
@@ -142,7 +144,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -161,5 +163,6 @@ export function confirmVideoTaskStage(
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
     ownershipTransfers: structuredClone(record.ownershipTransfers),
+    taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
   };
 }
