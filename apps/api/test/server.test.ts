@@ -89,7 +89,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /workspace-agent-dialog-v3/u);
+  assert.match(page, /workspace-agent-dialog-v4/u);
   assert.match(page, /type="module"/u);
 
   const [
@@ -131,6 +131,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(agentApiScript, /seenEventIds/u);
   assert.match(agentPanelScript, /bindAgentPanel/u);
   assert.match(agentPanelScript, /abortRun/u);
+  assert.match(agentPanelScript, /createAgentPanelLayoutController/u);
+  assert.match(agentPanelScript, /Alt\+Shift\+A/u);
   assert.match(workspaceApiScript, /generateStrategy/u);
   assert.match(await workspaceShellResponse.text(), /bindWorkspaceShell/u);
   assert.match(script, /读取车型事实快照/u);
@@ -148,7 +150,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /确认生成策略/u);
   assert.match(script, /videoTaskId/u);
   assert.match(script, /cancel-generation/u);
-  assert.doesNotMatch(agentPanelScript, /createAgentPanelLayoutController/u);
+  assert.match(page, /id="agent-resizer"/u);
+  assert.match(page, /id="collapse-agent"/u);
 });
 
 test("unknown endpoints return a stable business error", async (context) => {
