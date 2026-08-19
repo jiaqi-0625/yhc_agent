@@ -263,9 +263,15 @@ test("Agent session listing stays scoped to the selected video task", async (con
   const response = await fetch(`${baseUrl}/v1/sessions?videoTaskId=${encodeURIComponent(firstWork.work.id)}`);
   assert.equal(response.status, 200);
   const body = await json(response);
-  assert.deepEqual(body.sessions.map((session: { id: string }) => session.id), [
-    "session_task_choice_2",
+  assert.deepEqual(new Set(body.sessions.map((session: { id: string }) => session.id)), new Set([
     "session_task_choice_1",
-  ]);
+    "session_task_choice_2",
+  ]));
+  const [newer, older] = body.sessions as Array<{ id: string; updatedAt: string }>;
+  assert.ok(newer && older);
+  assert.ok(newer.updatedAt > older.updatedAt || (newer.updatedAt === older.updatedAt && newer.id < older.id));
   assert.ok(body.sessions.every((session: { videoTaskId: string }) => session.videoTaskId === firstWork.work.id));
+
+  const unscoped = await fetch(`${baseUrl}/v1/sessions`);
+  assert.equal(unscoped.status, 400);
 });

@@ -9,7 +9,6 @@ const state = {
   sessionVideoTaskId: null,
   sessions: [],
   taskContext: null,
-  activeAbortController: null,
   activeRunId: null,
   lastPrompt: "",
   busy: false,
@@ -1050,7 +1049,7 @@ function compareSessions(left, right) {
 
 function renderSessionOptions() {
   elements.sessionSelect.replaceChildren();
-  state.sessions.slice().sort(compareSessions).forEach(function (session, index) {
+  state.sessions.forEach(function (session, index) {
     const option = document.createElement("option");
     option.value = session.id;
     option.textContent = (index === 0 ? "最近会话" : "历史会话 " + (index + 1)) + " · " + session.messageCount + " 条消息";
@@ -1153,13 +1152,7 @@ async function restoreSessionForCurrentWork() {
 
 async function ensureSessionForCurrentWork() {
   const videoTaskId = state.work?.work.id || null;
-  if (state.sessionId && state.sessionVideoTaskId === videoTaskId) {
-    await loadTaskSessions(videoTaskId);
-    const current = state.sessions.find(function (session) { return session.id === state.sessionId; });
-    if (current) updateSession(current);
-    else await restoreSessionForCurrentWork();
-    return;
-  }
+  if (state.sessionId && state.sessionVideoTaskId === videoTaskId) return;
   await restoreSessionForCurrentWork();
 }
 
@@ -1211,8 +1204,6 @@ async function sendMessage(text) {
   elements.prompt.value = "";
   elements.prompt.style.height = "auto";
   const turn = createAgentTurn();
-  const controller = new AbortController();
-  state.activeAbortController = controller;
   let streamedText = "";
   let liveAnswer = null;
   try {
@@ -1220,7 +1211,6 @@ async function sendMessage(text) {
       state.sessionId,
       message,
       {
-        signal: controller.signal,
         onRunStarted: function (run) {
           state.activeRunId = run.runId;
         },
@@ -1260,7 +1250,6 @@ async function sendMessage(text) {
       elements.retryMessage.hidden = false;
     }
   } finally {
-    state.activeAbortController = null;
     state.activeRunId = null;
     elements.cancelGeneration.disabled = false;
     setBusy(false);

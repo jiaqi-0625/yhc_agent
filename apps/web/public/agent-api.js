@@ -25,11 +25,16 @@ function waitForRetry(delayMs, signal) {
       reject(signal.reason instanceof Error ? signal.reason : new DOMException("Aborted", "AbortError"));
       return;
     }
-    const timer = setTimeout(resolve, delayMs);
-    signal?.addEventListener("abort", function () {
+    const onAbort = function () {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
       reject(signal.reason instanceof Error ? signal.reason : new DOMException("Aborted", "AbortError"));
-    }, { once: true });
+    };
+    const timer = setTimeout(function () {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, delayMs);
+    signal?.addEventListener("abort", onAbort, { once: true });
   });
 }
 
@@ -158,7 +163,7 @@ async function streamAgentMessage(sessionId, message, options = {}) {
   const run = await startAgentRun(sessionId, message, requestId, options);
   options.onRunStarted?.(run, requestId);
   const completion = await streamRunEvents(sessionId, run.runId, options);
-  return { ...completion, requestId: requestId };
+  return completion;
 }
 
 export const agentApi = {
@@ -180,9 +185,6 @@ export const agentApi = {
   },
   resetSession: function (sessionId) {
     return api("/v1/sessions/" + encodeURIComponent(sessionId) + "/reset", { method: "POST" });
-  },
-  abortSession: function (sessionId) {
-    return api("/v1/sessions/" + encodeURIComponent(sessionId) + "/abort", { method: "POST" });
   },
   abortRun: function (sessionId, runId) {
     return api(

@@ -47,7 +47,6 @@ function replayCursor(request: IncomingMessage, url: URL): string | undefined {
 
 async function streamRunObservation(response: ServerResponse, observation: LocalPromptRunObservation): Promise<void> {
   let unsubscribe = observation.release;
-  let completed = false;
   const close = () => unsubscribe();
   try {
     startEventStream(response);
@@ -56,7 +55,6 @@ async function streamRunObservation(response: ServerResponse, observation: Local
     });
     response.once("close", close);
     const outcome = await observation.outcome;
-    completed = true;
     if (outcome.status === "completed") {
       const { events: _events, ...completion } = outcome.result;
       sendEvent(response, "complete", completion);
@@ -66,7 +64,6 @@ async function streamRunObservation(response: ServerResponse, observation: Local
   } finally {
     unsubscribe();
     response.off("close", close);
-    if (!completed) observation.release();
     if (!response.writableEnded) response.end();
   }
 }

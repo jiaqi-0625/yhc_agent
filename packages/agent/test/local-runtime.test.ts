@@ -175,6 +175,7 @@ test("prompt runs are idempotent by client request ID and retain replayable even
   const outcome = await initialObservation.outcome;
   unsubscribe();
   assert.equal(outcome.status, "completed");
+  if (outcome.status === "completed") assert.equal(outcome.result.session.isRunning, false);
   assert.equal(modelCalls, 1);
   assert.ok(initialEvents.length > 4);
 

@@ -96,3 +96,25 @@ test("browser Agent API rejects a replay sequence gap", async (context) => {
     /事件流出现缺口/u,
   );
 });
+
+test("browser Agent API stops start retries when the request is cancelled", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    throw new TypeError("offline");
+  }) as typeof fetch;
+  const controller = new AbortController();
+
+  await assert.rejects(
+    () => agentApi.startRun("session_cancel_retry", "取消重试", "request_cancel_retry", {
+      signal: controller.signal,
+      onConnectionState: (state: string) => {
+        if (state === "reconnecting") controller.abort();
+      },
+    }),
+    (error: unknown) => error instanceof DOMException && error.name === "AbortError",
+  );
+  assert.equal(calls, 1);
+});
