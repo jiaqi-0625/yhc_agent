@@ -7,6 +7,7 @@ import {
   AccountRunLockDeniedError,
   AccountRunLockTokenMismatchError,
   RevisionConflictError,
+  WorkspaceAccessDeniedError,
 } from "@firefly/domain";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
@@ -71,6 +72,7 @@ export function validateBody<T>(schema: TSchema, body: Record<string, unknown>):
 export function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
   if (error instanceof LocalAgentRunError) return error.statusCode;
+  if (error instanceof WorkspaceAccessDeniedError) return 403;
   if (error instanceof LocalAgentCredentialsError) return 503;
   if (
     error instanceof RevisionConflictError ||
@@ -97,7 +99,8 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AccountRunLockDeniedError ||
       normalized instanceof AccountRunLockTokenMismatchError ||
       normalized instanceof LocalAgentRunError ||
-      normalized instanceof LocalAgentCredentialsError
+      normalized instanceof LocalAgentCredentialsError ||
+      normalized instanceof WorkspaceAccessDeniedError
         ? normalized.code
         : "AIC-API-INVALID_REQUEST",
     message: normalized.message,

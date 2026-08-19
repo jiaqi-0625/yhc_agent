@@ -30,7 +30,9 @@ export async function handleWorkspaceRoute(
   response: ServerResponse,
   url: URL,
   business: LocalBusinessRuntime,
+  legacyLocalAccessEnabled: boolean,
 ): Promise<boolean> {
+  if (url.pathname.startsWith("/v1/works") && !legacyLocalAccessEnabled) return false;
   if (request.method === "GET" && url.pathname === "/v1/works") {
     sendJson(response, 200, { works: await business.listWorks() });
     return true;

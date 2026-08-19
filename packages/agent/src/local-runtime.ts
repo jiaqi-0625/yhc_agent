@@ -472,8 +472,7 @@ export class LocalAgentRuntime {
 
   async authorizeSession(sessionId: string, scope?: AgentSessionScope): Promise<void> {
     const active = await this.#getActive(sessionId);
-    if (!active) throw new Error(`Session '${sessionId}' was not found.`);
-    if (!this.#scopeMatches(active.scope, scope)) {
+    if (!active || !this.#scopeMatches(active.scope, scope)) {
       throw new LocalAgentRunError(
         "AIC-AUTH-SESSION_SCOPE_DENIED",
         "当前认证账号与任务无权访问该 Agent 会话。",

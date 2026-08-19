@@ -8,10 +8,22 @@ import {
   type LocalPromptRunObservation,
 } from "@firefly/agent";
 import type { TaskContext } from "@firefly/schemas";
+import { Type } from "typebox";
 
-import { LocalBusinessRuntime } from "./business-runtime.ts";
-import { readJson, sendEvent, sendJson, startEventStream } from "./http-boundary.ts";
+import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
+import { readJson, sendEvent, sendJson, startEventStream, validateBody } from "./http-boundary.ts";
 import { resolveLocalTaskContext } from "./task-context.ts";
+import {
+  readOptionalWorkspaceBearer,
+} from "./workspace-session-routes.ts";
+
+const AuthenticatedAgentSessionBodySchema = Type.Object(
+  {
+    videoTaskId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+    workId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  },
+  { additionalProperties: false },
+);
 
 export interface AuthenticatedAgentIdentity {
   actorId: string;
@@ -41,9 +53,19 @@ async function routeScope(
   url: URL,
   business: LocalBusinessRuntime,
   resolveIdentity: AgentIdentityResolver,
+  required: boolean,
 ): Promise<AgentSessionScope | undefined> {
   const videoTaskId = url.searchParams.get("videoTaskId");
-  if (!videoTaskId) return undefined;
+  if (!videoTaskId) {
+    if (required) {
+      throw new BusinessRuntimeError(
+        "AIC-AUTH-SESSION_SCOPE_REQUIRED",
+        "A videoTaskId query is required for an authenticated Agent session.",
+        401,
+      );
+    }
+    return undefined;
+  }
   const taskContext = await resolveLocalTaskContext(business, videoTaskId);
   return sessionScope(request, taskContext, resolveIdentity);
 }
@@ -104,6 +126,10 @@ async function streamRunObservation(response: ServerResponse, observation: Local
   }
 }
 
+function requiresTaskScope(request: IncomingMessage, legacyLocalAccessEnabled: boolean): boolean {
+  return !legacyLocalAccessEnabled || readOptionalWorkspaceBearer(request) !== undefined;
+}
+
 export async function handleAgentRoute(
   request: IncomingMessage,
   response: ServerResponse,
@@ -111,6 +137,7 @@ export async function handleAgentRoute(
   runtime: LocalAgentRuntime,
   business: LocalBusinessRuntime,
   resolveIdentity: AgentIdentityResolver,
+  legacyLocalAccessEnabled: boolean,
 ): Promise<boolean> {
   if (request.method === "GET" && url.pathname === "/v1/sessions") {
     const videoTaskId = url.searchParams.get("videoTaskId");
@@ -121,7 +148,11 @@ export async function handleAgentRoute(
     return true;
   }
   if (request.method === "POST" && url.pathname === "/v1/sessions") {
-    const body = await readJson(request);
+    const rawBody = await readJson(request);
+    const workspaceBearer = readOptionalWorkspaceBearer(request);
+    const body = workspaceBearer === undefined
+      ? rawBody
+      : validateBody<Record<string, unknown>>(AuthenticatedAgentSessionBodySchema, rawBody);
     if (body.id !== undefined && typeof body.id !== "string") throw new Error("Session id must be a string.");
     if (body.videoTaskId !== undefined && typeof body.videoTaskId !== "string") {
       throw new Error("Video task id must be a string.");
@@ -134,11 +165,18 @@ export async function handleAgentRoute(
     const taskContext = videoTaskId === undefined
       ? undefined
       : await resolveLocalTaskContext(business, videoTaskId);
+    if (taskContext === undefined && (workspaceBearer !== undefined || !legacyLocalAccessEnabled)) {
+      throw new BusinessRuntimeError(
+        "AIC-AUTH-SESSION_SCOPE_REQUIRED",
+        "Authenticated Agent sessions must be bound to a video task.",
+        401,
+      );
+    }
     const options = taskContext === undefined
       ? {}
       : { taskContext, scope: await sessionScope(request, taskContext, resolveIdentity) };
     const session = await runtime.createSession(
-      body.id as string | undefined,
+      workspaceBearer === undefined ? body.id as string | undefined : undefined,
       options,
     );
     sendJson(response, 201, { session });
@@ -149,7 +187,13 @@ export async function handleAgentRoute(
   if (matchedRun) {
     await runtime.authorizeSession(
       matchedRun.sessionId,
-      await routeScope(request, url, business, resolveIdentity),
+      await routeScope(
+        request,
+        url,
+        business,
+        resolveIdentity,
+        requiresTaskScope(request, legacyLocalAccessEnabled),
+      ),
     );
     if (request.method === "POST" && matchedRun.runId === undefined) {
       const body = await readJson(request);
@@ -181,7 +225,13 @@ export async function handleAgentRoute(
   if (!route) return false;
   await runtime.authorizeSession(
     route.sessionId,
-    await routeScope(request, url, business, resolveIdentity),
+    await routeScope(
+      request,
+      url,
+      business,
+      resolveIdentity,
+      requiresTaskScope(request, legacyLocalAccessEnabled),
+    ),
   );
   if (request.method === "GET" && route.action === undefined) {
     const session = await runtime.getSession(route.sessionId);

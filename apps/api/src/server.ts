@@ -5,11 +5,20 @@ import { LocalAgentRuntime } from "@firefly/agent";
 
 import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
-import { LocalBusinessRuntime } from "./business-runtime.ts";
+import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceRoute } from "./workspace-routes.ts";
+import {
+  handleWorkspaceSessionRoute,
+  readOptionalWorkspaceBearer,
+} from "./workspace-session-routes.ts";
+import {
+  InMemoryWorkspaceAccessGrantProvider,
+  WorkspaceSessionRuntime,
+} from "./workspace-session-runtime.ts";
+import { LocalWorkspaceSessionStore } from "./workspace-session-store.ts";
 
 const version = "0.1.0";
 const resolveLocalAgentIdentity: AgentIdentityResolver = () => ({
@@ -17,12 +26,43 @@ const resolveLocalAgentIdentity: AgentIdentityResolver = () => ({
   tenantId: LOCAL_SCOPE.tenantId,
 });
 
+function createWorkspaceAgentIdentityResolver(
+  workspaceSessions: WorkspaceSessionRuntime,
+  legacyLocalAccessEnabled: boolean,
+): AgentIdentityResolver {
+  return async (request) => {
+    const bearer = readOptionalWorkspaceBearer(request);
+    if (bearer !== undefined) {
+      const session = await workspaceSessions.resolveSession(bearer);
+      return {
+        actorId: session.scope.actorAccountId,
+        tenantId: session.scope.tenantId,
+      };
+    }
+    if (legacyLocalAccessEnabled) return resolveLocalAgentIdentity(request);
+    throw new BusinessRuntimeError(
+      "AIC-AUTH-SESSION_REQUIRED",
+      "A valid workspace bearer session is required.",
+      401,
+    );
+  };
+}
+
+function developmentAccountsAllowed(host: string): boolean {
+  if (process.env.NODE_ENV === "production") return false;
+  if (["127.0.0.1", "::1", "localhost"].includes(host)) return true;
+  return process.env.FIREFLY_ENABLE_DEVELOPMENT_ACCOUNTS === "true";
+}
+
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   runtime: LocalAgentRuntime,
   business: LocalBusinessRuntime,
   resolveAgentIdentity: AgentIdentityResolver,
+  workspaceSessions: WorkspaceSessionRuntime,
+  developmentAccountsEnabled: boolean,
+  legacyLocalAccessEnabled: boolean,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -65,8 +105,27 @@ async function handleRequest(
     return;
   }
 
-  if (await handleWorkspaceRoute(request, response, url, business)) return;
-  if (await handleAgentRoute(request, response, url, runtime, business, resolveAgentIdentity)) return;
+  if (
+    await handleWorkspaceSessionRoute(
+      request,
+      response,
+      url,
+      workspaceSessions,
+      developmentAccountsEnabled,
+    )
+  ) return;
+  if (await handleWorkspaceRoute(request, response, url, business, legacyLocalAccessEnabled)) return;
+  if (
+    await handleAgentRoute(
+      request,
+      response,
+      url,
+      runtime,
+      business,
+      resolveAgentIdentity,
+      legacyLocalAccessEnabled,
+    )
+  ) return;
 
   sendJson(response, 404, {
     code: "AIC-API-NOT_FOUND",
@@ -79,11 +138,30 @@ async function handleRequest(
 export function createApiServer(
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
-  resolveAgentIdentity: AgentIdentityResolver = resolveLocalAgentIdentity,
+  resolveAgentIdentity: AgentIdentityResolver | undefined = undefined,
+  workspaceSessions = new WorkspaceSessionRuntime(
+    new LocalWorkspaceSessionStore(
+      process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
+    ),
+    new InMemoryWorkspaceAccessGrantProvider(),
+  ),
+  developmentAccountsEnabled = false,
+  legacyLocalAccessEnabled = false,
 ): Server {
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
+  const activeIdentityResolver = resolveAgentIdentity ??
+    createWorkspaceAgentIdentityResolver(workspaceSessions, legacyLocalAccessEnabled);
   return createServer((request, response) => {
-    void handleRequest(request, response, activeRuntime, business, resolveAgentIdentity).catch((error: unknown) => {
+    void handleRequest(
+      request,
+      response,
+      activeRuntime,
+      business,
+      activeIdentityResolver,
+      workspaceSessions,
+      developmentAccountsEnabled,
+      legacyLocalAccessEnabled,
+    ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
   });
@@ -94,9 +172,24 @@ export async function startApiServer(
   host = "127.0.0.1",
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
-  resolveAgentIdentity: AgentIdentityResolver = resolveLocalAgentIdentity,
+  resolveAgentIdentity: AgentIdentityResolver | undefined = undefined,
+  workspaceSessions = new WorkspaceSessionRuntime(
+    new LocalWorkspaceSessionStore(
+      process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
+    ),
+    new InMemoryWorkspaceAccessGrantProvider(),
+  ),
+  developmentAccountsEnabled = developmentAccountsAllowed(host),
+  legacyLocalAccessEnabled = developmentAccountsAllowed(host),
 ): Promise<Server> {
-  const server = createApiServer(runtime, business, resolveAgentIdentity);
+  const server = createApiServer(
+    runtime,
+    business,
+    resolveAgentIdentity,
+    workspaceSessions,
+    developmentAccountsEnabled,
+    legacyLocalAccessEnabled,
+  );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {
