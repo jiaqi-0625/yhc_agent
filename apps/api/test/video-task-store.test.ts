@@ -19,7 +19,7 @@ function record(
   batchProjectId = "project_e5_launch",
 ): VideoTaskProductionRecord {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       id,
       tenantId,
@@ -46,6 +46,10 @@ function record(
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
     taskAssetSnapshots: [],
+    taskVehicleSnapshots: [],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 
@@ -54,6 +58,304 @@ function metadata(
   payloadHash = "payload_hash_v1",
 ): VideoTaskCreationMetadata {
   return { requestId, actorAccountId: "account_creator", payloadHash };
+}
+
+function recordWithCommandState(): VideoTaskProductionRecord {
+  const value = record();
+  value.videoTask = {
+    ...value.videoTask,
+    vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+    stageStatus: "awaiting_confirmation",
+    revision: 3,
+  };
+  value.taskVehicleSnapshots = [{
+    id: "vehicle_snapshot_e5_v1",
+    projectId: value.videoTask.batchProjectId,
+    vehicleId: "vehicle_e5",
+    vehicleVersion: 1,
+    brandId: "brand_firefly",
+    brand: "萤火汽车",
+    series: "E5",
+    modelYear: 2026,
+    trim: "长续航版",
+    parameters: { rangeKm: 520 },
+    fixedClaims: [],
+    optionalClaims: [],
+    prohibitedClaims: [],
+    referenceAssetIds: [],
+    createdAt: "2026-08-19T08:00:00.000Z",
+    createdBy: "account_creator",
+  }];
+  value.strategyDrafts = [{
+    schemaVersion: 1,
+    id: "strategy_draft_1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+    version: 1,
+    status: "awaiting_confirmation",
+    audience: "城市家庭用户",
+    theme: "夏季上市",
+    items: [{
+      id: "strategy_item_1",
+      claimId: "claim_range",
+      kind: "fixed",
+      title: "长续航",
+      statement: "CLTC 续航 520 公里",
+      rationale: "覆盖家庭出行需求",
+      order: 1,
+      locked: false,
+    }],
+    validation: {
+      valid: true,
+      issues: [{
+        code: "AIC-STRATEGY-TONE_REVIEW",
+        severity: "warning",
+        message: "建议人工复核表达语气。",
+      }],
+    },
+    generation: { kind: "vehicle_fact_projection", templateVersion: "v1" },
+    createdAt: "2026-08-19T08:01:00.000Z",
+    createdBy: "account_creator",
+    updatedAt: "2026-08-19T08:02:00.000Z",
+    updatedBy: "account_creator",
+  }];
+  value.activeStrategyDraftId = "strategy_draft_1";
+  value.stageConfirmationRequests = [{
+    schemaVersion: 1,
+    id: "confirmation_request_1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    stage: "strategy",
+    strategyDraftId: "strategy_draft_1",
+    expectedTaskRevision: 2,
+    source: "human_action",
+    actorAccountId: "account_creator",
+    occurredAt: "2026-08-19T08:02:00.000Z",
+  }];
+  value.commandReceipts = [
+    {
+      schemaVersion: 1,
+      id: "command_receipt_generate_1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      actorAccountId: "account_creator",
+      requestId: "request_generate_1",
+      payloadHash: "a".repeat(64),
+      action: "generate_strategy",
+      expectedTaskRevision: 1,
+      resultingTaskRevision: 2,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+      occurredAt: "2026-08-19T08:01:00.000Z",
+    },
+    {
+      schemaVersion: 1,
+      id: "command_receipt_confirmation_1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      actorAccountId: "account_creator",
+      requestId: "request_confirmation_1",
+      payloadHash: "b".repeat(64),
+      action: "request_strategy_approval",
+      expectedTaskRevision: 2,
+      resultingTaskRevision: 3,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: {
+        kind: "strategy_confirmation_requested",
+        strategyDraftId: "strategy_draft_1",
+        stageConfirmationRequestId: "confirmation_request_1",
+      },
+      occurredAt: "2026-08-19T08:02:00.000Z",
+    },
+  ];
+  return value;
+}
+
+function recordWithArtifactGraph(): VideoTaskProductionRecord {
+  const value = record();
+  value.videoTask = {
+    ...value.videoTask,
+    revision: 12,
+    vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+    assetSnapshotId: "asset_snapshot_1",
+  };
+  value.taskVehicleSnapshots = [structuredClone(recordWithCommandState().taskVehicleSnapshots[0]!)];
+  value.taskAssetSnapshots = [{
+    id: "asset_snapshot_1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    version: 1,
+    sourceProjectAssetPoolRevision: 1,
+    vehicleSnapshotId: "vehicle_snapshot_e5_v1",
+    assets: [{
+      assetId: "asset_vehicle_1",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "vehicle",
+      vehicleId: "vehicle_e5",
+    }],
+    createdAt: "2026-08-19T08:00:30.000Z",
+    createdBy: "account_creator",
+  }];
+  value.stageArtifactVersions = [
+    {
+      id: "artifact_strategy_v1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "strategy",
+      version: 1,
+      content: {
+        artifactId: "strategy_content_v1",
+        schemaName: "marketing_strategy",
+        schemaVersion: 1,
+        contentHashSha256: "1".repeat(64),
+      },
+      dependencies: [{ kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_e5_v1" }],
+      provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_v1" },
+      createdAt: "2026-08-19T08:01:00.000Z",
+      createdBy: "account_creator",
+    },
+    {
+      id: "artifact_strategy_v2",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "strategy",
+      version: 2,
+      content: {
+        artifactId: "strategy_content_v2",
+        schemaName: "marketing_strategy",
+        schemaVersion: 1,
+        contentHashSha256: "2".repeat(64),
+      },
+      dependencies: [{ kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_e5_v1" }],
+      provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_v2" },
+      createdAt: "2026-08-19T08:02:00.000Z",
+      createdBy: "account_creator",
+    },
+    {
+      id: "artifact_script_v1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "script",
+      version: 1,
+      content: {
+        artifactId: "script_content_v1",
+        schemaName: "shooting_script",
+        schemaVersion: 1,
+        contentHashSha256: "3".repeat(64),
+      },
+      dependencies: [
+        { kind: "stage_artifact", stage: "strategy", artifactVersionId: "artifact_strategy_v2" },
+        { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
+      ],
+      provenance: { kind: "human_confirmation", confirmationId: "confirmation_script_v1" },
+      createdAt: "2026-08-19T08:03:00.000Z",
+      createdBy: "account_creator",
+    },
+    {
+      id: "artifact_storyboard_v1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "storyboard",
+      version: 1,
+      content: {
+        artifactId: "storyboard_content_v1",
+        schemaName: "storyboard",
+        schemaVersion: 1,
+        contentHashSha256: "4".repeat(64),
+      },
+      dependencies: [{
+        kind: "stage_artifact",
+        stage: "script",
+        artifactVersionId: "artifact_script_v1",
+      }],
+      provenance: { kind: "human_confirmation", confirmationId: "confirmation_storyboard_v1" },
+      createdAt: "2026-08-19T08:04:00.000Z",
+      createdBy: "account_creator",
+    },
+  ];
+  value.stageConfirmations = value.stageArtifactVersions.map((artifact, index) => ({
+    id: `confirmation_${artifact.stage}_v${artifact.version}`,
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    stage: artifact.stage,
+    artifactVersionId: artifact.id,
+    decision: "confirmed",
+    source: "human_action",
+    expectedTaskRevision: index + 1,
+    actorAccountId: "account_creator",
+    occurredAt: artifact.createdAt,
+  }));
+  value.activeStageArtifactVersionIds = { strategy: "artifact_strategy_v1" };
+  value.stageRollbacks = [{
+    id: "rollback_strategy_1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    stage: "strategy",
+    fromArtifactVersionId: "artifact_strategy_v2",
+    toArtifactVersionId: "artifact_strategy_v1",
+    expectedTaskRevision: 11,
+    reason: "恢复首版策略",
+    requestedBy: "account_creator",
+    invalidationIds: ["invalidation_script_1", "invalidation_storyboard_1"],
+    occurredAt: "2026-08-19T08:05:00.000Z",
+  }];
+  value.stageArtifactInvalidations = [
+    {
+      id: "invalidation_script_1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "script",
+      artifactVersionId: "artifact_script_v1",
+      reason: "上游策略已回退",
+      invalidatedDependency: {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: "artifact_strategy_v2",
+      },
+      cause: {
+        kind: "rollback",
+        reasonCode: "upstream_rollback",
+        rollbackId: "rollback_strategy_1",
+      },
+      occurredAt: "2026-08-19T08:05:00.000Z",
+    },
+    {
+      id: "invalidation_storyboard_1",
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage: "storyboard",
+      artifactVersionId: "artifact_storyboard_v1",
+      reason: "上游脚本已失效",
+      invalidatedDependency: {
+        kind: "stage_artifact",
+        stage: "script",
+        artifactVersionId: "artifact_script_v1",
+      },
+      cause: {
+        kind: "upstream_invalidation",
+        reasonCode: "upstream_invalidation",
+        invalidationId: "invalidation_script_1",
+      },
+      occurredAt: "2026-08-19T08:05:00.000Z",
+    },
+  ];
+  return value;
 }
 
 function transactionLockDirectory(directory: string): string {
@@ -85,6 +387,317 @@ test("video task store creates, scopes, sorts, and returns defensive copies", as
   assert.equal((await store.load("task_launch_cut"))?.videoTask.name, "首发短片");
   assert.equal((await store.list("tenant_firefly")).length, 3);
   assert.equal((await store.list("tenant_missing")).length, 0);
+});
+
+test("v5 command state accepts warnings and preserves its complete reference graph", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-command-state-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const store = new LocalVideoTaskProductionStore(directory);
+  const input = recordWithCommandState();
+  await store.create(input, metadata());
+  assert.deepEqual(
+    await new LocalVideoTaskProductionStore(directory).load(input.videoTask.id),
+    input,
+  );
+});
+
+test("v5 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["draft scope", (candidate) => { candidate.strategyDrafts[0]!.tenantId = "tenant_attacker"; }],
+    ["vehicle scope", (candidate) => { candidate.taskVehicleSnapshots[0]!.projectId = "project_attacker"; }],
+    ["active vehicle pointer", (candidate) => { candidate.videoTask.vehicleSnapshotId = "snapshot_missing"; }],
+    ["active draft pointer", (candidate) => { candidate.activeStrategyDraftId = "strategy_missing"; }],
+    ["active draft is not latest", (candidate) => {
+      const firstDraft = candidate.strategyDrafts[0]!;
+      candidate.videoTask.revision = 4;
+      candidate.strategyDrafts.push({
+        ...structuredClone(firstDraft),
+        id: "strategy_draft_2",
+        version: 2,
+        createdAt: "2026-08-19T08:03:00.000Z",
+        updatedAt: "2026-08-19T08:03:00.000Z",
+      });
+      candidate.commandReceipts.push({
+        ...structuredClone(candidate.commandReceipts[0]!),
+        id: "command_receipt_generate_2",
+        requestId: "request_generate_2",
+        expectedTaskRevision: 3,
+        resultingTaskRevision: 4,
+        result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_2" },
+        occurredAt: "2026-08-19T08:03:00.000Z",
+      });
+    }],
+    ["draft version gap", (candidate) => { candidate.strategyDrafts[0]!.version = 2; }],
+    ["draft vehicle pointer", (candidate) => { candidate.strategyDrafts[0]!.vehicleSnapshotId = "snapshot_missing"; }],
+    ["confirmation pointer", (candidate) => { candidate.stageConfirmationRequests[0]!.strategyDraftId = "strategy_missing"; }],
+    ["receipt revision", (candidate) => { candidate.commandReceipts[0]!.resultingTaskRevision = 3; }],
+    ["receipt result", (candidate) => {
+      candidate.commandReceipts[0]!.result = {
+        kind: "strategy_generated",
+        strategyDraftId: "strategy_missing",
+      };
+    }],
+    ["receipt draft actor", (candidate) => { candidate.strategyDrafts[0]!.createdBy = "account_other"; }],
+    ["receipt draft time", (candidate) => { candidate.strategyDrafts[0]!.createdAt = "2026-08-19T08:00:30.000Z"; }],
+    ["multiple vehicle snapshots", (candidate) => {
+      candidate.taskVehicleSnapshots.push({
+        ...structuredClone(candidate.taskVehicleSnapshots[0]!),
+        id: "vehicle_snapshot_e5_v2",
+        vehicleVersion: 2,
+      });
+    }],
+    ["asset snapshot pointer", (candidate) => {
+      candidate.videoTask.assetSnapshotId = "asset_snapshot_missing";
+      candidate.taskAssetSnapshots = [{
+        id: "asset_snapshot_1",
+        tenantId: candidate.videoTask.tenantId,
+        batchProjectId: candidate.videoTask.batchProjectId,
+        videoTaskId: candidate.videoTask.id,
+        version: 1,
+        sourceProjectAssetPoolRevision: 1,
+        vehicleSnapshotId: candidate.taskVehicleSnapshots[0]!.id,
+        assets: [{
+          assetId: "asset_vehicle_1",
+          version: 1,
+          source: "company_catalog",
+          sourceProvider: "mock_company_assets",
+          category: "vehicle",
+          vehicleId: "vehicle_e5",
+        }],
+        createdAt: "2026-08-19T08:01:00.000Z",
+        createdBy: "account_creator",
+      }];
+    }],
+    ["duplicate actor request", (candidate) => {
+      candidate.commandReceipts[1]!.requestId = candidate.commandReceipts[0]!.requestId;
+    }],
+    ["unreferenced confirmation request", (candidate) => { candidate.commandReceipts.pop(); }],
+    ["warning validity", (candidate) => { candidate.strategyDrafts[0]!.validation.valid = false; }],
+    ["error validity", (candidate) => {
+      candidate.strategyDrafts[0]!.validation.issues[0]!.severity = "error";
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithCommandState();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v5-${label}`, false).save(candidate),
+      /invalid|duplicate|unreferenced/u,
+      label,
+    );
+  }
+});
+
+test("v5 artifact graph accepts a complete rollback invalidation closure", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-artifact-graph-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const input = recordWithArtifactGraph();
+  await new LocalVideoTaskProductionStore(directory).create(input, metadata());
+  assert.deepEqual(
+    await new LocalVideoTaskProductionStore(directory).load(input.videoTask.id),
+    input,
+  );
+});
+
+test("v5 artifact graph fails closed on invalid dependencies and provenance", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["missing dependency artifact", (candidate) => {
+      candidate.stageArtifactVersions[2]!.dependencies[0] = {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: "artifact_missing",
+      };
+    }],
+    ["forged dependency stage", (candidate) => {
+      candidate.stageArtifactVersions[2]!.dependencies[0] = {
+        kind: "stage_artifact",
+        stage: "asset_matching",
+        artifactVersionId: "artifact_strategy_v2",
+      };
+    }],
+    ["same stage dependency", (candidate) => {
+      candidate.stageArtifactVersions[2]!.dependencies[0] = {
+        kind: "stage_artifact",
+        stage: "script",
+        artifactVersionId: "artifact_script_v1",
+      };
+    }],
+    ["missing vehicle snapshot", (candidate) => {
+      candidate.stageArtifactVersions[0]!.dependencies[0] = {
+        kind: "vehicle_snapshot",
+        vehicleSnapshotId: "vehicle_snapshot_missing",
+      };
+    }],
+    ["missing asset snapshot", (candidate) => {
+      candidate.stageArtifactVersions[2]!.dependencies[1] = {
+        kind: "asset_snapshot",
+        assetSnapshotId: "asset_snapshot_missing",
+      };
+    }],
+    ["duplicate dependency", (candidate) => {
+      candidate.stageArtifactVersions[2]!.dependencies.push(
+        structuredClone(candidate.stageArtifactVersions[2]!.dependencies[0]!),
+      );
+    }],
+    ["missing provenance confirmation", (candidate) => {
+      candidate.stageArtifactVersions[0]!.provenance = {
+        kind: "human_confirmation",
+        confirmationId: "confirmation_missing",
+      };
+    }],
+    ["confirmation artifact mismatch", (candidate) => {
+      candidate.stageConfirmations[0]!.artifactVersionId = "artifact_strategy_v2";
+    }],
+    ["confirmation stage mismatch", (candidate) => {
+      candidate.stageConfirmations[2]!.stage = "storyboard";
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithArtifactGraph();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v5-artifact-${label}`, false)
+        .save(candidate),
+      /invalid|duplicate|unreferenced/u,
+      label,
+    );
+  }
+});
+
+test("v5 artifact graph fails closed on invalid rollback and invalidation closure", async () => {
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["missing rollback source", (candidate) => {
+      candidate.stageRollbacks[0]!.fromArtifactVersionId = "artifact_missing";
+    }],
+    ["cross stage rollback target", (candidate) => {
+      candidate.stageRollbacks[0]!.toArtifactVersionId = "artifact_script_v1";
+    }],
+    ["same rollback endpoints", (candidate) => {
+      candidate.stageRollbacks[0]!.toArtifactVersionId = "artifact_strategy_v2";
+    }],
+    ["future rollback revision", (candidate) => {
+      candidate.stageRollbacks[0]!.expectedTaskRevision = 13;
+    }],
+    ["missing invalidated artifact", (candidate) => {
+      candidate.stageArtifactInvalidations[0]!.artifactVersionId = "artifact_missing";
+    }],
+    ["invalidation stage mismatch", (candidate) => {
+      candidate.stageArtifactInvalidations[0]!.stage = "storyboard";
+    }],
+    ["dependency not owned by invalidated artifact", (candidate) => {
+      candidate.stageArtifactInvalidations[0]!.invalidatedDependency = {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: "artifact_strategy_v1",
+      };
+    }],
+    ["missing rollback cause", (candidate) => {
+      const cause = candidate.stageArtifactInvalidations[0]!.cause;
+      if (cause.kind === "rollback") cause.rollbackId = "rollback_missing";
+    }],
+    ["missing upstream invalidation cause", (candidate) => {
+      const cause = candidate.stageArtifactInvalidations[1]!.cause;
+      if (cause.kind === "upstream_invalidation") cause.invalidationId = "invalidation_missing";
+    }],
+    ["cyclic invalidation cause", (candidate) => {
+      candidate.stageArtifactInvalidations[0]!.cause = {
+        kind: "upstream_invalidation",
+        reasonCode: "upstream_invalidation",
+        invalidationId: "invalidation_storyboard_1",
+      };
+    }],
+    ["rollback invalidation omission", (candidate) => {
+      candidate.stageRollbacks[0]!.invalidationIds.pop();
+    }],
+    ["rollback invalidation extra", (candidate) => {
+      candidate.stageRollbacks[0]!.invalidationIds.push("invalidation_missing");
+    }],
+    ["duplicate invalidated artifact", (candidate) => {
+      candidate.stageArtifactInvalidations[1]!.artifactVersionId = "artifact_script_v1";
+      candidate.stageArtifactInvalidations[1]!.stage = "script";
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithArtifactGraph();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-v5-rollback-${label}`, false)
+        .save(candidate),
+      /invalid|duplicate|unreferenced|cycle/u,
+      label,
+    );
+  }
+});
+
+test("persisted v1 through v4 aggregates upgrade to empty v5 command state", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-upgrade-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  for (const version of [1, 2, 3, 4] as const) {
+    const current = record(`task_legacy_v${version}`);
+    current.stageArtifactVersions = [{
+      id: `artifact_legacy_v${version}`,
+      tenantId: current.videoTask.tenantId,
+      batchProjectId: current.videoTask.batchProjectId,
+      videoTaskId: current.videoTask.id,
+      stage: "strategy",
+      version: 1,
+      content: {
+        artifactId: `content_legacy_v${version}`,
+        schemaName: "marketing_strategy",
+        schemaVersion: 1,
+        contentHashSha256: version.toString().repeat(64),
+      },
+      dependencies: [{
+        kind: "vehicle_snapshot",
+        vehicleSnapshotId: `external_vehicle_snapshot_v${version}`,
+      }],
+      provenance: {
+        kind: "human_confirmation",
+        confirmationId: `legacy_confirmation_v${version}`,
+      },
+      createdAt: "2026-08-19T08:00:00.000Z",
+      createdBy: "account_creator",
+    }];
+    current.activeStageArtifactVersionIds = { strategy: `artifact_legacy_v${version}` };
+    const {
+      taskVehicleSnapshots: _taskVehicleSnapshots,
+      strategyDrafts: _strategyDrafts,
+      activeStrategyDraftId: _activeStrategyDraftId,
+      stageConfirmationRequests: _stageConfirmationRequests,
+      commandReceipts: _commandReceipts,
+      ...withoutV5
+    } = current;
+    const { taskAssetSnapshots: _taskAssetSnapshots, ...withoutV4 } = withoutV5;
+    const { ownershipTransfers: _ownershipTransfers, ...withoutV3 } = withoutV4;
+    const persisted = version === 4
+      ? { ...withoutV5, schemaVersion: 4 }
+      : version === 3
+        ? { ...withoutV4, schemaVersion: 3 }
+        : version === 2
+          ? { ...withoutV3, schemaVersion: 2 }
+          : {
+              schemaVersion: 1,
+              videoTask: current.videoTask,
+              stageArtifactVersions: current.stageArtifactVersions,
+              stageConfirmations: current.stageConfirmations,
+            };
+    await writeFile(
+      join(directory, `${current.videoTask.id}.json`),
+      `${JSON.stringify(persisted)}\n`,
+      "utf8",
+    );
+    const upgraded = await new LocalVideoTaskProductionStore(directory).load(current.videoTask.id);
+    assert.equal(upgraded?.schemaVersion, 5);
+    assert.deepEqual(upgraded?.taskVehicleSnapshots, []);
+    assert.deepEqual(upgraded?.strategyDrafts, []);
+    assert.equal(upgraded?.activeStrategyDraftId, undefined);
+    assert.deepEqual(upgraded?.stageConfirmationRequests, []);
+    assert.deepEqual(upgraded?.commandReceipts, []);
+    assert.deepEqual(upgraded?.stageArtifactVersions[0]?.provenance, {
+      kind: "migrated_confirmation",
+      legacyApprovalId: `legacy_confirmation_v${version}`,
+    });
+  }
 });
 
 test("creation metadata makes concurrent requests replay-safe and rejects conflicts", async () => {

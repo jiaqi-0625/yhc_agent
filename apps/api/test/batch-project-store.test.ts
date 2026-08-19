@@ -30,6 +30,7 @@ function project(
     tenantId,
     brandId: "brand_firefly_demo",
     vehicleId: "vehicle_firefly_e5_2026_long_range",
+    vehicleVersion: 1,
     name,
     batchName: "夏季上新",
     aspectRatio: "9:16",
@@ -102,7 +103,7 @@ test("project and asset pool survive restart in one atomic aggregate file", asyn
   const persisted = JSON.parse(
     await readFile(join(directory, "tenant_firefly", "project_e5_launch.json"), "utf8"),
   ) as Record<string, unknown>;
-  assert.equal(persisted.schemaVersion, 1);
+  assert.equal(persisted.schemaVersion, 2);
   assert.deepEqual(Object.keys(persisted).sort(), [
     "actorAccountId",
     "assetPool",
@@ -122,6 +123,30 @@ test("project and asset pool survive restart in one atomic aggregate file", asyn
     saved,
   );
   assert.deepEqual(await restored.list("tenant_firefly"), [saved]);
+});
+
+test("legacy batch project aggregates fail closed until vehicle version migration", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-legacy-batch-project-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const input = project();
+  const { vehicleVersion: _vehicleVersion, ...legacyProject } = input;
+  const tenantDirectory = join(directory, input.tenantId);
+  await mkdir(tenantDirectory);
+  await writeFile(
+    join(tenantDirectory, `${input.id}.json`),
+    JSON.stringify({
+      schemaVersion: 1,
+      ...metadata(),
+      project: legacyProject,
+      assetPool: assetPool(input),
+    }),
+    "utf8",
+  );
+
+  await assert.rejects(
+    new LocalBatchProjectStore(directory).load(input.tenantId, input.id),
+    /explicit vehicle fact version migration/u,
+  );
 });
 
 test("batch project creation rejects duplicate IDs and normalized names", async () => {
@@ -225,7 +250,7 @@ test("persisted aggregate schema and tenant scope are validated", async (context
   await writeFile(
     join(tenantDirectory, "project_e5_launch.json"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       ...metadata(),
       project: input,
       assetPool: assetPool(input),

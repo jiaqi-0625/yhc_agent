@@ -16,7 +16,7 @@ import {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       id: "task_persisted",
       tenantId: "tenant_firefly",
@@ -43,7 +43,11 @@ function productionRecord(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskVehicleSnapshots: [],
     taskAssetSnapshots: [],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 
@@ -73,6 +77,19 @@ function rollbackRecord(): VideoTaskProductionRecord {
     createdAt: `2026-08-18T0${version}:00:00.000Z`,
     createdBy: "account_owner",
   }));
+  record.stageConfirmations = [1, 2].map((version) => ({
+    id: `confirmation_v${version}`,
+    tenantId: "tenant_firefly",
+    batchProjectId: "project_launch",
+    videoTaskId: "task_persisted",
+    stage: "strategy" as const,
+    artifactVersionId: `strategy_v${version}`,
+    decision: "confirmed" as const,
+    source: "human_action" as const,
+    expectedTaskRevision: version,
+    actorAccountId: "account_owner",
+    occurredAt: `2026-08-18T0${version}:00:00.000Z`,
+  }));
   record.activeStageArtifactVersionIds.strategy = "strategy_v2";
   return record;
 }
@@ -94,6 +111,7 @@ const project: BatchProject = {
   tenantId: "tenant_firefly",
   brandId: "brand_firefly",
   vehicleId: "vehicle_e5",
+  vehicleVersion: 1,
   name: "萤火 E5 9:16 上市",
   batchName: "上市",
   aspectRatio: "9:16",
@@ -358,7 +376,7 @@ test("store upgrades WS-102 schema v1 records and selects each stage's latest ve
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 4);
+  assert.equal(upgraded?.schemaVersion, 5);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
   assert.deepEqual(upgraded?.stageRollbacks, []);
   assert.deepEqual(upgraded?.stageArtifactInvalidations, []);
@@ -379,7 +397,7 @@ test("store upgrades WS-103 schema v2 records with an empty ownership audit", as
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 4);
+  assert.equal(upgraded?.schemaVersion, 5);
   assert.deepEqual(upgraded?.ownershipTransfers, []);
   assert.deepEqual(upgraded?.taskAssetSnapshots, []);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
@@ -397,7 +415,7 @@ test("store upgrades WS-202 schema v3 records with an empty task asset snapshot 
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 4);
+  assert.equal(upgraded?.schemaVersion, 5);
   assert.deepEqual(upgraded?.taskAssetSnapshots, []);
   assert.equal(upgraded?.ownershipTransfers.length, current.ownershipTransfers.length);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");

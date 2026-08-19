@@ -58,7 +58,7 @@ export function takeOverVideoTask(
   };
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: context.actorAccountId,
@@ -72,6 +72,13 @@ export function takeOverVideoTask(
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
     ownershipTransfers: [...structuredClone(record.ownershipTransfers), transfer],
+    taskVehicleSnapshots: structuredClone(record.taskVehicleSnapshots),
     taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
+    strategyDrafts: structuredClone(record.strategyDrafts),
+    ...(record.activeStrategyDraftId === undefined
+      ? {}
+      : { activeStrategyDraftId: record.activeStrategyDraftId }),
+    stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
+    commandReceipts: structuredClone(record.commandReceipts),
   };
 }

@@ -139,7 +139,7 @@ export function createVideoTask(
   const timestamp = context.occurredAt;
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       id: context.taskId,
       tenantId: context.tenantId,
@@ -166,7 +166,11 @@ export function createVideoTask(
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskVehicleSnapshots: [],
     taskAssetSnapshots: [],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 
@@ -217,7 +221,7 @@ export function assignVideoTaskOwner(
   };
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: request.targetOwnerAccountId,
@@ -231,6 +235,13 @@ export function assignVideoTaskOwner(
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
     ownershipTransfers: [...structuredClone(record.ownershipTransfers), transfer],
+    taskVehicleSnapshots: structuredClone(record.taskVehicleSnapshots),
     taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
+    strategyDrafts: structuredClone(record.strategyDrafts),
+    ...(record.activeStrategyDraftId === undefined
+      ? {}
+      : { activeStrategyDraftId: record.activeStrategyDraftId }),
+    stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
+    commandReceipts: structuredClone(record.commandReceipts),
   };
 }

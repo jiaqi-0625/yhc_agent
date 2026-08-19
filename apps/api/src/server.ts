@@ -6,6 +6,11 @@ import { MockCompanyAssetProvider } from "@firefly/tools";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { LocalAccountBudgetStore } from "./account-budget-store.ts";
+import {
+  handleAgentActionCommandRoute,
+  matchAgentActionCommandPath,
+} from "./agent-action-command-routes.ts";
+import { AgentActionCommandRuntime } from "./agent-action-command-runtime.ts";
 import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
 import { LocalBatchProjectStore } from "./batch-project-store.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
@@ -17,6 +22,7 @@ import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { handleVideoTaskRoute } from "./video-task-routes.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
+import { LocalTemporaryAssetStore } from "./temporary-asset-store.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
@@ -81,6 +87,7 @@ async function handleRequest(
   workspaceAdmin: WorkspaceAdminRuntime | undefined,
   projectCreation: ProjectCreationRuntime | undefined,
   videoTasks: VideoTaskRuntime | undefined,
+  agentActionCommands: AgentActionCommandRuntime | undefined,
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
 ): Promise<void> {
@@ -158,6 +165,26 @@ async function handleRequest(
     )
   ) return;
   if (
+    agentActionCommands === undefined &&
+    matchAgentActionCommandPath(url.pathname) !== undefined
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-AGENT-COMMAND-RUNTIME_NOT_CONFIGURED",
+      "Agent action commands must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    agentActionCommands !== undefined &&
+    await handleAgentActionCommandRoute(
+      request,
+      response,
+      url,
+      agentActionCommands,
+      workspaceSessions,
+    )
+  ) return;
+  if (
     videoTasks === undefined &&
     url.pathname.startsWith("/v1/workspace/batch-projects/") &&
     url.pathname.includes("/video-tasks")
@@ -223,10 +250,16 @@ export function createApiServer(
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
   projectCreation: ProjectCreationRuntime | undefined = undefined,
   videoTasks: VideoTaskRuntime | undefined = undefined,
+  agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
 ): Server {
   if (
     workspaceSessions === undefined &&
-    (workspaceAdmin !== undefined || projectCreation !== undefined || videoTasks !== undefined)
+    (
+      workspaceAdmin !== undefined ||
+      projectCreation !== undefined ||
+      videoTasks !== undefined ||
+      agentActionCommands !== undefined
+    )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
   }
@@ -271,14 +304,30 @@ export function createApiServer(
     batchProjectStore!,
     companyAssetProvider,
   ));
+  const videoTaskStore = adminStore === undefined ? undefined : new LocalVideoTaskProductionStore(
+    process.env.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
+  );
+  const temporaryAssetStore = adminStore === undefined ? undefined : new LocalTemporaryAssetStore(
+    process.env.TEMPORARY_ASSET_DATA_DIRECTORY ?? ".data/temporary-assets",
+  );
   const activeVideoTasks = videoTasks ?? (adminStore === undefined ? undefined : new VideoTaskRuntime(
     adminStore,
     batchProjectStore!,
-    new LocalVideoTaskProductionStore(
-      process.env.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
-    ),
+    videoTaskStore!,
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
+  const activeAgentActionCommands = agentActionCommands ?? (
+    adminStore === undefined
+      ? undefined
+      : new AgentActionCommandRuntime(
+          adminStore,
+          batchProjectStore!,
+          videoTaskStore!,
+          undefined,
+          undefined,
+          temporaryAssetStore!,
+        )
+  );
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   const activeIdentityResolver = resolveAgentIdentity ??
     createWorkspaceAgentIdentityResolver(activeWorkspaceSessions, legacyLocalAccessEnabled);
@@ -293,6 +342,7 @@ export function createApiServer(
       activeWorkspaceAdmin,
       activeProjectCreation,
       activeVideoTasks,
+      activeAgentActionCommands,
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
     ).catch((error: unknown) => {
@@ -313,6 +363,7 @@ export async function startApiServer(
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
   projectCreation: ProjectCreationRuntime | undefined = undefined,
   videoTasks: VideoTaskRuntime | undefined = undefined,
+  agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
 ): Promise<Server> {
   const server = createApiServer(
     runtime,
@@ -324,6 +375,7 @@ export async function startApiServer(
     workspaceAdmin,
     projectCreation,
     videoTasks,
+    agentActionCommands,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

@@ -26,6 +26,7 @@ const project: BatchProject = {
   tenantId: "tenant_firefly",
   brandId: "brand_firefly",
   vehicleId: "vehicle_e5",
+  vehicleVersion: 1,
   name: "萤火 E5 9:16 上市",
   batchName: "上市",
   aspectRatio: "9:16",
@@ -113,7 +114,7 @@ function pool(overrides: Partial<ProjectAssetPool> = {}): ProjectAssetPool {
 
 function record(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       id: "task_asset_lock",
       tenantId: project.tenantId,
@@ -140,7 +141,11 @@ function record(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskVehicleSnapshots: [],
     taskAssetSnapshots: [],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 
@@ -305,7 +310,7 @@ test("lockVideoTaskAssetSnapshot atomically appends an immutable snapshot and ad
   const sourcePool = pool();
   const result = lockVideoTaskAssetSnapshot(source, project, sourcePool, 5, context());
 
-  assert.equal(result.schemaVersion, 4);
+  assert.equal(result.schemaVersion, 5);
   assert.equal(result.videoTask.assetSnapshotId, "asset_snapshot_created");
   assert.equal(result.videoTask.revision, 6);
   assert.equal(result.videoTask.updatedAt, "2026-08-19T06:00:00.000Z");

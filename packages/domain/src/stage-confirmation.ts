@@ -1,4 +1,6 @@
 import type {
+  AgentActionCommandReceipt,
+  StageConfirmationRequest,
   StageArtifactContentReference,
   StageArtifactDependency,
   StageArtifactInvalidation,
@@ -6,15 +8,17 @@ import type {
   StageConfirmation,
   StageRollbackRecord,
   TaskAssetSnapshot,
+  VehicleSnapshot,
   VideoTask,
   VideoTaskOwnershipTransfer,
   VideoTaskStage,
+  VideoTaskStrategyDraft,
 } from "@firefly/schemas";
 
 import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 4;
+  schemaVersion: 5;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
@@ -22,7 +26,12 @@ export interface VideoTaskProductionRecord {
   stageRollbacks: StageRollbackRecord[];
   stageArtifactInvalidations: StageArtifactInvalidation[];
   ownershipTransfers: VideoTaskOwnershipTransfer[];
+  taskVehicleSnapshots: VehicleSnapshot[];
   taskAssetSnapshots: TaskAssetSnapshot[];
+  strategyDrafts: VideoTaskStrategyDraft[];
+  activeStrategyDraftId?: string;
+  stageConfirmationRequests: StageConfirmationRequest[];
+  commandReceipts: AgentActionCommandReceipt[];
 }
 
 export interface ConfirmStageCommand {
@@ -144,7 +153,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -163,6 +172,13 @@ export function confirmVideoTaskStage(
     stageRollbacks: structuredClone(record.stageRollbacks),
     stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
     ownershipTransfers: structuredClone(record.ownershipTransfers),
+    taskVehicleSnapshots: structuredClone(record.taskVehicleSnapshots),
     taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
+    strategyDrafts: structuredClone(record.strategyDrafts),
+    ...(record.activeStrategyDraftId === undefined
+      ? {}
+      : { activeStrategyDraftId: record.activeStrategyDraftId }),
+    stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
+    commandReceipts: structuredClone(record.commandReceipts),
   };
 }

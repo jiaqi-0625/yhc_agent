@@ -205,7 +205,7 @@ export function rollbackVideoTaskStage(
   const workflow = rollbackWorkflowState(request.stage);
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       ...structuredClone(record.videoTask),
       ...workflow,
@@ -222,6 +222,13 @@ export function rollbackVideoTaskStage(
       ...invalidations,
     ],
     ownershipTransfers: structuredClone(record.ownershipTransfers),
+    taskVehicleSnapshots: structuredClone(record.taskVehicleSnapshots),
     taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
+    strategyDrafts: structuredClone(record.strategyDrafts),
+    ...(record.activeStrategyDraftId === undefined
+      ? {}
+      : { activeStrategyDraftId: record.activeStrategyDraftId }),
+    stageConfirmationRequests: structuredClone(record.stageConfirmationRequests),
+    commandReceipts: structuredClone(record.commandReceipts),
   };
 }

@@ -13,9 +13,31 @@ import { Value } from "typebox/value";
 
 import type { ProjectAssetPoolStore } from "./project-asset-pool-store.ts";
 
-const StoredBatchProjectAggregateSchema = Type.Object(
+const LegacyBatchProjectSchema = Type.Omit(BatchProjectSchema, ["vehicleVersion"]);
+
+const StoredBatchProjectAggregateV1Schema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
+    requestId: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[A-Za-z0-9_-]+$",
+    }),
+    actorAccountId: Type.String({
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[A-Za-z0-9_-]+$",
+    }),
+    payloadHash: Type.String({ minLength: 1, maxLength: 128 }),
+    project: LegacyBatchProjectSchema,
+    assetPool: ProjectAssetPoolSchema,
+  },
+  { additionalProperties: false },
+);
+
+const StoredBatchProjectAggregateSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(2),
     requestId: Type.String({
       minLength: 1,
       maxLength: 128,
@@ -34,7 +56,7 @@ const StoredBatchProjectAggregateSchema = Type.Object(
 );
 
 interface StoredBatchProjectAggregate extends BatchProjectAggregate {
-  schemaVersion: 1;
+  schemaVersion: 2;
 }
 
 export interface BatchProjectAggregate {
@@ -146,12 +168,18 @@ export class LocalBatchProjectStore implements BatchProjectStore {
     projectId: string,
   ): Promise<BatchProjectAggregate | undefined> {
     try {
-      const stored = JSON.parse(
+      const persisted = JSON.parse(
         await readFile(this.#path(tenantId, projectId), "utf8"),
-      ) as StoredBatchProjectAggregate;
-      if (!Value.Check(StoredBatchProjectAggregateSchema, stored)) {
+      ) as unknown;
+      if (Value.Check(StoredBatchProjectAggregateV1Schema, persisted)) {
+        throw new Error(
+          "Persisted batch project requires an explicit vehicle fact version migration.",
+        );
+      }
+      if (!Value.Check(StoredBatchProjectAggregateSchema, persisted)) {
         throw new Error("Persisted batch project aggregate has an invalid format or scope.");
       }
+      const stored = persisted as StoredBatchProjectAggregate;
       validateAggregate(stored, tenantId, projectId);
       const { schemaVersion: _schemaVersion, ...aggregate } = stored;
       return aggregate;
@@ -277,7 +305,7 @@ export class LocalBatchProjectStore implements BatchProjectStore {
       const path = this.#path(copy.project.tenantId, copy.project.id);
       await mkdir(dirname(path), { recursive: true });
       const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-      const stored: StoredBatchProjectAggregate = { schemaVersion: 1, ...copy };
+      const stored: StoredBatchProjectAggregate = { schemaVersion: 2, ...copy };
       await writeFile(temporaryPath, `${JSON.stringify(stored, null, 2)}\n`, {
         encoding: "utf8",
         flag: "wx",

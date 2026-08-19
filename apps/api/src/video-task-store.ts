@@ -15,13 +15,17 @@ import { dirname, join, resolve, sep } from "node:path";
 
 import type { VideoTaskProductionRecord } from "@firefly/domain";
 import {
+  AgentActionCommandReceiptSchema,
   StageArtifactInvalidationSchema,
   StageArtifactVersionSchema,
   StageConfirmationSchema,
+  StageConfirmationRequestSchema,
   StageRollbackRecordSchema,
   TaskAssetSnapshotSchema,
+  VehicleSnapshotSchema,
   VideoTaskOwnershipTransferSchema,
   VideoTaskSchema,
+  VideoTaskStrategyDraftSchema,
   VideoTaskStageSchema,
   type StageArtifactVersion,
   type StageConfirmation,
@@ -38,8 +42,18 @@ interface LegacyVideoTaskProductionRecord {
   stageConfirmations: StageConfirmation[];
 }
 
-type LegacyVideoTaskProductionRecordV3 = Omit<
+type LegacyVideoTaskProductionRecordV4 = Omit<
   VideoTaskProductionRecord,
+  | "schemaVersion"
+  | "taskVehicleSnapshots"
+  | "strategyDrafts"
+  | "activeStrategyDraftId"
+  | "stageConfirmationRequests"
+  | "commandReceipts"
+> & { schemaVersion: 4 };
+
+type LegacyVideoTaskProductionRecordV3 = Omit<
+  LegacyVideoTaskProductionRecordV4,
   "schemaVersion" | "taskAssetSnapshots"
 > & { schemaVersion: 3 };
 
@@ -105,7 +119,7 @@ const ActiveStageArtifactVersionIdsSchema = Type.Partial(
 
 const VideoTaskProductionRecordSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(4),
+    schemaVersion: Type.Literal(5),
     videoTask: VideoTaskSchema,
     stageArtifactVersions: Type.Array(StageArtifactVersionSchema),
     stageConfirmations: Type.Array(StageConfirmationSchema),
@@ -114,9 +128,58 @@ const VideoTaskProductionRecordSchema = Type.Object(
     stageArtifactInvalidations: Type.Array(StageArtifactInvalidationSchema),
     ownershipTransfers: Type.Array(VideoTaskOwnershipTransferSchema),
     taskAssetSnapshots: Type.Array(TaskAssetSnapshotSchema),
+    taskVehicleSnapshots: Type.Array(VehicleSnapshotSchema),
+    strategyDrafts: Type.Array(VideoTaskStrategyDraftSchema),
+    activeStrategyDraftId: Type.Optional(IdentifierSchema),
+    stageConfirmationRequests: Type.Array(StageConfirmationRequestSchema),
+    commandReceipts: Type.Array(AgentActionCommandReceiptSchema),
   },
   { additionalProperties: false },
 );
+
+const videoTaskStageRank: Record<VideoTaskStage, number> = {
+  strategy: 0,
+  asset_matching: 1,
+  script: 2,
+  storyboard: 3,
+  video_preview: 4,
+  delivery: 5,
+};
+
+function stageArtifactDependencyIdentity(
+  dependency: StageArtifactVersion["dependencies"][number],
+): string {
+  switch (dependency.kind) {
+    case "stage_artifact":
+      return `${dependency.kind}:${dependency.stage}:${dependency.artifactVersionId}`;
+    case "vehicle_snapshot":
+      return `${dependency.kind}:${dependency.vehicleSnapshotId}`;
+    case "asset_snapshot":
+      return `${dependency.kind}:${dependency.assetSnapshotId}`;
+  }
+}
+
+function upgradeLegacyStageArtifactVersions(
+  record: Readonly<{
+    stageArtifactVersions: readonly StageArtifactVersion[];
+    stageConfirmations: readonly StageConfirmation[];
+  }>,
+): StageArtifactVersion[] {
+  const confirmationIds = new Set(record.stageConfirmations.map(({ id }) => id));
+  return record.stageArtifactVersions.map((artifact) => {
+    const copy = structuredClone(artifact);
+    if (
+      copy.provenance.kind === "human_confirmation" &&
+      !confirmationIds.has(copy.provenance.confirmationId)
+    ) {
+      copy.provenance = {
+        kind: "migrated_confirmation",
+        legacyApprovalId: copy.provenance.confirmationId,
+      };
+    }
+    return copy;
+  });
+}
 
 function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
@@ -158,6 +221,9 @@ function validateRecord(
     ...record.stageArtifactInvalidations,
     ...record.ownershipTransfers,
     ...record.taskAssetSnapshots,
+    ...record.strategyDrafts,
+    ...record.stageConfirmationRequests,
+    ...record.commandReceipts,
   ];
   if (
     scoped.some(
@@ -169,6 +235,30 @@ function validateRecord(
   ) {
     throw new Error("Persisted video task has an invalid format or scope.");
   }
+  if (
+    record.taskVehicleSnapshots.some((snapshot) => snapshot.projectId !== batchProjectId)
+  ) {
+    throw new Error("Persisted video task has an invalid format or scope.");
+  }
+  const collections = [
+    record.stageArtifactVersions,
+    record.stageConfirmations,
+    record.stageRollbacks,
+    record.stageArtifactInvalidations,
+    record.ownershipTransfers,
+    record.taskAssetSnapshots,
+    record.taskVehicleSnapshots,
+    record.strategyDrafts,
+    record.stageConfirmationRequests,
+    record.commandReceipts,
+  ] as const;
+  if (
+    collections.some(
+      (items) => new Set(items.map(({ id: itemId }) => itemId)).size !== items.length,
+    )
+  ) {
+    throw new Error("Persisted video task has duplicate aggregate record identities.");
+  }
   const activeEntries = Object.entries(record.activeStageArtifactVersionIds) as Array<
     [VideoTaskStage, string]
   >;
@@ -178,10 +268,333 @@ function validateRecord(
         !Value.Check(VideoTaskStageSchema, stage) ||
         !record.stageArtifactVersions.some(
           (artifact) => artifact.id === artifactId && artifact.stage === stage,
+        ) ||
+        record.stageArtifactInvalidations.some(
+          (invalidation) => invalidation.artifactVersionId === artifactId,
         ),
     )
   ) {
     throw new Error("Persisted video task has an invalid format or scope.");
+  }
+  const vehicleSnapshotIds = new Set(record.taskVehicleSnapshots.map(({ id: snapshotId }) => snapshotId));
+  const vehicleSnapshotVersionKeys = record.taskVehicleSnapshots.map(
+    (snapshot) => `${snapshot.vehicleId}:${snapshot.vehicleVersion}`,
+  );
+  const strategyDraftIds = new Set(record.strategyDrafts.map(({ id: draftId }) => draftId));
+  const strategyDraftVersions = record.strategyDrafts.map(({ version }) => version);
+  const latestStrategyDraft = record.strategyDrafts.reduce<
+    VideoTaskProductionRecord["strategyDrafts"][number] | undefined
+  >((latest, draft) => latest === undefined || draft.version > latest.version ? draft : latest, undefined);
+  const assetSnapshotIds = new Set(record.taskAssetSnapshots.map(({ id: snapshotId }) => snapshotId));
+  const assetSnapshotVersions = record.taskAssetSnapshots.map(({ version }) => version);
+  const versionsAreContiguous = (versions: readonly number[]): boolean =>
+    [...versions].sort((left, right) => left - right).every(
+      (version, index) => version === index + 1,
+    );
+  const artifactVersionsByStage = new Map<VideoTaskStage, number[]>();
+  for (const artifact of record.stageArtifactVersions) {
+    artifactVersionsByStage.set(
+      artifact.stage,
+      [...(artifactVersionsByStage.get(artifact.stage) ?? []), artifact.version],
+    );
+  }
+  if (
+    record.taskVehicleSnapshots.length > 1 ||
+    new Set(vehicleSnapshotVersionKeys).size !== vehicleSnapshotVersionKeys.length ||
+    !versionsAreContiguous(strategyDraftVersions) ||
+    !versionsAreContiguous(assetSnapshotVersions) ||
+    [...artifactVersionsByStage.values()].some((versions) => !versionsAreContiguous(versions)) ||
+    (record.taskVehicleSnapshots.length > 0 &&
+      (record.videoTask.vehicleSnapshotId === undefined ||
+        !vehicleSnapshotIds.has(record.videoTask.vehicleSnapshotId))) ||
+    (record.taskAssetSnapshots.length > 0 &&
+      (record.videoTask.assetSnapshotId === undefined ||
+        !assetSnapshotIds.has(record.videoTask.assetSnapshotId))) ||
+    record.taskAssetSnapshots.some(
+      (snapshot) =>
+        record.taskVehicleSnapshots.length > 0 &&
+        !vehicleSnapshotIds.has(snapshot.vehicleSnapshotId),
+    ) ||
+    record.strategyDrafts.some(
+      (draft) =>
+        !vehicleSnapshotIds.has(draft.vehicleSnapshotId) ||
+        draft.validation.valid !==
+          !draft.validation.issues.some((issue) => issue.severity === "error"),
+    ) ||
+    (latestStrategyDraft === undefined
+      ? record.activeStrategyDraftId !== undefined
+      : record.activeStrategyDraftId !== latestStrategyDraft.id)
+  ) {
+    throw new Error("Persisted video task has an invalid strategy draft or vehicle snapshot pointer.");
+  }
+  const artifactsById = new Map(
+    record.stageArtifactVersions.map((artifact) => [artifact.id, artifact] as const),
+  );
+  const confirmationsById = new Map(
+    record.stageConfirmations.map((confirmation) => [confirmation.id, confirmation] as const),
+  );
+  for (const artifact of record.stageArtifactVersions) {
+    const dependencyIdentities = artifact.dependencies.map(stageArtifactDependencyIdentity);
+    if (new Set(dependencyIdentities).size !== dependencyIdentities.length) {
+      throw new Error("Persisted video task has a duplicate stage artifact dependency.");
+    }
+    for (const dependency of artifact.dependencies) {
+      if (dependency.kind === "stage_artifact") {
+        const dependencyArtifact = artifactsById.get(dependency.artifactVersionId);
+        if (
+          dependencyArtifact === undefined ||
+          dependencyArtifact.stage !== dependency.stage ||
+          videoTaskStageRank[dependencyArtifact.stage] >= videoTaskStageRank[artifact.stage]
+        ) {
+          throw new Error("Persisted video task has an invalid stage artifact dependency graph.");
+        }
+        continue;
+      }
+      if (
+        dependency.kind === "vehicle_snapshot" &&
+        record.taskVehicleSnapshots.length > 0 &&
+        !vehicleSnapshotIds.has(dependency.vehicleSnapshotId)
+      ) {
+        throw new Error("Persisted video task has an invalid vehicle snapshot dependency.");
+      }
+      if (
+        dependency.kind === "asset_snapshot" &&
+        record.taskAssetSnapshots.length > 0 &&
+        !assetSnapshotIds.has(dependency.assetSnapshotId)
+      ) {
+        throw new Error("Persisted video task has an invalid asset snapshot dependency.");
+      }
+    }
+    if (artifact.provenance.kind === "human_confirmation") {
+      const confirmation = confirmationsById.get(artifact.provenance.confirmationId);
+      if (
+        confirmation === undefined ||
+        confirmation.artifactVersionId !== artifact.id ||
+        confirmation.stage !== artifact.stage
+      ) {
+        throw new Error("Persisted video task has an invalid stage artifact provenance graph.");
+      }
+    }
+  }
+  for (const confirmation of record.stageConfirmations) {
+    const artifact = artifactsById.get(confirmation.artifactVersionId);
+    if (
+      artifact === undefined ||
+      artifact.stage !== confirmation.stage ||
+      (artifact.provenance.kind === "human_confirmation" &&
+        artifact.provenance.confirmationId !== confirmation.id)
+    ) {
+      throw new Error("Persisted video task has an invalid stage confirmation graph.");
+    }
+  }
+  const rollbacksById = new Map(
+    record.stageRollbacks.map((rollback) => [rollback.id, rollback] as const),
+  );
+  const invalidationsById = new Map(
+    record.stageArtifactInvalidations.map((invalidation) => [invalidation.id, invalidation] as const),
+  );
+  for (const rollback of record.stageRollbacks) {
+    const fromArtifact = artifactsById.get(rollback.fromArtifactVersionId);
+    const toArtifact = artifactsById.get(rollback.toArtifactVersionId);
+    if (
+      fromArtifact === undefined ||
+      toArtifact === undefined ||
+      fromArtifact.stage !== rollback.stage ||
+      toArtifact.stage !== rollback.stage ||
+      fromArtifact.id === toArtifact.id ||
+      rollback.expectedTaskRevision > record.videoTask.revision ||
+      rollback.invalidationIds.some((invalidationId) => !invalidationsById.has(invalidationId))
+    ) {
+      throw new Error("Persisted video task has an invalid stage rollback graph.");
+    }
+  }
+  const invalidatedArtifactIds = new Set<string>();
+  for (const invalidation of record.stageArtifactInvalidations) {
+    const artifact = artifactsById.get(invalidation.artifactVersionId);
+    const dependency = invalidation.invalidatedDependency;
+    if (
+      artifact === undefined ||
+      artifact.stage !== invalidation.stage ||
+      invalidatedArtifactIds.has(invalidation.artifactVersionId) ||
+      dependency.kind !== "stage_artifact" ||
+      !artifact.dependencies.some(
+        (candidate) =>
+          stageArtifactDependencyIdentity(candidate) ===
+          stageArtifactDependencyIdentity(dependency),
+      )
+    ) {
+      throw new Error("Persisted video task has an invalid stage artifact invalidation graph.");
+    }
+    invalidatedArtifactIds.add(invalidation.artifactVersionId);
+    const dependencyArtifact = artifactsById.get(dependency.artifactVersionId);
+    if (
+      dependencyArtifact === undefined ||
+      dependencyArtifact.stage !== dependency.stage ||
+      videoTaskStageRank[dependencyArtifact.stage] >= videoTaskStageRank[artifact.stage]
+    ) {
+      throw new Error("Persisted video task has an invalid invalidated dependency graph.");
+    }
+    if (invalidation.cause.kind === "rollback") {
+      const rollback = rollbacksById.get(invalidation.cause.rollbackId);
+      if (
+        rollback === undefined ||
+        dependency.artifactVersionId !== rollback.fromArtifactVersionId
+      ) {
+        throw new Error("Persisted video task has an invalid rollback invalidation cause.");
+      }
+    } else {
+      const upstream = invalidationsById.get(invalidation.cause.invalidationId);
+      if (
+        upstream === undefined ||
+        dependency.artifactVersionId !== upstream.artifactVersionId
+      ) {
+        throw new Error("Persisted video task has an invalid upstream invalidation cause.");
+      }
+    }
+  }
+  const rollbackRootByInvalidationId = new Map<string, string>();
+  for (const invalidation of record.stageArtifactInvalidations) {
+    const visited = new Set<string>();
+    let current = invalidation;
+    while (current.cause.kind === "upstream_invalidation") {
+      if (visited.has(current.id)) {
+        throw new Error("Persisted video task has a cyclic artifact invalidation graph.");
+      }
+      visited.add(current.id);
+      const upstream = invalidationsById.get(current.cause.invalidationId);
+      if (upstream === undefined) {
+        throw new Error("Persisted video task has an invalid upstream invalidation cause.");
+      }
+      current = upstream;
+    }
+    if (visited.has(current.id)) {
+      throw new Error("Persisted video task has a cyclic artifact invalidation graph.");
+    }
+    if (!rollbacksById.has(current.cause.rollbackId)) {
+      throw new Error("Persisted video task has an invalid rollback invalidation cause.");
+    }
+    rollbackRootByInvalidationId.set(invalidation.id, current.cause.rollbackId);
+  }
+  for (const rollback of record.stageRollbacks) {
+    const rootedInvalidationIds = new Set(
+      record.stageArtifactInvalidations
+        .filter((invalidation) => rollbackRootByInvalidationId.get(invalidation.id) === rollback.id)
+        .map(({ id: invalidationId }) => invalidationId),
+    );
+    const listedInvalidationIds = new Set(rollback.invalidationIds);
+    if (
+      rootedInvalidationIds.size !== listedInvalidationIds.size ||
+      [...rootedInvalidationIds].some(
+        (invalidationId) => !listedInvalidationIds.has(invalidationId),
+      )
+    ) {
+      throw new Error("Persisted video task has an incomplete stage rollback invalidation graph.");
+    }
+  }
+  const confirmationRequests = new Map(
+    record.stageConfirmationRequests.map((request) => [request.id, request] as const),
+  );
+  if (
+    record.stageConfirmationRequests.some(
+      (request) =>
+        !strategyDraftIds.has(request.strategyDraftId) ||
+        record.strategyDrafts.find(({ id: draftId }) => draftId === request.strategyDraftId)
+          ?.status !== "awaiting_confirmation" ||
+        request.expectedTaskRevision + 1 > record.videoTask.revision,
+    )
+  ) {
+    throw new Error("Persisted video task has an invalid stage confirmation request pointer.");
+  }
+  const receiptRequestKeys = record.commandReceipts.map(
+    (receipt) => `${receipt.actorAccountId}:${receipt.requestId}`,
+  );
+  if (new Set(receiptRequestKeys).size !== receiptRequestKeys.length) {
+    throw new Error("Persisted video task has duplicate command request identities.");
+  }
+  const receiptResultingRevisions = record.commandReceipts.map(
+    ({ resultingTaskRevision }) => resultingTaskRevision,
+  );
+  if (new Set(receiptResultingRevisions).size !== receiptResultingRevisions.length) {
+    throw new Error("Persisted video task has duplicate command result revisions.");
+  }
+  const referencedConfirmationRequestIds = new Set<string>();
+  for (const receipt of record.commandReceipts) {
+    if (
+      receipt.resultingTaskRevision !== receipt.expectedTaskRevision + 1 ||
+      receipt.resultingTaskRevision > record.videoTask.revision
+    ) {
+      throw new Error("Persisted video task has an invalid command receipt revision.");
+    }
+    if (receipt.action === "generate_strategy") {
+      const generatedResult = receipt.result;
+      const draft = generatedResult.kind === "strategy_generated"
+        ? record.strategyDrafts.find(
+            ({ id: draftId }) => draftId === generatedResult.strategyDraftId,
+          )
+        : undefined;
+      if (
+        draft === undefined ||
+        draft.createdBy !== receipt.actorAccountId ||
+        draft.createdAt !== receipt.occurredAt
+      ) {
+        throw new Error("Persisted video task has an invalid strategy command receipt.");
+      }
+      continue;
+    }
+    if (receipt.action === "request_strategy_approval") {
+      if (receipt.result.kind !== "strategy_confirmation_requested") {
+        throw new Error("Persisted video task has an invalid confirmation command receipt.");
+      }
+      const request = confirmationRequests.get(receipt.result.stageConfirmationRequestId);
+      if (
+        request === undefined ||
+        request.strategyDraftId !== receipt.result.strategyDraftId ||
+        request.expectedTaskRevision !== receipt.expectedTaskRevision ||
+        request.actorAccountId !== receipt.actorAccountId ||
+        request.occurredAt !== receipt.occurredAt
+      ) {
+        throw new Error("Persisted video task has an invalid confirmation command receipt.");
+      }
+      referencedConfirmationRequestIds.add(request.id);
+      continue;
+    }
+    if (receipt.result.kind !== "stage_rolled_back") {
+      throw new Error("Persisted video task has an invalid rollback command receipt.");
+    }
+    const rollbackResult = receipt.result;
+    const rollback = record.stageRollbacks.find(
+      ({ id: rollbackId }) => rollbackId === rollbackResult.stageRollbackId,
+    );
+    if (
+      rollback === undefined ||
+      rollback.expectedTaskRevision !== receipt.expectedTaskRevision ||
+      rollback.requestedBy !== receipt.actorAccountId ||
+      rollback.occurredAt !== receipt.occurredAt ||
+      rollback.invalidationIds.length !== rollbackResult.invalidationIds.length ||
+      rollback.invalidationIds.some(
+        (invalidationId, index) => invalidationId !== rollbackResult.invalidationIds[index],
+      ) ||
+      rollbackResult.invalidationIds.some(
+        (invalidationId) =>
+          !record.stageArtifactInvalidations.some(({ id: currentId }) => currentId === invalidationId),
+      )
+    ) {
+      throw new Error("Persisted video task has an invalid rollback command receipt.");
+    }
+  }
+  if (referencedConfirmationRequestIds.size !== record.stageConfirmationRequests.length) {
+    throw new Error("Persisted video task has an unreferenced stage confirmation request.");
+  }
+  const generatedDraftIds = record.commandReceipts.flatMap((receipt) =>
+    receipt.action === "generate_strategy" && receipt.result.kind === "strategy_generated"
+      ? [receipt.result.strategyDraftId]
+      : [],
+  );
+  if (
+    new Set(generatedDraftIds).size !== generatedDraftIds.length ||
+    generatedDraftIds.length !== record.strategyDrafts.length
+  ) {
+    throw new Error("Persisted video task has an invalid strategy command receipt graph.");
   }
 }
 
@@ -211,6 +624,7 @@ export interface VideoTaskCreationStore extends VideoTaskProductionStore {
 function upgradeRecord(
   parsed:
     | VideoTaskProductionRecord
+    | LegacyVideoTaskProductionRecordV4
     | LegacyVideoTaskProductionRecordV3
     | LegacyVideoTaskProductionRecordV2
     | LegacyVideoTaskProductionRecord,
@@ -219,20 +633,41 @@ function upgradeRecord(
   if (parsed.videoTask.id !== videoTaskId) {
     throw new Error("Persisted video task has an invalid format or scope.");
   }
-  if (parsed.schemaVersion === 4) return structuredClone(parsed);
+  if (parsed.schemaVersion === 5) return structuredClone(parsed);
+  if (parsed.schemaVersion === 4) {
+    return {
+      ...structuredClone(parsed),
+      schemaVersion: 5,
+      stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
+      taskVehicleSnapshots: [],
+      strategyDrafts: [],
+      stageConfirmationRequests: [],
+      commandReceipts: [],
+    };
+  }
   if (parsed.schemaVersion === 3) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 4,
+      schemaVersion: 5,
+      stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
       taskAssetSnapshots: [],
+      taskVehicleSnapshots: [],
+      strategyDrafts: [],
+      stageConfirmationRequests: [],
+      commandReceipts: [],
     };
   }
   if (parsed.schemaVersion === 2) {
     return {
       ...structuredClone(parsed),
-      schemaVersion: 4,
+      schemaVersion: 5,
+      stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
       ownershipTransfers: [],
       taskAssetSnapshots: [],
+      taskVehicleSnapshots: [],
+      strategyDrafts: [],
+      stageConfirmationRequests: [],
+      commandReceipts: [],
     };
   }
   if ((parsed as { schemaVersion: number }).schemaVersion !== 1) {
@@ -247,15 +682,19 @@ function upgradeRecord(
     }
   }
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: structuredClone(parsed.videoTask),
-    stageArtifactVersions: structuredClone(parsed.stageArtifactVersions),
+    stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
     stageConfirmations: structuredClone(parsed.stageConfirmations),
     activeStageArtifactVersionIds,
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
     taskAssetSnapshots: [],
+    taskVehicleSnapshots: [],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 
@@ -505,6 +944,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
       const record = upgradeRecord(
         rawRecord as
           | VideoTaskProductionRecord
+          | LegacyVideoTaskProductionRecordV4
           | LegacyVideoTaskProductionRecordV3
           | LegacyVideoTaskProductionRecordV2
           | LegacyVideoTaskProductionRecord,

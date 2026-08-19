@@ -19,7 +19,10 @@ function issue(
   return { code: `AIC-STRATEGY-${code}`, severity: "error", message, ...details };
 }
 
-export function validateStrategy(strategy: Strategy, snapshot: VehicleSnapshot): StrategyValidationResult {
+export function validateStrategy(
+  strategy: Readonly<Pick<Strategy, "items">>,
+  snapshot: Readonly<VehicleSnapshot>,
+): StrategyValidationResult {
   const issues: StrategyValidationIssue[] = [];
   const claims = new Map<string, Claim>(
     [...snapshot.fixedClaims, ...snapshot.optionalClaims].map((claim) => [claim.id, claim]),

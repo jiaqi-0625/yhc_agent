@@ -17,6 +17,7 @@ const project: BatchProject = {
   tenantId: "tenant_firefly",
   brandId: "brand_firefly",
   vehicleId: "vehicle_suv",
+  vehicleVersion: 1,
   name: "萤火虫 SUV 旗舰版 9:16 首发",
   batchName: "首发",
   aspectRatio: "9:16",
@@ -47,10 +48,10 @@ const creationContext = {
   taskId: "task_family",
 };
 
-test("createVideoTask derives a clean schema-v4 aggregate from active project and server scope", () => {
+test("createVideoTask derives a clean schema-v5 aggregate from active project and server scope", () => {
   const record = createVideoTask(project, creationInput, creationContext);
 
-  assert.equal(record.schemaVersion, 4);
+  assert.equal(record.schemaVersion, 5);
   assert.deepEqual(record.videoTask, {
     id: "task_family",
     tenantId: "tenant_firefly",

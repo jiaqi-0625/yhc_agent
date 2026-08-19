@@ -66,7 +66,7 @@ const taskContext = {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       id: "task_1",
       tenantId: "tenant_1",
@@ -94,6 +94,7 @@ function productionRecord(): VideoTaskProductionRecord {
     stageRollbacks: [],
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
+    taskVehicleSnapshots: [],
     taskAssetSnapshots: [{
       id: "asset_snapshot_1",
       tenantId: "tenant_1",
@@ -106,6 +107,9 @@ function productionRecord(): VideoTaskProductionRecord {
       createdAt: occurredAt,
       createdBy: "account_1",
     }],
+    strategyDrafts: [],
+    stageConfirmationRequests: [],
+    commandReceipts: [],
   };
 }
 

@@ -97,6 +97,7 @@ const batchProject = {
   tenantId: brand.tenantId,
   brandId: brand.id,
   vehicleId: vehicle.id,
+  vehicleVersion: vehicle.version,
   name: "萤火汽车 萤火 E5 9:16 夏季上新",
   batchName: "夏季上新",
   aspectRatio: "9:16",
@@ -341,6 +342,9 @@ test("workspace v2 vehicle schema carries versioned official facts without asset
 
 test("workspace v2 batch project locks vehicle, visual style, and aspect ratio at project level", () => {
   assert.equal(Value.Check(BatchProjectSchema, batchProject), true);
+  assert.equal(Value.Check(BatchProjectSchema, { ...batchProject, vehicleVersion: 0 }), false);
+  const { vehicleVersion: _vehicleVersion, ...withoutVehicleVersion } = batchProject;
+  assert.equal(Value.Check(BatchProjectSchema, withoutVehicleVersion), false);
   assert.equal(Value.Check(BatchProjectSchema, { ...batchProject, aspectRatio: "vertical" }), false);
   assert.equal(Value.Check(BatchProjectSchema, { ...batchProject, customStylePrompt: "" }), false);
   assert.equal(Value.Check(BatchProjectSchema, { ...batchProject, platformTags: ["douyin"] }), false);

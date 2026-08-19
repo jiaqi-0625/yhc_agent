@@ -45,7 +45,7 @@ function referenceIdentity(reference: Readonly<AssetReference>): string {
   return `${reference.source}:${reference.batchProjectId}:${reference.assetId}`;
 }
 
-function assertPoolAssets(
+export function assertProjectAssetPoolAssets(
   project: Readonly<BatchProject>,
   assets: readonly AssetReference[],
 ): void {
@@ -105,7 +105,7 @@ export function createProjectAssetPool(
       "The project is outside the authenticated tenant scope.",
     );
   }
-  assertPoolAssets(project, assets);
+  assertProjectAssetPoolAssets(project, assets);
   return {
     id: context.createId("project_asset_pool"),
     tenantId: project.tenantId,
@@ -159,7 +159,7 @@ export function refreshProjectAssetPool(
     changed = true;
     return structuredClone(latest);
   });
-  assertPoolAssets(project, assets);
+  assertProjectAssetPoolAssets(project, assets);
   if (!changed) return structuredClone(current);
   return {
     ...structuredClone(current),
@@ -220,7 +220,7 @@ export function lockVideoTaskAssetSnapshot(
       "A vehicle snapshot must be locked before task assets.",
     );
   }
-  assertPoolAssets(project, pool.assets);
+  assertProjectAssetPoolAssets(project, pool.assets);
   const version =
     Math.max(0, ...record.taskAssetSnapshots.map((snapshot) => snapshot.version)) + 1;
   const snapshot: TaskAssetSnapshot = {
@@ -237,7 +237,7 @@ export function lockVideoTaskAssetSnapshot(
   };
   return {
     ...structuredClone(record),
-    schemaVersion: 4,
+    schemaVersion: 5,
     videoTask: {
       ...structuredClone(task),
       assetSnapshotId: snapshot.id,

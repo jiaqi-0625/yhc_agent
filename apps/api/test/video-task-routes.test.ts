@@ -36,6 +36,7 @@ const project: BatchProject = {
   tenantId: "tenant_firefly",
   brandId: "brand_firefly_demo",
   vehicleId: "vehicle_firefly_e5_2026_long_range",
+  vehicleVersion: 1,
   name: "萤火汽车 萤火 E5 长续航版 16:9 HTTP WS304",
   batchName: "HTTP WS304",
   aspectRatio: "16:9",

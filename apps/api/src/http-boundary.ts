@@ -6,9 +6,11 @@ import {
   AccountHighCostTaskRunningError,
   AccountRunLockDeniedError,
   AccountRunLockTokenMismatchError,
+  AgentActionCommandError,
   AssetPoolError,
   BatchProjectCreationError,
   RevisionConflictError,
+  StageRollbackDeniedError,
   TaskTakeoverDeniedError,
   VideoTaskAssignmentDeniedError,
   VideoTaskCreationError,
@@ -88,6 +90,8 @@ export function errorStatus(error: Error): number {
   if (
     error instanceof VideoTaskAssignmentDeniedError ||
     error instanceof TaskTakeoverDeniedError ||
+    error instanceof AgentActionCommandError ||
+    error instanceof StageRollbackDeniedError ||
     (error instanceof VideoTaskCreationError &&
       error.code === "AIC-VIDEO-TASK-CREATION-PROJECT_INACTIVE")
   ) {
@@ -118,7 +122,9 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AccountRunLockDeniedError ||
       normalized instanceof AccountRunLockTokenMismatchError ||
       normalized instanceof AssetPoolError ||
+      normalized instanceof AgentActionCommandError ||
       normalized instanceof BatchProjectCreationError ||
+      normalized instanceof StageRollbackDeniedError ||
       normalized instanceof VideoTaskCreationError ||
       normalized instanceof VideoTaskAssignmentDeniedError ||
       normalized instanceof TaskTakeoverDeniedError ||

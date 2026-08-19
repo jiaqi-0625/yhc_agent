@@ -95,6 +95,7 @@ export function createBatchProject(
     tenantId: context.tenantId,
     brandId: brand.id,
     vehicleId: vehicle.id,
+    vehicleVersion: vehicle.version,
     name,
     batchName,
     aspectRatio: input.aspectRatio,

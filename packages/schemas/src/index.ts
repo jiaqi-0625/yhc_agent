@@ -251,6 +251,7 @@ export const BatchProjectSchema = Type.Object(
     tenantId: Identifier,
     brandId: Identifier,
     vehicleId: Identifier,
+    vehicleVersion: Type.Integer({ minimum: 1 }),
     name: Type.String({ minLength: 1, maxLength: 240 }),
     batchName: Type.String({ minLength: 1, maxLength: 120 }),
     aspectRatio: AspectRatioSchema,
@@ -1216,6 +1217,141 @@ export const AgentActionCardSchema = Type.Union([
   ),
 ]);
 export type AgentActionCard = Static<typeof AgentActionCardSchema>;
+
+export const ExecuteAgentActionRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    card: AgentActionCardSchema,
+  },
+  { additionalProperties: false },
+);
+export type ExecuteAgentActionRequest = Static<typeof ExecuteAgentActionRequestSchema>;
+
+export const VideoTaskStrategyDraftStatusSchema = Type.Union([
+  Type.Literal("draft"),
+  Type.Literal("awaiting_confirmation"),
+]);
+export type VideoTaskStrategyDraftStatus = Static<typeof VideoTaskStrategyDraftStatusSchema>;
+
+export const VideoTaskStrategyDraftSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    vehicleSnapshotId: Identifier,
+    version: Type.Integer({ minimum: 1 }),
+    status: VideoTaskStrategyDraftStatusSchema,
+    audience: Type.String({ minLength: 1, maxLength: 500 }),
+    theme: Type.String({ minLength: 1, maxLength: 500 }),
+    items: Type.Array(StrategyItemSchema, { minItems: 1, maxItems: 20 }),
+    validation: StrategyValidationResultSchema,
+    generation: Type.Object(
+      {
+        kind: Type.Literal("vehicle_fact_projection"),
+        templateVersion: Type.Literal("v1"),
+      },
+      { additionalProperties: false },
+    ),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type VideoTaskStrategyDraft = Static<typeof VideoTaskStrategyDraftSchema>;
+
+export const StageConfirmationRequestSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    stage: Type.Literal("strategy"),
+    strategyDraftId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    source: Type.Literal("human_action"),
+    actorAccountId: Identifier,
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type StageConfirmationRequest = Static<typeof StageConfirmationRequestSchema>;
+
+export const AgentActionCommandActionSchema = Type.Union([
+  Type.Literal("generate_strategy"),
+  Type.Literal("request_strategy_approval"),
+  Type.Literal("rollback_stage"),
+]);
+export type AgentActionCommandAction = Static<typeof AgentActionCommandActionSchema>;
+
+export const AgentActionCommandResultSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("strategy_generated"),
+      strategyDraftId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("strategy_confirmation_requested"),
+      strategyDraftId: Identifier,
+      stageConfirmationRequestId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("stage_rolled_back"),
+      stageRollbackId: Identifier,
+      invalidationIds: Type.Array(Identifier, { maxItems: 500, uniqueItems: true }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type AgentActionCommandResult = Static<typeof AgentActionCommandResultSchema>;
+
+export const AgentActionCommandReceiptSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    id: Identifier,
+    tenantId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    actorAccountId: Identifier,
+    requestId: Identifier,
+    payloadHash: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+    action: AgentActionCommandActionSchema,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    resultingTaskRevision: Type.Integer({ minimum: 1 }),
+    cost: Type.Object(
+      {
+        kind: Type.Literal("free"),
+        amountMinor: Type.Literal(0),
+        charged: Type.Literal(false),
+      },
+      { additionalProperties: false },
+    ),
+    result: AgentActionCommandResultSchema,
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type AgentActionCommandReceipt = Static<typeof AgentActionCommandReceiptSchema>;
+
+export const ExecuteAgentActionResponseSchema = Type.Object(
+  {
+    receipt: AgentActionCommandReceiptSchema,
+    replayed: Type.Boolean(),
+    videoTask: VideoTaskSchema,
+  },
+  { additionalProperties: false },
+);
+export type ExecuteAgentActionResponse = Static<typeof ExecuteAgentActionResponseSchema>;
 
 /** @deprecated Compatibility contract; migrate producers to AgentActionCardSchema. */
 export const StrategyActionProposalSchema = Type.Union([
