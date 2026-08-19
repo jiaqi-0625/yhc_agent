@@ -150,6 +150,94 @@ export const VehicleSchema = Type.Object(
 );
 export type Vehicle = Static<typeof VehicleSchema>;
 
+export const CreateBrandRequestSchema = Type.Object(
+  {
+    name: Type.String({ minLength: 1, maxLength: 120 }),
+    defaultVisualStylePresetId: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type CreateBrandRequest = Static<typeof CreateBrandRequestSchema>;
+
+export const UpdateBrandRequestSchema = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    name: Type.Optional(Type.String({ minLength: 1, maxLength: 120 })),
+    defaultVisualStylePresetId: Type.Optional(Identifier),
+    status: Type.Optional(CatalogRecordStatusSchema),
+  },
+  { additionalProperties: false, minProperties: 2 },
+);
+export type UpdateBrandRequest = Static<typeof UpdateBrandRequestSchema>;
+
+const VehicleFactFields = {
+  status: CatalogRecordStatusSchema,
+  series: Type.String({ minLength: 1, maxLength: 120 }),
+  modelYear: Type.Integer({ minimum: 2000, maximum: 2100 }),
+  trim: Type.String({ minLength: 1, maxLength: 120 }),
+  parameters: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
+  fixedClaims: Type.Array(ClaimSchema),
+  optionalClaims: Type.Array(ClaimSchema),
+  prohibitedClaims: Type.Array(NonEmptyString),
+};
+
+export const CreateVehicleRequestSchema = Type.Object(
+  VehicleFactFields,
+  { additionalProperties: false },
+);
+export type CreateVehicleRequest = Static<typeof CreateVehicleRequestSchema>;
+
+export const CreateVehicleFactVersionRequestSchema = Type.Object(
+  {
+    expectedVersion: Type.Integer({ minimum: 1 }),
+    ...VehicleFactFields,
+  },
+  { additionalProperties: false },
+);
+export type CreateVehicleFactVersionRequest = Static<
+  typeof CreateVehicleFactVersionRequestSchema
+>;
+
+export const CreateWorkspaceAccessGrantRequestSchema = Type.Object(
+  {
+    accountId: Identifier,
+    access: WorkspaceAccessScopeSchema,
+  },
+  { additionalProperties: false },
+);
+export type CreateWorkspaceAccessGrantRequest = Static<
+  typeof CreateWorkspaceAccessGrantRequestSchema
+>;
+
+export const UpdateWorkspaceAccessGrantRequestSchema = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    status: WorkspaceAccessGrantStatusSchema,
+  },
+  { additionalProperties: false },
+);
+export type UpdateWorkspaceAccessGrantRequest = Static<
+  typeof UpdateWorkspaceAccessGrantRequestSchema
+>;
+
+export const CreateAccountBudgetRequestSchema = Type.Object(
+  {
+    currency: Type.String({ pattern: "^[A-Z]{3}$" }),
+    limitAmountMinor: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  },
+  { additionalProperties: false },
+);
+export type CreateAccountBudgetRequest = Static<typeof CreateAccountBudgetRequestSchema>;
+
+export const UpdateAccountBudgetRequestSchema = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 1 }),
+    limitAmountMinor: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+  },
+  { additionalProperties: false },
+);
+export type UpdateAccountBudgetRequest = Static<typeof UpdateAccountBudgetRequestSchema>;
+
 export const AspectRatioSchema = Type.String({
   minLength: 3,
   maxLength: 11,
@@ -425,6 +513,40 @@ export const CompanyReusableAssetReferenceSchema = Type.Object(
   { additionalProperties: false },
 );
 export type CompanyReusableAssetReference = Static<typeof CompanyReusableAssetReferenceSchema>;
+
+export const CompanyAssetReferenceSchema = Type.Union([
+  CompanyVehicleAssetReferenceSchema,
+  CompanyReusableAssetReferenceSchema,
+]);
+export type CompanyAssetReference = Static<typeof CompanyAssetReferenceSchema>;
+
+export const VehicleAssetAssociationSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    brandId: Identifier,
+    vehicleId: Identifier,
+    revision: Type.Integer({ minimum: 1 }),
+    assets: Type.Array(CompanyAssetReferenceSchema, { maxItems: 500 }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type VehicleAssetAssociation = Static<typeof VehicleAssetAssociationSchema>;
+
+export const ReplaceVehicleAssetAssociationsRequestSchema = Type.Object(
+  {
+    expectedRevision: Type.Integer({ minimum: 0 }),
+    assets: Type.Array(CompanyAssetReferenceSchema, { maxItems: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type ReplaceVehicleAssetAssociationsRequest = Static<
+  typeof ReplaceVehicleAssetAssociationsRequestSchema
+>;
 
 export const TemporaryAssetReferenceSchema = Type.Object(
   {

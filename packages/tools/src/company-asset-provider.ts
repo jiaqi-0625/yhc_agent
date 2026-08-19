@@ -1,12 +1,9 @@
 import type {
   AssetCategory,
-  CompanyReusableAssetReference,
-  CompanyVehicleAssetReference,
+  CompanyAssetReference,
 } from "@firefly/schemas";
 
-export type CompanyAssetReference =
-  | CompanyVehicleAssetReference
-  | CompanyReusableAssetReference;
+export type { CompanyAssetReference } from "@firefly/schemas";
 
 /** Server-resolved authorization scope. Never construct this from provider query fields. */
 export interface CompanyAssetProviderScope {

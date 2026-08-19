@@ -9,6 +9,11 @@ import {
   RevisionConflictError,
   WorkspaceAccessDeniedError,
 } from "@firefly/domain";
+import {
+  CompanyAssetCatalogAccessError,
+  CompanyAssetCatalogQueryError,
+  CompanyAssetProviderAbortedError,
+} from "@firefly/tools";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -73,6 +78,7 @@ export function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
   if (error instanceof LocalAgentRunError) return error.statusCode;
   if (error instanceof WorkspaceAccessDeniedError) return 403;
+  if (error instanceof CompanyAssetCatalogAccessError) return 403;
   if (error instanceof LocalAgentCredentialsError) return 503;
   if (
     error instanceof RevisionConflictError ||
@@ -100,6 +106,9 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AccountRunLockTokenMismatchError ||
       normalized instanceof LocalAgentRunError ||
       normalized instanceof LocalAgentCredentialsError ||
+      normalized instanceof CompanyAssetCatalogAccessError ||
+      normalized instanceof CompanyAssetCatalogQueryError ||
+      normalized instanceof CompanyAssetProviderAbortedError ||
       normalized instanceof WorkspaceAccessDeniedError
         ? normalized.code
         : "AIC-API-INVALID_REQUEST",

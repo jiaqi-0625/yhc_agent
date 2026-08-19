@@ -88,6 +88,46 @@ function preview(assetId: string, width = 1920, height = 1080): CompanyAssetPrev
 const defaultCatalog: readonly MockCompanyAssetRecord[] = [
   {
     tenantId: "tenant_firefly",
+    assetId: "asset_firefly_demo_e5_hero",
+    version: 1,
+    category: "vehicle",
+    vehicleId: "vehicle_firefly_e5_2026_long_range",
+    displayName: "萤火 E5 长续航版英雄图",
+    description: "开发管理中心使用的白色棚拍前侧视角",
+    brandIds: ["brand_firefly_demo"],
+    tags: ["hero", "front", "studio"],
+    preview: preview("asset_firefly_demo_e5_hero"),
+    updatedAt: "2026-08-19T00:00:00.000Z",
+    internalSortWeight: 120,
+  },
+  {
+    tenantId: "tenant_firefly",
+    assetId: "asset_style_firefly_demo_clean",
+    version: 1,
+    category: "visual_style",
+    displayName: "萤火汽车清透科技风",
+    description: "开发品牌默认视觉预设",
+    brandIds: ["brand_firefly_demo"],
+    tags: ["brand", "clean", "technology"],
+    preview: preview("asset_style_firefly_demo_clean"),
+    updatedAt: "2026-08-19T00:00:00.000Z",
+    internalSortWeight: 120,
+  },
+  {
+    tenantId: "tenant_firefly",
+    assetId: "asset_style_global_clean",
+    version: 1,
+    category: "visual_style",
+    displayName: "全品牌清透产品风",
+    description: "可作为新品牌初始化视觉预设的通用模拟风格。",
+    brandIds: [],
+    tags: ["global", "clean", "product"],
+    preview: preview("asset_style_global_clean"),
+    updatedAt: "2026-08-19T00:00:00.000Z",
+    internalSortWeight: 50,
+  },
+  {
+    tenantId: "tenant_firefly",
     assetId: "asset_e5_hero",
     version: 1,
     category: "vehicle",
@@ -231,6 +271,39 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     internalSortWeight: 999,
   },
 ];
+
+function recordsForScope(
+  scope: Readonly<CompanyAssetProviderScope>,
+): readonly MockCompanyAssetRecord[] {
+  const catalogVehicleIds = new Set(
+    defaultCatalog
+      .filter(
+        (record) => record.tenantId === scope.tenantId && record.category === "vehicle",
+      )
+      .map((record) => record.category === "vehicle" ? record.vehicleId : ""),
+  );
+  const syntheticVehicles: MockVehicleAssetRecord[] = scope.allowedVehicleIds
+    .filter((vehicleId) => !catalogVehicleIds.has(vehicleId))
+    .map((vehicleId) => {
+      const fingerprint = createHash("sha256").update(`${scope.tenantId}:${vehicleId}`).digest("hex").slice(0, 24);
+      const assetId = `asset_mock_vehicle_${fingerprint}`;
+      return {
+        tenantId: scope.tenantId,
+        assetId,
+        version: 1,
+        category: "vehicle",
+        vehicleId,
+        displayName: `模拟车型参考图 ${vehicleId}`,
+        description: "为管理中心新建车型提供的确定性模拟公司资产。",
+        brandIds: [],
+        tags: ["vehicle", "mock", "reference"],
+        preview: preview(assetId),
+        updatedAt: "2026-08-19T00:00:00.000Z",
+        internalSortWeight: 10,
+      };
+    });
+  return [...defaultCatalog, ...syntheticVehicles];
+}
 
 function assertNotAborted(options?: Readonly<CompanyAssetProviderRequestOptions>): void {
   if (options?.signal?.aborted) throw new CompanyAssetProviderAbortedError();
@@ -409,7 +482,7 @@ export class MockCompanyAssetProvider implements CompanyAssetProvider {
     const offset = query.cursor === undefined ? 0 : decodeCursor(query.cursor, fingerprint);
     const normalizedSearch = query.searchText === undefined ? undefined : normalizeSearch(query.searchText);
     const normalizedTags = query.tags?.map(normalizeSearch);
-    const filtered = latestRecords(defaultCatalog.filter((record) => recordVisible(record, scope)))
+    const filtered = latestRecords(recordsForScope(scope).filter((record) => recordVisible(record, scope)))
       .filter(
         (record) => query.categories === undefined || query.categories.includes(record.category),
       )
@@ -469,7 +542,7 @@ export class MockCompanyAssetProvider implements CompanyAssetProvider {
     const items: CompanyAssetCatalogItem[] = [];
     const missingReferences: CompanyAssetReference[] = [];
     for (const reference of references) {
-      const record = defaultCatalog.find(
+      const record = recordsForScope(scope).find(
         (candidate) =>
           recordVisible(candidate, scope) && sameReference(reference, candidate),
       );

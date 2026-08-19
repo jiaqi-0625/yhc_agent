@@ -49,6 +49,11 @@ export interface ReservedAccountBudget {
   balance: AccountBudgetBalance;
 }
 
+export interface AccountBudgetAdministrationView {
+  budget: AccountBudget;
+  balance: AccountBudgetBalance;
+}
+
 export interface HighCostOperationExecutionResult<T> {
   value: T;
   operationResultId: string;
@@ -259,5 +264,25 @@ export class AccountBudgetRuntime {
   async loadBalance(tenantId: string, accountId: string): Promise<AccountBudgetBalance | undefined> {
     const budget = await this.store.load(tenantId, accountId);
     return budget ? calculateAccountBudgetBalance(budget) : undefined;
+  }
+
+  async loadForAdministration(
+    accountId: string,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<AccountBudgetAdministrationView | undefined> {
+    this.#assertAdministrator(session);
+    const budget = await this.store.load(session.tenantId, accountId);
+    return budget
+      ? { budget, balance: calculateAccountBudgetBalance(budget) }
+      : undefined;
+  }
+
+  async loadForSession(
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<AccountBudgetAdministrationView | undefined> {
+    const budget = await this.store.load(session.tenantId, session.actorAccountId);
+    return budget
+      ? { budget, balance: calculateAccountBudgetBalance(budget) }
+      : undefined;
   }
 }

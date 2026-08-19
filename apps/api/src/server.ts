@@ -2,20 +2,31 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { fileURLToPath } from "node:url";
 
 import { LocalAgentRuntime } from "@firefly/agent";
+import { MockCompanyAssetProvider } from "@firefly/tools";
 
+import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
+import { LocalAccountBudgetStore } from "./account-budget-store.ts";
 import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import { sendWebAsset } from "./web-assets.ts";
+import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
+import {
+  DEFAULT_ADMIN_BRANDS,
+  DEFAULT_ADMIN_VEHICLES,
+  DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
+  WorkspaceAdminRuntime,
+} from "./workspace-admin-runtime.ts";
+import { LocalWorkspaceAdminStore } from "./workspace-admin-store.ts";
 import { handleWorkspaceRoute } from "./workspace-routes.ts";
 import {
   handleWorkspaceSessionRoute,
   readOptionalWorkspaceBearer,
 } from "./workspace-session-routes.ts";
 import {
-  InMemoryWorkspaceAccessGrantProvider,
+  DEVELOPMENT_ACCESS_GRANTS,
   WorkspaceSessionRuntime,
 } from "./workspace-session-runtime.ts";
 import { LocalWorkspaceSessionStore } from "./workspace-session-store.ts";
@@ -61,6 +72,7 @@ async function handleRequest(
   business: LocalBusinessRuntime,
   resolveAgentIdentity: AgentIdentityResolver,
   workspaceSessions: WorkspaceSessionRuntime,
+  workspaceAdmin: WorkspaceAdminRuntime | undefined,
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
 ): Promise<void> {
@@ -114,6 +126,26 @@ async function handleRequest(
       developmentAccountsEnabled,
     )
   ) return;
+  if (
+    workspaceAdmin === undefined &&
+    (url.pathname.startsWith("/v1/admin/") || url.pathname === "/v1/workspace/me/budget")
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-ADMIN-RUNTIME_NOT_CONFIGURED",
+      "Workspace administration must be injected with the custom session runtime.",
+      503,
+    );
+  }
+  if (
+    workspaceAdmin !== undefined &&
+    await handleWorkspaceAdminRoute(
+      request,
+      response,
+      url,
+      workspaceAdmin,
+      workspaceSessions,
+    )
+  ) return;
   if (await handleWorkspaceRoute(request, response, url, business, legacyLocalAccessEnabled)) return;
   if (
     await handleAgentRoute(
@@ -139,18 +171,49 @@ export function createApiServer(
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
   resolveAgentIdentity: AgentIdentityResolver | undefined = undefined,
-  workspaceSessions = new WorkspaceSessionRuntime(
+  workspaceSessions: WorkspaceSessionRuntime | undefined = undefined,
+  developmentAccountsEnabled = false,
+  legacyLocalAccessEnabled = false,
+  workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
+): Server {
+  if (workspaceSessions === undefined && workspaceAdmin !== undefined) {
+    throw new Error("A custom workspace administration runtime requires its matching session runtime.");
+  }
+  const adminStore = workspaceSessions === undefined
+    ? new LocalWorkspaceAdminStore(
+        process.env.WORKSPACE_ADMIN_DATA_DIRECTORY ?? ".data/workspace-admin",
+        {
+          brands: DEFAULT_ADMIN_BRANDS,
+          vehicleVersions: DEFAULT_ADMIN_VEHICLES,
+          vehicleAssetAssociations: DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
+          accessGrants: DEVELOPMENT_ACCESS_GRANTS,
+        },
+      )
+    : undefined;
+  const activeWorkspaceSessions = workspaceSessions ?? new WorkspaceSessionRuntime(
     new LocalWorkspaceSessionStore(
       process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
     ),
-    new InMemoryWorkspaceAccessGrantProvider(),
-  ),
-  developmentAccountsEnabled = false,
-  legacyLocalAccessEnabled = false,
-): Server {
+    adminStore!,
+  );
+  const activeWorkspaceAdmin = workspaceAdmin ?? (adminStore === undefined ? undefined : new WorkspaceAdminRuntime(
+    adminStore,
+    new AccountBudgetRuntime(
+      new LocalAccountBudgetStore(
+        process.env.ACCOUNT_BUDGET_DATA_DIRECTORY ?? ".data/account-budgets",
+      ),
+      {
+        async estimate() {
+          throw new Error("High-cost pricing is unavailable from workspace administration routes.");
+        },
+      },
+    ),
+    new MockCompanyAssetProvider(),
+    () => activeWorkspaceSessions.listDevelopmentAccounts(),
+  ));
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   const activeIdentityResolver = resolveAgentIdentity ??
-    createWorkspaceAgentIdentityResolver(workspaceSessions, legacyLocalAccessEnabled);
+    createWorkspaceAgentIdentityResolver(activeWorkspaceSessions, legacyLocalAccessEnabled);
   return createServer((request, response) => {
     void handleRequest(
       request,
@@ -158,7 +221,8 @@ export function createApiServer(
       activeRuntime,
       business,
       activeIdentityResolver,
-      workspaceSessions,
+      activeWorkspaceSessions,
+      activeWorkspaceAdmin,
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
     ).catch((error: unknown) => {
@@ -173,14 +237,10 @@ export async function startApiServer(
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
   resolveAgentIdentity: AgentIdentityResolver | undefined = undefined,
-  workspaceSessions = new WorkspaceSessionRuntime(
-    new LocalWorkspaceSessionStore(
-      process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
-    ),
-    new InMemoryWorkspaceAccessGrantProvider(),
-  ),
+  workspaceSessions: WorkspaceSessionRuntime | undefined = undefined,
   developmentAccountsEnabled = developmentAccountsAllowed(host),
   legacyLocalAccessEnabled = developmentAccountsAllowed(host),
+  workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
 ): Promise<Server> {
   const server = createApiServer(
     runtime,
@@ -189,6 +249,7 @@ export async function startApiServer(
     workspaceSessions,
     developmentAccountsEnabled,
     legacyLocalAccessEnabled,
+    workspaceAdmin,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

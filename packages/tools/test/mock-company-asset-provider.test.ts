@@ -21,7 +21,7 @@ const e5Scope: CompanyAssetProviderScope = {
 test("mock catalog exposes all four public asset categories within server scope", async () => {
   const provider = new MockCompanyAssetProvider();
   const page = await provider.searchAssets({ limit: 100 }, e5Scope);
-  assert.equal(page.items.length, 7);
+  assert.equal(page.items.length, 8);
   assert.deepEqual(
     [...new Set(page.items.map((item) => item.reference.category))].sort(),
     ["person", "scene", "vehicle", "visual_style"],
@@ -62,7 +62,10 @@ test("category, vehicle, and brand filters cover vehicle, people, scenes, and vi
   );
   assert.equal(people.items.length, 2);
   assert.equal(scenes.items.length, 2);
-  assert.deepEqual(styles.items.map((item) => item.reference.assetId), ["asset_style_firefly_clean"]);
+  assert.deepEqual(styles.items.map((item) => item.reference.assetId), [
+    "asset_style_firefly_clean",
+    "asset_style_global_clean",
+  ]);
 });
 
 test("search and tag filters are normalized and combined", async () => {
