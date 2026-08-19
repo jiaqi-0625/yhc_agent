@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionRequestBody, agentBudgetPresentation, agentPanelWidthBounds, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentBudgetPresentation, agentPanelWidthBounds, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -117,6 +117,46 @@ test("Agent action cards stay disabled for missing, cross-task, stale, and busy 
   });
   assert.deepEqual(agentActionAvailability(generationCard, "task_1", 3), {
     enabled: true,
+    stale: false,
+  });
+  assert.deepEqual(agentActionAvailability(generationCard, "task_1", 3, false, true), {
+    enabled: false,
+    stale: false,
+    reason: "该卡片已被服务端拒绝，请按提示处理后重新获取建议。",
+  });
+});
+
+test("Agent action failures give recoverable business guidance and block stale resubmission", () => {
+  const cases: Array<[string, string, RegExp, boolean]> = [
+    ["AIC-WORKFLOW-REVISION_CONFLICT", "已失效", /刷新任务/u, true],
+    ["AIC-AUTH-TASK_OWNER_REQUIRED", "无执行权限", /任务归属|接管/u, true],
+    ["AIC-COST-BUDGET_EXCEEDED", "额度不足", /调整额度/u, true],
+    ["AIC-CONCURRENCY-ACCOUNT_HIGH_COST_TASK_RUNNING", "任务繁忙", /等待/u, true],
+    ["AIC-WORKFLOW-STAGE_CONFLICT", "状态冲突", /重新获取建议/u, true],
+  ];
+  for (const [code, status, message, blocksCard] of cases) {
+    const presentation = agentActionFailurePresentation({ code });
+    assert.equal(presentation.status, status);
+    assert.match(presentation.message, message);
+    assert.equal(presentation.blocksCard, blocksCard);
+    assert.doesNotMatch(presentation.message, /AIC-/u);
+  }
+});
+
+test("Agent action failures never invite a duplicate when the server reports a charge", () => {
+  assert.deepEqual(agentActionFailurePresentation({
+    code: "AIC-PROVIDER-UNKNOWN_RESULT",
+    charged: true,
+  }), {
+    status: "结果待确认",
+    message: "服务端提示本次操作可能已产生费用。为避免重复执行，请先刷新任务并核对结果。",
+    blocksCard: true,
+    stale: false,
+  });
+  assert.deepEqual(agentActionFailurePresentation(new Error("网络暂时不可用")), {
+    status: "执行失败",
+    message: "网络暂时不可用",
+    blocksCard: false,
     stale: false,
   });
 });

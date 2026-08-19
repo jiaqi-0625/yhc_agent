@@ -114,4 +114,4 @@ strategy -> asset_matching -> script -> storyboard -> video_preview -> delivery
 - WS-305：统一命令 API 到位后完成 AG-403/AG-405 及操作卡片执行闭环。
 - WS-404：三栏 Workspace 到位后完成 Agent 面板最终嵌入与布局验收。
 - WS-503：真实交付链路到位后完成交付阶段联调。
-- 上述依赖完成后执行 AG-504 全链路联调、AG-505 浏览器验收、AG-506 最终质量门禁，再将 AG-507 标记完成。
+- 上述依赖完成后执行 AG-504 Workspace 上下文联调、AG-505 操作卡片完整链路联调、AG-506 最终桌面浏览器验收与质量门禁，再将 AG-507 标记完成。

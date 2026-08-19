@@ -104,7 +104,13 @@ export function agentActionRequestBody(proposal) {
   throw new Error("Unsupported Agent action card.");
 }
 
-export function agentActionAvailability(proposal, currentVideoTaskId, currentRevision, busy = false) {
+export function agentActionAvailability(
+  proposal,
+  currentVideoTaskId,
+  currentRevision,
+  busy = false,
+  executionBlocked = false,
+) {
   if (!currentVideoTaskId || !Number.isSafeInteger(currentRevision)) {
     return { enabled: false, stale: true, reason: "当前未绑定作品。" };
   }
@@ -114,7 +120,69 @@ export function agentActionAvailability(proposal, currentVideoTaskId, currentRev
   if (proposal.expectedRevision !== currentRevision) {
     return { enabled: false, stale: true, reason: "任务内容已经更新，请重新获取操作建议。" };
   }
+  if (executionBlocked) {
+    return { enabled: false, stale: false, reason: "该卡片已被服务端拒绝，请按提示处理后重新获取建议。" };
+  }
   return { enabled: !busy, stale: false };
+}
+
+export function agentActionFailurePresentation(error) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  const charged = Boolean(error && error.charged);
+  if (code === "AIC-WORKFLOW-REVISION_CONFLICT") {
+    return {
+      status: "已失效",
+      message: "任务内容已经更新，请刷新任务并让 Agent 基于最新状态重新建议。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
+  if (code === "AIC-AUTH-TASK_OWNER_REQUIRED" || code.startsWith("AIC-AUTH-")) {
+    return {
+      status: "无执行权限",
+      message: "当前账号不是该任务的可执行负责人，请先确认任务归属或完成接管。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (code === "AIC-COST-BUDGET_EXCEEDED") {
+    return {
+      status: "额度不足",
+      message: "当前账号可用额度不足，请调整额度后重新获取操作建议。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (code === "AIC-CONCURRENCY-ACCOUNT_HIGH_COST_TASK_RUNNING") {
+    return {
+      status: "任务繁忙",
+      message: "当前账号已有高消耗制作任务在运行，请等待其结束后重新获取操作建议。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (code.startsWith("AIC-WORKFLOW-") || code.endsWith("_CONFLICT")) {
+    return {
+      status: "状态冲突",
+      message: "任务当前状态不再允许执行这项操作，请刷新任务后重新获取建议。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
+  if (charged) {
+    return {
+      status: "结果待确认",
+      message: "服务端提示本次操作可能已产生费用。为避免重复执行，请先刷新任务并核对结果。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  return {
+    status: "执行失败",
+    message: error instanceof Error ? error.message : "操作执行失败。",
+    blocksCard: false,
+    stale: false,
+  };
 }
 
 const panelMinimumWidth = 320;

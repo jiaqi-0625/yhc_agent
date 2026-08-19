@@ -1,6 +1,7 @@
 import { agentApi } from "./agent-api.js";
 import {
   agentActionAvailability,
+  agentActionFailurePresentation,
   agentActionRequestBody,
   agentBudgetPresentation,
   bindAgentPanel,
@@ -816,6 +817,9 @@ async function executeActionProposal(card, proposal) {
   setWorkflowBusy(true);
   button.disabled = true;
   status.textContent = "执行中…";
+  result.hidden = true;
+  delete card.dataset.executionBlocked;
+  card.classList.remove("failed");
   try {
     const view = await api(endpoint, {
       method: "POST",
@@ -831,12 +835,15 @@ async function executeActionProposal(card, proposal) {
     card.classList.add("completed");
     elements.messages.scrollTop = elements.messages.scrollHeight;
   } catch (error) {
-    status.textContent = "执行失败";
-    result.textContent = error instanceof Error ? error.message : "操作执行失败。";
+    const failure = agentActionFailurePresentation(error);
+    status.textContent = failure.status;
+    result.textContent = failure.message;
     result.hidden = false;
+    card.dataset.executionBlocked = failure.blocksCard ? "true" : "false";
+    card.classList.toggle("stale", failure.stale);
     card.classList.add("failed");
     showWorkflowError(error);
-    button.disabled = false;
+    button.disabled = failure.blocksCard;
   } finally {
     setWorkflowBusy(false);
   }
@@ -894,7 +901,7 @@ function refreshActionProposalAvailability() {
     const availability = agentActionAvailability({
       videoTaskId: card.dataset.videoTaskId,
       expectedRevision: Number(card.dataset.expectedRevision),
-    }, state.work?.work.id, state.work?.work.revision, state.workflowBusy);
+    }, state.work?.work.id, state.work?.work.revision, state.workflowBusy, card.dataset.executionBlocked === "true");
     button.disabled = !availability.enabled;
     card.classList.toggle("stale", availability.stale);
     if (availability.stale) {
