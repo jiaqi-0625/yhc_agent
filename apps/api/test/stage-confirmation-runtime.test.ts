@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -15,7 +15,7 @@ import {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     videoTask: {
       id: "task_persisted",
       tenantId: "tenant_firefly",
@@ -38,7 +38,40 @@ function productionRecord(): VideoTaskProductionRecord {
     },
     stageArtifactVersions: [],
     stageConfirmations: [],
+    activeStageArtifactVersionIds: {},
+    stageRollbacks: [],
+    stageArtifactInvalidations: [],
   };
+}
+
+function rollbackRecord(): VideoTaskProductionRecord {
+  const record = productionRecord();
+  record.videoTask.currentStage = "asset_matching";
+  record.videoTask.stageStatus = "in_progress";
+  record.videoTask.revision = 7;
+  record.stageArtifactVersions = [1, 2].map((version) => ({
+    id: `strategy_v${version}`,
+    tenantId: "tenant_firefly",
+    batchProjectId: "project_launch",
+    videoTaskId: "task_persisted",
+    stage: "strategy" as const,
+    version,
+    content: {
+      artifactId: `strategy_content_v${version}`,
+      schemaName: "marketing_strategy",
+      schemaVersion: 1,
+      contentHashSha256: version.toString(16).padStart(64, "0"),
+    },
+    dependencies: [{ kind: "vehicle_snapshot" as const, vehicleSnapshotId: "vehicle_snapshot_1" }],
+    provenance: {
+      kind: "human_confirmation" as const,
+      confirmationId: `confirmation_v${version}`,
+    },
+    createdAt: `2026-08-18T0${version}:00:00.000Z`,
+    createdBy: "account_owner",
+  }));
+  record.activeStageArtifactVersionIds.strategy = "strategy_v2";
+  return record;
 }
 
 const command: ConfirmStageCommand = {
@@ -117,4 +150,89 @@ test("store returns defensive copies so callers cannot mutate persisted versions
   loaded.videoTask.revision = 999;
   const loadedAgain = await store.load("task_persisted");
   assert.equal(loadedAgain?.videoTask.revision, 5);
+});
+
+test("rollback audit and version selection are persisted atomically and reject duplicate revisions", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-stage-rollback-store-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const store = new LocalVideoTaskProductionStore(directory);
+  await store.save(rollbackRecord());
+  const runtime = new StageConfirmationRuntime(
+    store,
+    () => "2026-08-19T03:00:00.000Z",
+    (kind) => `${kind}_persisted`,
+  );
+  const request = {
+    expectedTaskRevision: 7,
+    stage: "strategy" as const,
+    targetArtifactVersionId: "strategy_v1",
+    reason: "恢复首版策略",
+  };
+
+  const result = await runtime.rollbackStage("task_persisted", request, session);
+  assert.equal(result.videoTask.revision, 8);
+  assert.equal(result.activeStageArtifactVersionIds.strategy, "strategy_v1");
+  assert.equal(result.stageRollbacks[0]?.id, "rollback_persisted");
+  assert.deepEqual(
+    await new LocalVideoTaskProductionStore(directory).load("task_persisted"),
+    result,
+  );
+  await assert.rejects(
+    runtime.rollbackStage("task_persisted", request, session),
+    RevisionConflictError,
+  );
+  assert.deepEqual(
+    await new LocalVideoTaskProductionStore(directory).load("task_persisted"),
+    result,
+  );
+});
+
+test("a failed rollback save does not partially update the loaded aggregate", async () => {
+  const original = rollbackRecord();
+  const failingStore: VideoTaskProductionStore = {
+    async load() {
+      return structuredClone(original);
+    },
+    async save() {
+      throw new Error("simulated rollback disk failure");
+    },
+  };
+  const runtime = new StageConfirmationRuntime(failingStore);
+
+  await assert.rejects(
+    runtime.rollbackStage(
+      "task_persisted",
+      {
+        expectedTaskRevision: 7,
+        stage: "strategy",
+        targetArtifactVersionId: "strategy_v1",
+        reason: "恢复首版策略",
+      },
+      session,
+    ),
+    /simulated rollback disk failure/u,
+  );
+  assert.equal(original.videoTask.revision, 7);
+  assert.equal(original.activeStageArtifactVersionIds.strategy, "strategy_v2");
+  assert.equal(original.stageRollbacks.length, 0);
+  assert.equal(original.stageArtifactInvalidations.length, 0);
+});
+
+test("store upgrades WS-102 schema v1 records and selects each stage's latest version", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v1-store-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const current = rollbackRecord();
+  const legacy = {
+    schemaVersion: 1,
+    videoTask: current.videoTask,
+    stageArtifactVersions: current.stageArtifactVersions,
+    stageConfirmations: current.stageConfirmations,
+  };
+  await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
+
+  const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
+  assert.equal(upgraded?.schemaVersion, 2);
+  assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
+  assert.deepEqual(upgraded?.stageRollbacks, []);
+  assert.deepEqual(upgraded?.stageArtifactInvalidations, []);
 });

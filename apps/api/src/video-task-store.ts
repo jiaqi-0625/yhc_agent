@@ -3,6 +3,19 @@ import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import type { VideoTaskProductionRecord } from "@firefly/domain";
+import type {
+  StageArtifactVersion,
+  StageConfirmation,
+  VideoTask,
+  VideoTaskStage,
+} from "@firefly/schemas";
+
+interface LegacyVideoTaskProductionRecord {
+  schemaVersion: 1;
+  videoTask: VideoTask;
+  stageArtifactVersions: StageArtifactVersion[];
+  stageConfirmations: StageConfirmation[];
+}
 
 function assertVideoTaskId(videoTaskId: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(videoTaskId)) {
@@ -13,6 +26,36 @@ function assertVideoTaskId(videoTaskId: string): void {
 export interface VideoTaskProductionStore {
   load(videoTaskId: string): Promise<VideoTaskProductionRecord | undefined>;
   save(record: VideoTaskProductionRecord): Promise<void>;
+}
+
+function upgradeRecord(
+  parsed: VideoTaskProductionRecord | LegacyVideoTaskProductionRecord,
+  videoTaskId: string,
+): VideoTaskProductionRecord {
+  if (parsed.videoTask.id !== videoTaskId) {
+    throw new Error("Persisted video task has an invalid format.");
+  }
+  if (parsed.schemaVersion === 2) return parsed;
+  if (parsed.schemaVersion !== 1) {
+    throw new Error("Persisted video task has an unsupported schema version.");
+  }
+  const activeStageArtifactVersionIds: Partial<Record<VideoTaskStage, string>> = {};
+  for (const artifact of parsed.stageArtifactVersions) {
+    const activeId = activeStageArtifactVersionIds[artifact.stage];
+    const active = parsed.stageArtifactVersions.find((item) => item.id === activeId);
+    if (!active || artifact.version > active.version) {
+      activeStageArtifactVersionIds[artifact.stage] = artifact.id;
+    }
+  }
+  return {
+    schemaVersion: 2,
+    videoTask: structuredClone(parsed.videoTask),
+    stageArtifactVersions: structuredClone(parsed.stageArtifactVersions),
+    stageConfirmations: structuredClone(parsed.stageConfirmations),
+    activeStageArtifactVersionIds,
+    stageRollbacks: [],
+    stageArtifactInvalidations: [],
+  };
 }
 
 export class LocalVideoTaskProductionStore implements VideoTaskProductionStore {
@@ -37,12 +80,12 @@ export class LocalVideoTaskProductionStore implements VideoTaskProductionStore {
     if (memory) return structuredClone(memory);
     if (!this.persist) return undefined;
     try {
-      const parsed = JSON.parse(await readFile(this.#path(videoTaskId), "utf8")) as VideoTaskProductionRecord;
-      if (parsed.schemaVersion !== 1 || parsed.videoTask.id !== videoTaskId) {
-        throw new Error("Persisted video task has an invalid format.");
-      }
-      this.#memory.set(videoTaskId, structuredClone(parsed));
-      return structuredClone(parsed);
+      const parsed = JSON.parse(await readFile(this.#path(videoTaskId), "utf8")) as
+        | VideoTaskProductionRecord
+        | LegacyVideoTaskProductionRecord;
+      const upgraded = upgradeRecord(parsed, videoTaskId);
+      this.#memory.set(videoTaskId, structuredClone(upgraded));
+      return structuredClone(upgraded);
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;

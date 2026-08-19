@@ -46,6 +46,7 @@ LocalAgentRuntime
 - Agent 按当前作品装配车型读取、事实校验、策略校验，以及“建议生成策略”“建议请求人工审批”白名单工具。建议工具只返回版本化操作卡片，不写入业务状态；负责人点击卡片后，由服务端/UI 使用 revision 守卫执行生成或审批请求。生产运行时不得注册 shell、文件系统、SQL、任意 HTTP、浏览器、直接状态变更或人工批准工具。
 - 每次工具调用先经过 `beforeToolCall` 的角色、状态、审批通道和预算策略；未知工具默认拒绝。
 - Workspace V2 的权威任务流程使用 `VideoTask.currentStage + stageStatus`：`strategy → asset_matching → script → storyboard → video_preview → delivery`。当前阶段只能从 `in_progress` 提交为 `awaiting_confirmation`，再由显式 `human_action` 确认后进入紧邻下一阶段；交付确认后任务才成为 `completed`。旧 `WorkStatus` 状态机仅供现有策略纵向链路和迁移读取，不得用于新的 V2 写路径。
+- Workspace V2 的阶段版本聚合同时保存不可变产物、人工确认、各阶段当前选中版本、回退记录和失效记录。负责人回退时，服务端从被替换版本沿 `stage_artifact` 依赖图递归标记所有下游版本失效、清除受影响的当前版本指针，并将任务重置到下一阶段；后续确认不得引用已失效或非当前选中的上游版本。回退、失效和任务 revision 使用同一聚合原子落盘，Agent 只能提出目标版本和原因。
 - 工具结果在 `afterToolCall` 中写入审计并进行敏感字段脱敏。
 - 车型快照按租户、项目、车型版本、颜色、地区和活动日期生成稳定 ID；保存和返回均使用副本，避免调用者回写历史事实。
 - 审批是服务端/UI 的人工事件。模型能提示“需要审批”，但没有批准工具。

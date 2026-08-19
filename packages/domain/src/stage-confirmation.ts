@@ -1,8 +1,10 @@
 import type {
   StageArtifactContentReference,
   StageArtifactDependency,
+  StageArtifactInvalidation,
   StageArtifactVersion,
   StageConfirmation,
+  StageRollbackRecord,
   VideoTask,
   VideoTaskStage,
 } from "@firefly/schemas";
@@ -10,10 +12,13 @@ import type {
 import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 1;
+  schemaVersion: 2;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
+  activeStageArtifactVersionIds: Partial<Record<VideoTaskStage, string>>;
+  stageRollbacks: StageRollbackRecord[];
+  stageArtifactInvalidations: StageArtifactInvalidation[];
 }
 
 export interface ConfirmStageCommand {
@@ -61,6 +66,25 @@ function assertConfirmationScope(
   }
   if (command.dependencies.length === 0) {
     throw new StageConfirmationDeniedError("A confirmed artifact must record at least one dependency.");
+  }
+  for (const dependency of command.dependencies) {
+    if (dependency.kind !== "stage_artifact") continue;
+    const dependencyVersion = record.stageArtifactVersions.find(
+      (item) => item.id === dependency.artifactVersionId && item.stage === dependency.stage,
+    );
+    if (!dependencyVersion) {
+      throw new StageConfirmationDeniedError("A stage dependency does not belong to this video task.");
+    }
+    if (
+      record.stageArtifactInvalidations.some(
+        (invalidation) => invalidation.artifactVersionId === dependency.artifactVersionId,
+      )
+    ) {
+      throw new StageConfirmationDeniedError("An invalidated stage artifact cannot be used as a dependency.");
+    }
+    if (record.activeStageArtifactVersionIds[dependency.stage] !== dependency.artifactVersionId) {
+      throw new StageConfirmationDeniedError("A stage dependency is not the currently selected version.");
+    }
   }
 }
 
@@ -116,7 +140,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -128,5 +152,11 @@ export function confirmVideoTaskStage(
     },
     stageArtifactVersions: [...structuredClone(record.stageArtifactVersions), artifactVersion],
     stageConfirmations: [...structuredClone(record.stageConfirmations), confirmation],
+    activeStageArtifactVersionIds: {
+      ...structuredClone(record.activeStageArtifactVersionIds),
+      [command.stage]: artifactVersionId,
+    },
+    stageRollbacks: structuredClone(record.stageRollbacks),
+    stageArtifactInvalidations: structuredClone(record.stageArtifactInvalidations),
   };
 }
