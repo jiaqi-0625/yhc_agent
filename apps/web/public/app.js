@@ -1,6 +1,7 @@
 import { agentApi } from "./agent-api.js";
 import { bindAgentPanel } from "./agent-panel.js";
-import { api } from "./api-client.js";
+import { api, setWorkspaceSessionToken } from "./api-client.js";
+import { authApi } from "./auth-api.js";
 import { workspaceApi } from "./workspace-api.js";
 import { bindWorkspaceShell } from "./workspace-shell.js";
 
@@ -17,6 +18,8 @@ const state = {
   workflowBusy: false,
   workFilter: "",
   modelReady: true,
+  account: null,
+  accounts: [],
 };
 const elements = {
   messages: document.querySelector("#messages"),
@@ -74,9 +77,21 @@ const elements = {
   studioWorkTitle: document.querySelector("#studio-work-title"),
   studioWorkDescription: document.querySelector("#studio-work-description"),
   studioStatus: document.querySelector("#studio-status"),
-  agentContextName: document.querySelector("#agent-context-name"),
+  agentAccountSelect: document.querySelector("#agent-account-select"),
+  agentAccountRole: document.querySelector("#agent-account-role"),
+  agentContextBrand: document.querySelector("#agent-context-brand"),
+  agentContextVehicle: document.querySelector("#agent-context-vehicle"),
+  agentContextProject: document.querySelector("#agent-context-project"),
+  agentContextTask: document.querySelector("#agent-context-task"),
+  agentContextOwner: document.querySelector("#agent-context-owner"),
   agentContextStage: document.querySelector("#agent-context-stage"),
   agentContextRevision: document.querySelector("#agent-context-revision"),
+  agentContextQuota: document.querySelector("#agent-context-quota"),
+};
+
+const roleLabels = {
+  content_admin: "内容管理员",
+  creator: "制作账号",
 };
 
 const statusLabels = {
@@ -128,6 +143,7 @@ function setBusy(busy) {
   elements.sessionSelect.disabled = busy || state.sessions.length === 0;
   elements.resetSession.disabled = busy;
   elements.retryMessage.disabled = busy;
+  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.workflowBusy || state.accounts.length < 2;
 }
 
 function setWorkflowBusy(busy) {
@@ -145,6 +161,7 @@ function setWorkflowBusy(busy) {
     elements.stateNewWork,
   ].forEach(function (button) { button.disabled = busy; });
   elements.workList.querySelectorAll("button").forEach(function (button) { button.disabled = busy; });
+  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.busy || state.accounts.length < 2;
   refreshActionProposalAvailability();
 }
 
@@ -274,7 +291,7 @@ function renderWork(view) {
     elements.studioWorkDescription.textContent = "从可信车型快照开始，逐步完成策略、脚本、分镜与成片。";
     elements.studioStatus.textContent = "未开始";
     elements.studioStatus.className = "badge neutral";
-    elements.agentContextName.textContent = "尚未绑定项目";
+    renderTaskContext(null);
     updateStages(null);
     renderWorkList();
     refreshActionProposalAvailability();
@@ -282,6 +299,7 @@ function renderWork(view) {
   }
   const work = view.work;
   const snapshot = view.vehicleSnapshot;
+  if (state.sessionVideoTaskId !== work.id) renderTaskContext(null);
   localStorage.setItem("firefly.workId", work.id);
   elements.createWorkCard.hidden = true;
   elements.activeWork.hidden = false;
@@ -294,7 +312,6 @@ function renderWork(view) {
   elements.studioWorkDescription.textContent = snapshot.brand + " · " + snapshot.series + " · " + snapshot.trim + " · " + snapshot.modelYear + " 年款";
   elements.studioStatus.textContent = statusLabels[work.status] || work.status;
   elements.studioStatus.className = elements.workStatus.className;
-  elements.agentContextName.textContent = displayName;
   const stateCopy = statusDescriptions[work.status] || ["当前作品", "继续完成当前阶段。"];
   elements.stateTitle.textContent = stateCopy[0];
   elements.stateDescription.textContent = stateCopy[1];
@@ -1038,7 +1055,7 @@ function restoreTranscriptTimeline(messages) {
 }
 
 function sessionStorageKey(videoTaskId) {
-  return "firefly.sessionId." + (videoTaskId || "unbound");
+  return "firefly.sessionId." + (state.account?.accountId || "anonymous") + "." + (videoTaskId || "unbound");
 }
 
 function compareSessions(left, right) {
@@ -1062,6 +1079,47 @@ function renderSessionOptions() {
   elements.sessionSelect.disabled = state.busy || state.sessions.length === 0;
 }
 
+function renderAccount() {
+  elements.agentAccountSelect.replaceChildren();
+  state.accounts.forEach(function (account) {
+    const option = document.createElement("option");
+    option.value = account.accountId;
+    option.textContent = account.displayName;
+    option.title = account.displayName + " · " + (roleLabels[account.role] || account.role);
+    elements.agentAccountSelect.appendChild(option);
+  });
+  if (state.account) elements.agentAccountSelect.value = state.account.accountId;
+  elements.agentAccountSelect.disabled = state.busy || state.workflowBusy || state.accounts.length < 2;
+  elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || state.account.role : "—";
+}
+
+function renderTaskContext(context) {
+  elements.agentContextBrand.textContent = context?.brand.name || "—";
+  elements.agentContextVehicle.textContent = context?.vehicle.displayName || "—";
+  elements.agentContextProject.textContent = context?.batchProject.name || "—";
+  elements.agentContextTask.textContent = context?.videoTask.name || "—";
+  elements.agentContextBrand.title = context?.brand.name || "";
+  elements.agentContextVehicle.title = context?.vehicle.displayName || "";
+  elements.agentContextProject.title = context?.batchProject.name || "";
+  elements.agentContextTask.title = context?.videoTask.name || "";
+  if (!context) {
+    elements.agentContextOwner.textContent = "负责人：—";
+    elements.agentContextStage.textContent = "未开始";
+    elements.agentContextRevision.textContent = "—";
+    return;
+  }
+  const ownership = context.videoTask.ownership;
+  if (ownership.state === "owned_by_current_account") {
+    elements.agentContextOwner.textContent = "负责人：当前账号" + (state.account ? "（" + state.account.displayName + "）" : "");
+  } else if (ownership.state === "owned_by_other_account") {
+    elements.agentContextOwner.textContent = "负责人：" + ownership.ownerDisplayName;
+  } else {
+    elements.agentContextOwner.textContent = "负责人：待分配";
+  }
+  elements.agentContextStage.textContent = taskStageLabels[context.videoTask.currentStage] || context.videoTask.currentStage;
+  elements.agentContextRevision.textContent = "任务版本 " + context.videoTask.revision;
+}
+
 function updateSession(summary) {
   state.sessionId = summary.id;
   state.sessionVideoTaskId = summary.videoTaskId || null;
@@ -1075,18 +1133,7 @@ function updateSession(summary) {
   elements.sessionId.textContent = summary.id;
   elements.sessionWork.textContent = summary.videoTaskId ? shortWorkId(summary.videoTaskId) : "未绑定";
   elements.sessionWork.title = summary.videoTaskId || "";
-  if (summary.taskContext) {
-    const context = summary.taskContext;
-    elements.agentContextName.textContent = context.brand.name + " · " + context.vehicle.displayName + " · " + context.videoTask.name;
-    elements.agentContextName.title = context.batchProject.name + " / " + context.videoTask.name;
-    elements.agentContextStage.textContent = taskStageLabels[context.videoTask.currentStage] || context.videoTask.currentStage;
-    elements.agentContextRevision.textContent = "任务版本 " + context.videoTask.revision;
-  } else {
-    elements.agentContextName.textContent = "尚未绑定任务";
-    elements.agentContextName.title = "";
-    elements.agentContextStage.textContent = "未开始";
-    elements.agentContextRevision.textContent = "—";
-  }
+  renderTaskContext(summary.taskContext || null);
   const toolNames = Array.isArray(summary.toolNames) ? summary.toolNames : [];
   elements.agentTools.textContent = summary.domainToolsLoaded ? toolNames.length + " 个已加载" : "未加载";
   elements.agentTools.title = toolNames.join("、");
@@ -1153,7 +1200,7 @@ async function restoreSessionForCurrentWork() {
 async function ensureSessionForCurrentWork() {
   const videoTaskId = state.work?.work.id || null;
   if (state.sessionId && state.sessionVideoTaskId === videoTaskId) return;
-  await restoreSessionForCurrentWork();
+  await restoreSession();
 }
 
 async function restoreSession() {
@@ -1167,6 +1214,62 @@ async function restoreSession() {
   }
 }
 
+function applyWorkspaceSession(session) {
+  if (session.token) {
+    setWorkspaceSessionToken(session.token);
+    sessionStorage.setItem("firefly.workspaceSession", session.token);
+  }
+  state.account = session.account;
+  localStorage.setItem("firefly.accountId", session.account.accountId);
+  renderAccount();
+}
+
+async function initializeWorkspaceAccount() {
+  const accountsBody = await authApi.listDevelopmentAccounts();
+  state.accounts = Array.isArray(accountsBody.accounts) ? accountsBody.accounts : [];
+  if (state.accounts.length === 0) throw new Error("当前没有可用的工作区账号。");
+  const storedToken = sessionStorage.getItem("firefly.workspaceSession");
+  if (storedToken) {
+    setWorkspaceSessionToken(storedToken);
+    try {
+      applyWorkspaceSession((await authApi.getSession()).session);
+      return;
+    } catch {
+      setWorkspaceSessionToken(null);
+      sessionStorage.removeItem("firefly.workspaceSession");
+    }
+  }
+  const savedAccountId = localStorage.getItem("firefly.accountId");
+  const selected = state.accounts.find(function (account) { return account.accountId === savedAccountId; })
+    || state.accounts.find(function (account) { return account.role === "creator"; })
+    || state.accounts[0];
+  applyWorkspaceSession((await authApi.createOrSwitchSession(selected.accountId)).session);
+}
+
+async function switchWorkspaceAccount(accountId) {
+  if (!accountId || accountId === state.account?.accountId || state.busy || state.workflowBusy) return;
+  clearError();
+  clearWorkflowError();
+  setBusy(true);
+  setWorkflowBusy(true);
+  try {
+    applyWorkspaceSession((await authApi.createOrSwitchSession(accountId)).session);
+    state.sessionId = null;
+    state.sessionVideoTaskId = null;
+    state.sessions = [];
+    state.taskContext = null;
+    renderTaskContext(null);
+    await loadWorks();
+    await restoreSession();
+  } catch (error) {
+    showError(error);
+    renderAccount();
+  } finally {
+    setWorkflowBusy(false);
+    setBusy(false);
+  }
+}
+
 async function initialize() {
   try {
     const meta = await api("/v1/meta");
@@ -1176,6 +1279,7 @@ async function initialize() {
     elements.provider.textContent = meta.model.provider;
     elements.model.textContent = meta.model.modelId;
     state.modelReady = Boolean(meta.model.credentialsConfigured);
+    await initializeWorkspaceAccount();
     await loadWorks();
     await restoreSession();
     if (state.modelReady) {
@@ -1272,6 +1376,10 @@ bindAgentPanel({
 });
 
 bindWorkspaceShell({ elements, state, renderWorkList });
+
+elements.agentAccountSelect.addEventListener("change", function () {
+  void switchWorkspaceAccount(elements.agentAccountSelect.value);
+});
 
 function createGoldenWork() {
   return workspaceApi.createWork({

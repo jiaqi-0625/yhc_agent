@@ -89,13 +89,14 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /作品列表/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /workspace-agent-dialog-v5/u);
+  assert.match(page, /workspace-agent-dialog-v7/u);
   assert.match(page, /type="module"/u);
 
   const [
     styleResponse,
     agentStyleResponse,
     scriptResponse,
+    authApiResponse,
     agentApiResponse,
     agentPanelResponse,
     workspaceApiResponse,
@@ -104,6 +105,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     fetch(`${baseUrl}/app.css`),
     fetch(`${baseUrl}/agent-panel.css`),
     fetch(`${baseUrl}/app.js`),
+    fetch(`${baseUrl}/auth-api.js`),
     fetch(`${baseUrl}/agent-api.js`),
     fetch(`${baseUrl}/agent-panel.js`),
     fetch(`${baseUrl}/workspace-api.js`),
@@ -115,6 +117,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(await agentStyleResponse.text(), /\.agent-action-card/u);
   assert.equal(scriptResponse.status, 200);
   assert.match(scriptResponse.headers.get("content-type") ?? "", /^text\/javascript/u);
+  assert.equal(authApiResponse.status, 200);
   assert.equal(agentApiResponse.status, 200);
   assert.equal(agentPanelResponse.status, 200);
   assert.equal(workspaceApiResponse.status, 200);

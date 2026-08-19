@@ -13,8 +13,18 @@
 .agent-identity strong { font-size: 11px; }
 .agent-identity > div > span { gap: 6px; margin-top: 4px; color: var(--muted-foreground); font-size: 8px; }
 .online-dot { width: 5px; height: 5px; }
-.agent-context { display: flex; justify-content: space-between; gap: 12px; padding: 9px 16px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); background: var(--muted); font-size: 8px; }
-.agent-context strong { overflow: hidden; color: var(--foreground); text-overflow: ellipsis; white-space: nowrap; }
+.agent-context { display: grid; gap: 9px; padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); background: var(--muted); font-size: 9px; }
+.agent-account-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 7px; }
+.agent-account-row label { font-weight: 600; }
+.agent-account-row select { min-width: 0; height: 27px; padding: 0 24px 0 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--input); font-size: 9px; }
+.agent-account-row > span { color: var(--foreground); }
+.agent-context-path { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px 12px; margin: 0; }
+.agent-context-path div { min-width: 0; }
+.agent-context-path dt { margin-bottom: 2px; }
+.agent-context-path dd { margin: 0; overflow: hidden; color: var(--foreground); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.agent-context-status { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.agent-context-status span:first-child { color: var(--foreground); }
+.agent-context-quota { margin: 0; padding-top: 7px; border-top: 1px solid var(--border); }
 .messages { flex: 1; min-height: 0; padding: 18px 15px; overflow-y: auto; }
 .welcome { display: grid; justify-items: center; max-width: 290px; margin: 9vh auto 0; text-align: center; }
 .welcome-icon { display: grid; width: 42px; height: 42px; place-items: center; border: 1px solid color-mix(in oklch, var(--primary) 35%, var(--border)); border-radius: 13px; color: var(--primary); background: var(--accent); }
@@ -107,11 +117,6 @@
 .agent-session-picker select { width: 104px; height: 30px; padding: 0 24px 0 8px; overflow: hidden; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); color: var(--foreground); background: var(--input); font-size: 9px; text-overflow: ellipsis; }
 .agent-session-picker select:focus-visible { border-color: var(--ring); outline: 2px solid color-mix(in oklch, var(--ring) 18%, transparent); outline-offset: 1px; }
 .chat-header-actions #collapse-agent svg { transition: transform .16s ease; }
-.agent-context { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; }
-.agent-context-copy { min-width: 0; }
-.agent-context-copy span, .agent-context-copy strong { display: block; }
-.agent-context-copy strong { margin-top: 3px; }
-.agent-context-meta { display: grid; justify-items: end; gap: 2px; color: var(--muted-foreground); font-size: 8px; }
 .streaming-answer { min-height: 20px; white-space: pre-wrap; }
 .streaming-answer:empty::after { color: var(--muted-foreground); content: "等待首个响应片段…"; }
 .cancel-button { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 10%, var(--card)); }

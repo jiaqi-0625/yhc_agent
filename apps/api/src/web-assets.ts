@@ -8,6 +8,7 @@ const webAssets = new Map<string, { path: string; type: string }>([
   ["/agent-panel.css", { path: fileURLToPath(new URL("../../web/public/agent-panel.css", import.meta.url)), type: "text/css; charset=utf-8" }],
   ["/app.js", { path: fileURLToPath(new URL("../../web/public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/api-client.js", { path: fileURLToPath(new URL("../../web/public/api-client.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/auth-api.js", { path: fileURLToPath(new URL("../../web/public/auth-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-api.js", { path: fileURLToPath(new URL("../../web/public/workspace-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-shell.js", { path: fileURLToPath(new URL("../../web/public/workspace-shell.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/agent-api.js", { path: fileURLToPath(new URL("../../web/public/agent-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],

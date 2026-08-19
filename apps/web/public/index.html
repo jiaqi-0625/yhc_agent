@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>萤火虫广告 Agent · 汽车广告工作台</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-agent-dialog-v5" />
-    <link rel="stylesheet" href="/agent-panel.css?build=workspace-agent-dialog-v5" />
+    <link rel="stylesheet" href="/app.css?build=workspace-agent-dialog-v7" />
+    <link rel="stylesheet" href="/agent-panel.css?build=workspace-agent-dialog-v7" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -249,9 +249,24 @@
             </div>
           </header>
 
-          <div class="agent-context">
-            <div class="agent-context-copy"><span>当前任务上下文</span><strong id="agent-context-name">尚未绑定任务</strong></div>
-            <div class="agent-context-meta"><span id="agent-context-stage">未开始</span><span id="agent-context-revision">—</span></div>
+          <div class="agent-context" aria-label="当前 Agent 账号与任务上下文">
+            <div class="agent-account-row">
+              <label for="agent-account-select">当前账号</label>
+              <select id="agent-account-select" aria-label="切换当前账号"></select>
+              <span id="agent-account-role">—</span>
+            </div>
+            <dl class="agent-context-path">
+              <div><dt>品牌</dt><dd id="agent-context-brand">—</dd></div>
+              <div><dt>车型</dt><dd id="agent-context-vehicle">—</dd></div>
+              <div><dt>项目</dt><dd id="agent-context-project">—</dd></div>
+              <div><dt>视频任务</dt><dd id="agent-context-task">—</dd></div>
+            </dl>
+            <div class="agent-context-status">
+              <span id="agent-context-owner">负责人：—</span>
+              <span id="agent-context-stage">未开始</span>
+              <span id="agent-context-revision">—</span>
+            </div>
+            <p id="agent-context-quota" class="agent-context-quota">额度数据暂未接入</p>
           </div>
 
           <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
@@ -278,6 +293,6 @@
         </aside>
       </div>
     </div>
-    <script type="module" src="/app.js?build=workspace-agent-dialog-v5"></script>
+    <script type="module" src="/app.js?build=workspace-agent-dialog-v7"></script>
   </body>
 </html>
