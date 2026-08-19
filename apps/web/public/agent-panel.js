@@ -1,5 +1,122 @@
 import { agentApi } from "./agent-api.js";
 
+const supportedActionLabels = {
+  generate_strategy: "生成卖点策略草稿",
+  request_strategy_approval: "提交卖点策略人工审批",
+};
+
+function isRecord(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasExactKeys(value, keys) {
+  return isRecord(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function isIdentifier(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
+}
+
+function isActionCost(value) {
+  if (!isRecord(value)) return false;
+  if (value.kind === "free" || value.kind === "estimate_required") {
+    return hasExactKeys(value, ["kind"]);
+  }
+  return value.kind === "estimated"
+    && hasExactKeys(value, ["kind", "amount", "currency"])
+    && typeof value.amount === "number"
+    && Number.isFinite(value.amount)
+    && value.amount >= 0
+    && typeof value.currency === "string"
+    && /^[A-Z]{3}$/u.test(value.currency);
+}
+
+function isSupportedPayload(action, payload) {
+  if (action === "generate_strategy") {
+    return hasExactKeys(payload, ["schemaVersion", "audience", "theme"])
+      && payload.schemaVersion === 1
+      && typeof payload.audience === "string"
+      && payload.audience.trim().length > 0
+      && typeof payload.theme === "string"
+      && payload.theme.trim().length > 0;
+  }
+  return action === "request_strategy_approval"
+    && hasExactKeys(payload, ["schemaVersion"])
+    && payload.schemaVersion === 1;
+}
+
+export function parseAgentActionCard(candidate) {
+  if (
+    !hasExactKeys(candidate, [
+      "schemaVersion",
+      "kind",
+      "videoTaskId",
+      "action",
+      "label",
+      "summary",
+      "expectedRevision",
+      "cost",
+      "payload",
+    ])
+    || candidate.schemaVersion !== 1
+    || candidate.kind !== "agent_action_card"
+    || !isIdentifier(candidate.videoTaskId)
+    || supportedActionLabels[candidate.action] !== candidate.label
+    || typeof candidate.summary !== "string"
+    || candidate.summary.length < 1
+    || candidate.summary.length > 2_000
+    || !Number.isSafeInteger(candidate.expectedRevision)
+    || candidate.expectedRevision < 1
+    || !isActionCost(candidate.cost)
+    || !isSupportedPayload(candidate.action, candidate.payload)
+  ) return undefined;
+  return structuredClone(candidate);
+}
+
+export function extractAgentActionCard(value) {
+  const candidates = [value, isRecord(value) ? value.details : undefined];
+  if (isRecord(value) && Array.isArray(value.content)) {
+    value.content.forEach(function (part) {
+      if (!isRecord(part) || part.type !== "text" || typeof part.text !== "string") return;
+      try { candidates.push(JSON.parse(part.text)); } catch {}
+    });
+  }
+  for (const candidate of candidates) {
+    const parsed = parseAgentActionCard(candidate);
+    if (parsed) return parsed;
+  }
+  return undefined;
+}
+
+export function agentActionRequestBody(proposal) {
+  if (proposal.action === "generate_strategy") {
+    return {
+      audience: proposal.payload.audience,
+      theme: proposal.payload.theme,
+      expectedRevision: proposal.expectedRevision,
+    };
+  }
+  if (proposal.action === "request_strategy_approval") {
+    return { expectedRevision: proposal.expectedRevision };
+  }
+  throw new Error("Unsupported Agent action card.");
+}
+
+export function agentActionAvailability(proposal, currentVideoTaskId, currentRevision, busy = false) {
+  if (!currentVideoTaskId || !Number.isSafeInteger(currentRevision)) {
+    return { enabled: false, stale: true, reason: "当前未绑定作品。" };
+  }
+  if (proposal.videoTaskId !== currentVideoTaskId) {
+    return { enabled: false, stale: true, reason: "该卡片属于其他视频任务，请切回对应任务或重新获取建议。" };
+  }
+  if (proposal.expectedRevision !== currentRevision) {
+    return { enabled: false, stale: true, reason: "任务内容已经更新，请重新获取操作建议。" };
+  }
+  return { enabled: !busy, stale: false };
+}
+
 const panelMinimumWidth = 320;
 const panelMaximumWidth = 560;
 const panelResizerWidth = 6;

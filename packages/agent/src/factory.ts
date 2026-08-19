@@ -53,13 +53,17 @@ export interface CreateAdvertisingAgentOptions {
 
 const sensitiveKeyPattern = /(?:api[-_]?key|authorization|cookie|password|secret|token)/iu;
 const sensitiveTextPatterns = [
+  /((?:["']?)(?:api[-_]?key|authorization|cookie|password|secret|token)(?:["']?)\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}\]]+)/giu,
   /\bBearer\s+[A-Za-z0-9._~+/=-]+\b/giu,
   /\bsk-[A-Za-z0-9_-]{20,}\b/gu,
 ];
 
 export function redactSensitive(value: unknown): unknown {
   if (typeof value === "string") {
-    return sensitiveTextPatterns.reduce((text, pattern) => text.replace(pattern, "[REDACTED]"), value);
+    return sensitiveTextPatterns.reduce(
+      (text, pattern, index) => text.replace(pattern, index === 0 ? "$1\"[REDACTED]\"" : "[REDACTED]"),
+      value,
+    );
   }
   if (Array.isArray(value)) return value.map(redactSensitive);
   if (value && typeof value === "object") {

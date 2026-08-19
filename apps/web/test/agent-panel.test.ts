@@ -2,7 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentBudgetPresentation, agentPanelWidthBounds, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionRequestBody, agentBudgetPresentation, agentPanelWidthBounds, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+
+const generationCard = {
+  schemaVersion: 1,
+  kind: "agent_action_card",
+  videoTaskId: "task_1",
+  action: "generate_strategy",
+  label: "生成卖点策略草稿",
+  summary: "生成家庭出行策略。",
+  expectedRevision: 3,
+  cost: { kind: "free" },
+  payload: { schemaVersion: 1, audience: "家庭用户", theme: "周末出行" },
+};
 
 test("Agent panel width preserves the desktop workspace minimums", () => {
   assert.equal(resolveAgentPanelWidth(1280, 380), 380);
@@ -57,4 +69,54 @@ test("Agent quota presentation rejects another account or inconsistent balances"
     accountId: "account_creator_a",
     balance: { ...budget.balance, availableAmountMinor: 39_999 },
   }, "account_creator_a"), /当前账号不一致/u);
+});
+
+test("Agent action cards require the exact frozen structure before rendering", () => {
+  assert.deepEqual(parseAgentActionCard(generationCard), generationCard);
+  assert.deepEqual(extractAgentActionCard({
+    content: [{ type: "text", text: JSON.stringify(generationCard) }],
+  }), generationCard);
+  for (const invalid of [
+    { ...generationCard, actorAccountId: "account_forged" },
+    { ...generationCard, videoTaskId: "../task_other" },
+    { ...generationCard, cost: { kind: "free", amount: 0 } },
+    { ...generationCard, payload: { ...generationCard.payload, tenantId: "tenant_forged" } },
+    { ...generationCard, action: "approve_strategy", label: "批准策略" },
+    { ...generationCard, action: "rollback_stage", label: "回退已确认阶段版本" },
+  ]) {
+    assert.equal(parseAgentActionCard(invalid), undefined);
+  }
+});
+
+test("Agent action execution sends only allowlisted payload fields", () => {
+  assert.deepEqual(agentActionRequestBody(generationCard), {
+    audience: "家庭用户",
+    theme: "周末出行",
+    expectedRevision: 3,
+  });
+  assert.deepEqual(agentActionRequestBody({
+    ...generationCard,
+    action: "request_strategy_approval",
+    payload: { schemaVersion: 1 },
+  }), { expectedRevision: 3 });
+});
+
+test("Agent action cards stay disabled for missing, cross-task, stale, and busy contexts", () => {
+  assert.deepEqual(agentActionAvailability(generationCard, undefined, undefined), {
+    enabled: false,
+    stale: true,
+    reason: "当前未绑定作品。",
+  });
+  assert.equal(agentActionAvailability(generationCard, "task_other", 3).enabled, false);
+  assert.match(agentActionAvailability(generationCard, "task_other", 3).reason ?? "", /其他视频任务/u);
+  assert.equal(agentActionAvailability(generationCard, "task_1", 4).enabled, false);
+  assert.match(agentActionAvailability(generationCard, "task_1", 4).reason ?? "", /已经更新/u);
+  assert.deepEqual(agentActionAvailability(generationCard, "task_1", 3, true), {
+    enabled: false,
+    stale: false,
+  });
+  assert.deepEqual(agentActionAvailability(generationCard, "task_1", 3), {
+    enabled: true,
+    stale: false,
+  });
 });

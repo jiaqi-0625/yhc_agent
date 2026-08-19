@@ -37,6 +37,9 @@ test("timeline payloads are redacted and bounded before leaving the runtime", ()
   const bounded = toTimelinePayload({ value: "x".repeat(7_000) });
   assert.equal(typeof bounded, "string");
   assert.ok((bounded as string).length <= 6_001);
+  const serializedText = toTimelinePayload('{"token":"timeline-secret","safe":"visible"}');
+  assert.doesNotMatch(String(serializedText), /timeline-secret/u);
+  assert.match(String(serializedText), /visible/u);
 });
 
 test("public transcripts remove hidden reasoning and sanitize tool payloads", () => {

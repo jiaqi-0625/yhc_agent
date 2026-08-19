@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AfterToolCallContext, BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import { toolPolicies } from "@firefly/domain";
 import { InMemoryVehicleService } from "@firefly/tools";
 
 import { ADVERTISING_AGENT_SYSTEM_PROMPT, createAdvertisingAgent, redactSensitive } from "../src/index.ts";
@@ -172,6 +173,40 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
   );
 });
 
+test("every dynamically assembled production tool is allowlisted and no approval decision tool is registered", () => {
+  const strategyService = {
+    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+    async currentRevision() { return MOCK_TASK_CONTEXT.videoTask.revision; },
+    async generate() { throw new Error("not called"); },
+    async validate() { return { valid: true, issues: [] }; },
+    async requestApproval() { throw new Error("not called"); },
+  };
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    taskContext: MOCK_TASK_CONTEXT,
+    getWorkStatus: () => "strategy_draft",
+    vehicleService: new InMemoryVehicleService([]),
+    strategyService,
+    taskAssetReader: {
+      videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+      assetSnapshotId: MOCK_TASK_CONTEXT.videoTask.assetSnapshotId!,
+      async read() { throw new Error("not called"); },
+    },
+    stageSuggestionReader: {
+      videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+      async read() { throw new Error("not called"); },
+    },
+  });
+  const toolNames = agent.state.tools.map((tool) => tool.name);
+  assert.ok(toolNames.every((toolName) => Object.hasOwn(toolPolicies, toolName)));
+  assert.doesNotMatch(
+    toolNames.join(","),
+    /bash|shell|filesystem|sql|http|browser|approve_strategy|approve_script|approve_storyboard|publish_ad/u,
+  );
+});
+
 test("before-tool hook blocks a registered tool in the wrong workflow state", async () => {
   const agent = createAgent("script_draft");
   assert.ok(agent.beforeToolCall);
@@ -203,4 +238,31 @@ test("redaction removes secret-bearing fields and bearer credentials", () => {
     redactSensitive({ apiKey: "not-for-logs", nested: { authorization: "Bearer abc.def", safe: "Bearer abc.def" } }),
     { apiKey: "[REDACTED]", nested: { authorization: "[REDACTED]", safe: "[REDACTED]" } },
   );
+  const serialized = redactSensitive(
+    '{"password":"text-secret","nested":{"apiKey":"json-secret"},"safe":"keep"}',
+  );
+  assert.doesNotMatch(String(serialized), /text-secret|json-secret/u);
+  assert.match(String(serialized), /"safe":"keep"/u);
+  assert.deepEqual(JSON.parse(String(serialized)), {
+    password: "[REDACTED]",
+    nested: { apiKey: "[REDACTED]" },
+    safe: "keep",
+  });
+});
+
+test("after-tool hook redacts serialized content and structured details before model or timeline use", async () => {
+  const agent = createAgent();
+  assert.ok(agent.afterToolCall);
+  const result = await agent.afterToolCall({
+    toolCall: { type: "toolCall", id: "call_redact", name: "get_vehicle_snapshot", arguments: {} },
+    result: {
+      content: [{ type: "text", text: '{"authorization":"Bearer tool-content-secret","safe":"visible"}' }],
+      details: { password: "detail-secret", safe: "visible" },
+    },
+    isError: false,
+  } as unknown as AfterToolCallContext);
+  const serialized = JSON.stringify(result);
+  assert.doesNotMatch(serialized, /tool-content-secret|detail-secret/u);
+  assert.match(serialized, /visible/u);
+  assert.match(serialized, /\[REDACTED\]/u);
 });

@@ -1,5 +1,11 @@
 import { agentApi } from "./agent-api.js";
-import { agentBudgetPresentation, bindAgentPanel } from "./agent-panel.js";
+import {
+  agentActionAvailability,
+  agentActionRequestBody,
+  agentBudgetPresentation,
+  bindAgentPanel,
+  extractAgentActionCard,
+} from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { workspaceApi } from "./workspace-api.js";
@@ -767,26 +773,6 @@ function addToolEvent(turn, event) {
   });
 }
 
-function extractActionProposal(value) {
-  const candidates = [value, value && typeof value === "object" ? value.details : undefined];
-  if (value && typeof value === "object" && Array.isArray(value.content)) {
-    value.content.forEach(function (part) {
-      if (!part || part.type !== "text" || typeof part.text !== "string") return;
-      try { candidates.push(JSON.parse(part.text)); } catch {}
-    });
-  }
-  return candidates.find(function (candidate) {
-    return candidate
-      && typeof candidate === "object"
-      && candidate.schemaVersion === 1
-      && (candidate.kind === "agent_action_card" || candidate.kind === "action_proposal")
-      && (candidate.action === "generate_strategy" || candidate.action === "request_strategy_approval")
-      && Number.isInteger(candidate.expectedRevision)
-      && candidate.payload
-      && typeof candidate.payload === "object";
-  });
-}
-
 function proposalEndpoint(proposal) {
   if (!state.work) return null;
   if (proposal.videoTaskId && proposal.videoTaskId !== state.work.work.id) return null;
@@ -794,14 +780,6 @@ function proposalEndpoint(proposal) {
   return proposal.action === "generate_strategy"
     ? "/v1/works/" + workId + "/strategy/generate"
     : "/v1/works/" + workId + "/strategy/approval-request";
-}
-
-function proposalRequestBody(proposal) {
-  const { schemaVersion: _schemaVersion, ...payload } = proposal.payload;
-  return {
-    ...payload,
-    expectedRevision: proposal.expectedRevision,
-  };
 }
 
 function proposalResultText(proposal, view) {
@@ -842,7 +820,7 @@ async function executeActionProposal(card, proposal) {
     const view = await api(endpoint, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(proposalRequestBody(proposal)),
+      body: JSON.stringify(agentActionRequestBody(proposal)),
     });
     renderWork(view);
     await refreshWorkList();
@@ -913,19 +891,15 @@ function refreshActionProposalAvailability() {
     const status = card.querySelector(".agent-action-status");
     const result = card.querySelector(".agent-action-result");
     if (!button || !status || !result) return;
-    const expectedRevision = Number(card.dataset.expectedRevision);
-    const currentRevision = state.work?.work.revision;
-    const taskMismatch = Boolean(card.dataset.videoTaskId) && card.dataset.videoTaskId !== state.work?.work.id;
-    const stale = taskMismatch || currentRevision === undefined || currentRevision !== expectedRevision;
-    button.disabled = stale || state.workflowBusy;
-    card.classList.toggle("stale", stale);
-    if (stale) {
+    const availability = agentActionAvailability({
+      videoTaskId: card.dataset.videoTaskId,
+      expectedRevision: Number(card.dataset.expectedRevision),
+    }, state.work?.work.id, state.work?.work.revision, state.workflowBusy);
+    button.disabled = !availability.enabled;
+    card.classList.toggle("stale", availability.stale);
+    if (availability.stale) {
       status.textContent = "已失效";
-      result.textContent = taskMismatch
-        ? "该卡片属于其他视频任务，请切回对应任务或重新获取建议。"
-        : currentRevision === undefined
-        ? "当前未绑定作品。"
-        : "任务内容已经更新，请重新获取操作建议。";
+      result.textContent = availability.reason;
       result.hidden = false;
     }
   });
@@ -950,7 +924,7 @@ function finishToolEvent(turn, event, resumeThinking) {
   tool.description.textContent = friendlyToolResult(tool.toolName, event);
   const isProposalTool = tool.toolName === "propose_strategy_generation"
     || tool.toolName === "propose_strategy_approval";
-  const proposal = event.isError || !isProposalTool ? undefined : extractActionProposal(event.output);
+  const proposal = event.isError || !isProposalTool ? undefined : extractAgentActionCard(event.output);
   const proposalMatchesTool = proposal
     && ((tool.toolName === "propose_strategy_generation" && proposal.action === "generate_strategy")
       || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval"));
