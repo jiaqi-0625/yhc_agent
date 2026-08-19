@@ -129,6 +129,31 @@ export function agentActionAvailability(
 export function agentActionFailurePresentation(error) {
   const code = error && typeof error.code === "string" ? error.code : "";
   const charged = Boolean(error && error.charged);
+  const invalidSessionCodes = new Set([
+    "AIC-AUTH-SESSION_REQUIRED",
+    "AIC-AUTH-SESSION_HEADER_INVALID",
+    "AIC-AUTH-SESSION_INVALID",
+    "AIC-AUTH-DEVELOPMENT_ACCOUNT_NOT_FOUND",
+  ]);
+  const mismatchedSessionCodes = new Set([
+    "AIC-AUTH-SESSION_SCOPE_REQUIRED",
+    "AIC-AUTH-SESSION_SCOPE_DENIED",
+  ]);
+  const unavailableTaskCodes = new Set([
+    "AIC-AGENT-COMMAND-SCOPE_INVALID",
+    "AIC-AGENT-COMMAND-PROJECT_NOT_FOUND",
+    "AIC-AGENT-COMMAND-TASK_NOT_FOUND",
+  ]);
+  const invalidSnapshotCodes = new Set([
+    "AIC-AGENT-COMMAND-SNAPSHOT_INVALID",
+    "AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID",
+    "AIC-AGENT-COMMAND-SNAPSHOT_MIGRATION_REQUIRED",
+  ]);
+  const invalidStrategyCodes = new Set([
+    "AIC-AGENT-COMMAND-STRATEGY_FACTS_INVALID",
+    "AIC-AGENT-COMMAND-STRATEGY_DRAFT_NOT_FOUND",
+    "AIC-AGENT-COMMAND-STRATEGY_VALIDATION_FAILED",
+  ]);
   if (code === "AIC-WORKFLOW-REVISION_CONFLICT") {
     return {
       status: "已失效",
@@ -137,10 +162,42 @@ export function agentActionFailurePresentation(error) {
       stale: true,
     };
   }
-  if (code === "AIC-AUTH-TASK_OWNER_REQUIRED" || code.startsWith("AIC-AUTH-")) {
+  if (code.endsWith("-IDEMPOTENCY_CONFLICT")) {
+    return {
+      status: "请求冲突",
+      message: "同一次请求已用于另一项操作，请先核对原操作结果，不要更换请求标识重复提交。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (invalidSessionCodes.has(code)) {
+    return {
+      status: "登录已失效",
+      message: "当前登录已失效，请重新登录或切换到正确账号后再获取操作建议。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (mismatchedSessionCodes.has(code)) {
+    return {
+      status: "会话不匹配",
+      message: "当前账号与任务会话不一致，请切换到有权限的账号并重新打开该任务。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (code === "AIC-AUTH-TASK_OWNER_REQUIRED") {
     return {
       status: "无执行权限",
       message: "当前账号不是该任务的可执行负责人，请先确认任务归属或完成接管。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
+  if (code.startsWith("AIC-AUTH-")) {
+    return {
+      status: "权限不足",
+      message: "当前账号没有执行这项任务操作的权限，请切换到有权限的账号或联系管理员。",
       blocksCard: true,
       stale: false,
     };
@@ -161,6 +218,38 @@ export function agentActionFailurePresentation(error) {
       stale: false,
     };
   }
+  if (unavailableTaskCodes.has(code)) {
+    return {
+      status: "任务不可用",
+      message: "当前项目或任务已不可访问，请刷新任务列表并重新获取操作建议。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
+  if (invalidSnapshotCodes.has(code)) {
+    return {
+      status: "任务数据需刷新",
+      message: "任务锁定的数据已失效或需要升级，请刷新任务；仍无法继续时请联系管理员处理数据迁移。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
+  if (invalidStrategyCodes.has(code) || code.startsWith("AIC-STRATEGY-")) {
+    return {
+      status: "策略需重新检查",
+      message: "当前策略内容或依据已发生变化，请刷新任务并重新生成或检查策略建议。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
+  if (code === "AIC-STAGE-ROLLBACK-DENIED") {
+    return {
+      status: "回退不可执行",
+      message: "当前阶段或目标版本已不允许回退，请刷新任务后重新选择可用版本。",
+      blocksCard: true,
+      stale: true,
+    };
+  }
   if (code.startsWith("AIC-WORKFLOW-") || code.endsWith("_CONFLICT")) {
     return {
       status: "状态冲突",
@@ -177,9 +266,17 @@ export function agentActionFailurePresentation(error) {
       stale: false,
     };
   }
+  if (code.startsWith("AIC-")) {
+    return {
+      status: "操作未完成",
+      message: "服务端未能完成这项操作，请刷新任务并按最新状态重新获取建议。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
   return {
     status: "执行失败",
-    message: error instanceof Error ? error.message : "操作执行失败。",
+    message: "网络或服务暂时不可用，请稍后手动重试。",
     blocksCard: false,
     stale: false,
   };

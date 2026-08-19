@@ -126,19 +126,66 @@ test("Agent action cards stay disabled for missing, cross-task, stale, and busy 
 });
 
 test("Agent action failures give recoverable business guidance and block stale resubmission", () => {
-  const cases: Array<[string, string, RegExp, boolean]> = [
-    ["AIC-WORKFLOW-REVISION_CONFLICT", "已失效", /刷新任务/u, true],
-    ["AIC-AUTH-TASK_OWNER_REQUIRED", "无执行权限", /任务归属|接管/u, true],
-    ["AIC-COST-BUDGET_EXCEEDED", "额度不足", /调整额度/u, true],
-    ["AIC-CONCURRENCY-ACCOUNT_HIGH_COST_TASK_RUNNING", "任务繁忙", /等待/u, true],
-    ["AIC-WORKFLOW-STAGE_CONFLICT", "状态冲突", /重新获取建议/u, true],
+  const cases: Array<[string, string, RegExp, boolean, boolean]> = [
+    ["AIC-WORKFLOW-REVISION_CONFLICT", "已失效", /刷新任务/u, true, true],
+    ["AIC-AUTH-TASK_OWNER_REQUIRED", "无执行权限", /任务归属|接管/u, true, false],
+    ["AIC-COST-BUDGET_EXCEEDED", "额度不足", /调整额度/u, true, false],
+    ["AIC-CONCURRENCY-ACCOUNT_HIGH_COST_TASK_RUNNING", "任务繁忙", /等待/u, true, false],
+    ["AIC-WORKFLOW-STAGE_CONFLICT", "状态冲突", /重新获取建议/u, true, true],
   ];
-  for (const [code, status, message, blocksCard] of cases) {
+  for (const [code, status, message, blocksCard, stale] of cases) {
     const presentation = agentActionFailurePresentation({ code });
     assert.equal(presentation.status, status);
     assert.match(presentation.message, message);
     assert.equal(presentation.blocksCard, blocksCard);
+    assert.equal(presentation.stale, stale);
     assert.doesNotMatch(presentation.message, /AIC-/u);
+  }
+});
+
+test("Agent action authentication failures distinguish login, session scope, ownership, and grants", () => {
+  const cases: Array<[string, string, RegExp]> = [
+    ["AIC-AUTH-SESSION_REQUIRED", "登录已失效", /重新登录|切换/u],
+    ["AIC-AUTH-SESSION_HEADER_INVALID", "登录已失效", /重新登录|切换/u],
+    ["AIC-AUTH-SESSION_INVALID", "登录已失效", /重新登录|切换/u],
+    ["AIC-AUTH-SESSION_SCOPE_REQUIRED", "会话不匹配", /账号.*任务会话/u],
+    ["AIC-AUTH-SESSION_SCOPE_DENIED", "会话不匹配", /账号.*任务会话/u],
+    ["AIC-AUTH-TASK_OWNER_REQUIRED", "无执行权限", /任务归属|接管/u],
+    ["AIC-AUTH-PROJECT_SCOPE_DENIED", "权限不足", /有权限的账号|管理员/u],
+    ["AIC-AUTH-ROLE_DENIED", "权限不足", /有权限的账号|管理员/u],
+  ];
+  for (const [code, status, message] of cases) {
+    const presentation = agentActionFailurePresentation({ code, message: "raw server detail" });
+    assert.equal(presentation.status, status);
+    assert.match(presentation.message, message);
+    assert.equal(presentation.blocksCard, true);
+    assert.equal(presentation.stale, false);
+    assert.doesNotMatch(presentation.message, /AIC-|raw server detail/u);
+  }
+});
+
+test("Agent action command failures block deterministic retries without exposing technical details", () => {
+  const cases: Array<[string, string, RegExp, boolean]> = [
+    ["AIC-AGENT-COMMAND-IDEMPOTENCY_CONFLICT", "请求冲突", /核对原操作结果.*不要.*重复提交/u, false],
+    ["AIC-AGENT-COMMAND-SCOPE_INVALID", "任务不可用", /刷新任务列表/u, true],
+    ["AIC-AGENT-COMMAND-PROJECT_NOT_FOUND", "任务不可用", /刷新任务列表/u, true],
+    ["AIC-AGENT-COMMAND-TASK_NOT_FOUND", "任务不可用", /刷新任务列表/u, true],
+    ["AIC-AGENT-COMMAND-STATE_CONFLICT", "状态冲突", /重新获取建议/u, true],
+    ["AIC-AGENT-COMMAND-SNAPSHOT_INVALID", "任务数据需刷新", /刷新任务/u, true],
+    ["AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID", "任务数据需刷新", /刷新任务/u, true],
+    ["AIC-AGENT-COMMAND-SNAPSHOT_MIGRATION_REQUIRED", "任务数据需刷新", /数据迁移/u, true],
+    ["AIC-AGENT-COMMAND-STRATEGY_FACTS_INVALID", "策略需重新检查", /重新生成|检查策略/u, true],
+    ["AIC-AGENT-COMMAND-STRATEGY_DRAFT_NOT_FOUND", "策略需重新检查", /重新生成|检查策略/u, true],
+    ["AIC-AGENT-COMMAND-STRATEGY_VALIDATION_FAILED", "策略需重新检查", /重新生成|检查策略/u, true],
+    ["AIC-STAGE-ROLLBACK-DENIED", "回退不可执行", /重新选择/u, true],
+  ];
+  for (const [code, status, message, stale] of cases) {
+    const presentation = agentActionFailurePresentation({ code, message: "internal raw failure" });
+    assert.equal(presentation.status, status);
+    assert.match(presentation.message, message);
+    assert.equal(presentation.blocksCard, true);
+    assert.equal(presentation.stale, stale);
+    assert.doesNotMatch(presentation.message, /AIC-|internal raw failure|JSON/u);
   }
 });
 
@@ -152,10 +199,19 @@ test("Agent action failures never invite a duplicate when the server reports a c
     blocksCard: true,
     stale: false,
   });
-  assert.deepEqual(agentActionFailurePresentation(new Error("网络暂时不可用")), {
+  assert.deepEqual(agentActionFailurePresentation(new Error("fetch failed")), {
     status: "执行失败",
-    message: "网络暂时不可用",
+    message: "网络或服务暂时不可用，请稍后手动重试。",
     blocksCard: false,
+    stale: false,
+  });
+  assert.deepEqual(agentActionFailurePresentation({
+    code: "AIC-AGENT-COMMAND-RUNTIME_NOT_CONFIGURED",
+    message: "internal runtime detail",
+  }), {
+    status: "操作未完成",
+    message: "服务端未能完成这项操作，请刷新任务并按最新状态重新获取建议。",
+    blocksCard: true,
     stale: false,
   });
 });
