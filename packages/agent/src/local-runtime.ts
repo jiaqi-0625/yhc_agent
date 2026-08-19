@@ -15,7 +15,12 @@ import {
   type PublicLocalAgentConfig,
 } from "./local-config.ts";
 import { createLocalModelRuntime, type LocalModelRuntime } from "./model-runtime.ts";
-import { assertLocalSessionId, LocalSessionStore, type PersistedLocalSession } from "./session-store.ts";
+import {
+  assertLocalSessionId,
+  LocalSessionStore,
+  type AgentSessionScope,
+  type PersistedLocalSession,
+} from "./session-store.ts";
 import { LOCAL_FRAMEWORK_SYSTEM_PROMPT } from "./system-prompt.ts";
 
 export interface LocalSessionSummary {
@@ -38,11 +43,15 @@ export interface LocalTaskAgentFactoryContext {
   getApiKey?: (provider: string) => string | undefined | Promise<string | undefined>;
   messages: readonly AgentMessage[];
   sessionId: string;
+  sessionScope: AgentSessionScope;
   taskContext: TaskContext;
 }
 
 export type LocalTaskAgentFactory = (context: LocalTaskAgentFactoryContext) => Agent;
 export type LegacyTaskContextResolver = (workId: string) => TaskContext | Promise<TaskContext>;
+export type LegacySessionScopeResolver = (
+  taskContext: TaskContext,
+) => AgentSessionScope | Promise<AgentSessionScope>;
 
 export type LocalRuntimeEvent = AgentStreamEvent;
 
@@ -100,6 +109,7 @@ export class LocalAgentRunError extends Error {
 interface ActiveLocalSession {
   agent: Agent;
   taskContext?: TaskContext;
+  scope?: AgentSessionScope;
   createdAt: string;
   updatedAt: string;
   activeRunId?: string;
@@ -229,6 +239,7 @@ export class LocalAgentRuntime {
   readonly #store: LocalSessionStore;
   readonly #taskAgentFactory: LocalTaskAgentFactory | undefined;
   readonly #legacyTaskContextResolver: LegacyTaskContextResolver | undefined;
+  readonly #legacySessionScopeResolver: LegacySessionScopeResolver | undefined;
 
   constructor(
     readonly config: LocalAgentConfig = loadLocalAgentConfig(),
@@ -236,11 +247,13 @@ export class LocalAgentRuntime {
     store: LocalSessionStore = new LocalSessionStore(config.dataDirectory, config.persistSessions),
     taskAgentFactory?: LocalTaskAgentFactory,
     legacyTaskContextResolver?: LegacyTaskContextResolver,
+    legacySessionScopeResolver?: LegacySessionScopeResolver,
   ) {
     this.#modelRuntime = modelRuntime;
     this.#store = store;
     this.#taskAgentFactory = taskAgentFactory;
     this.#legacyTaskContextResolver = legacyTaskContextResolver;
+    this.#legacySessionScopeResolver = legacySessionScopeResolver;
   }
 
   publicConfig(): PublicLocalAgentConfig {
@@ -327,13 +340,20 @@ export class LocalAgentRuntime {
     }
   }
 
-  #createAgent(messages: readonly AgentMessage[], sessionId: string, taskContext?: TaskContext): Agent {
+  #createAgent(
+    messages: readonly AgentMessage[],
+    sessionId: string,
+    taskContext?: TaskContext,
+    sessionScope?: AgentSessionScope,
+  ): Agent {
     if (taskContext !== undefined && this.#taskAgentFactory !== undefined) {
+      if (sessionScope === undefined) throw new Error("Task-bound Agent sessions require a server-resolved scope.");
       const agent = this.#taskAgentFactory({
         model: this.#modelRuntime.model,
         streamFn: this.#modelRuntime.streamFn,
         messages,
         sessionId,
+        sessionScope: structuredClone(sessionScope),
         taskContext,
         ...(this.#modelRuntime.getApiKey === undefined ? {} : { getApiKey: this.#modelRuntime.getApiKey }),
       });
@@ -354,16 +374,18 @@ export class LocalAgentRuntime {
 
   async createSession(
     sessionId = `session_${randomUUID()}`,
-    options: { taskContext?: TaskContext } = {},
+    options: { taskContext?: TaskContext; scope?: AgentSessionScope } = {},
   ): Promise<LocalSessionSummary> {
     assertLocalSessionId(sessionId);
+    this.#assertTaskBinding(options.taskContext, options.scope);
     if (this.#sessions.has(sessionId) || (await this.#store.load(sessionId))) {
       throw new Error(`Session '${sessionId}' already exists.`);
     }
     const now = new Date().toISOString();
     const active = {
-      agent: this.#createAgent([], sessionId, options.taskContext),
+      agent: this.#createAgent([], sessionId, options.taskContext, options.scope),
       ...(options.taskContext === undefined ? {} : { taskContext: structuredClone(options.taskContext) }),
+      ...(options.scope === undefined ? {} : { scope: structuredClone(options.scope) }),
       createdAt: now,
       updatedAt: now,
     };
@@ -378,14 +400,21 @@ export class LocalAgentRuntime {
     if (existing) return existing;
     const persisted = await this.#store.load(sessionId);
     if (!persisted) return undefined;
-    const taskContext = persisted.schemaVersion === 2
+    const taskContext = persisted.schemaVersion === 2 || persisted.schemaVersion === 3
       ? persisted.taskContext
       : persisted.workId === undefined
         ? undefined
         : await this.#resolveLegacyTaskContext(persisted.workId);
+    const scope = persisted.schemaVersion === 3
+      ? persisted.scope
+      : taskContext === undefined
+        ? undefined
+        : await this.#resolveLegacySessionScope(taskContext);
+    this.#assertTaskBinding(taskContext, scope);
     const active = {
-      agent: this.#createAgent(persisted.messages, sessionId, taskContext),
+      agent: this.#createAgent(persisted.messages, sessionId, taskContext, scope),
       ...(taskContext === undefined ? {} : { taskContext: structuredClone(taskContext) }),
+      ...(scope === undefined ? {} : { scope: structuredClone(scope) }),
       createdAt: persisted.createdAt,
       updatedAt: persisted.updatedAt,
     };
@@ -410,21 +439,65 @@ export class LocalAgentRuntime {
     return active ? toPublicTranscript(active.agent.state.messages) : undefined;
   }
 
-  async listSessions(videoTaskId?: string): Promise<LocalSessionSummary[]> {
+  async #resolveLegacySessionScope(taskContext: TaskContext): Promise<AgentSessionScope> {
+    if (!this.#legacySessionScopeResolver) {
+      throw new Error(
+        `Legacy task session '${taskContext.videoTask.id}' cannot be restored without a session scope resolver.`,
+      );
+    }
+    return this.#legacySessionScopeResolver(taskContext);
+  }
+
+  #assertTaskBinding(taskContext?: TaskContext, scope?: AgentSessionScope): void {
+    if (taskContext === undefined && scope === undefined) return;
+    if (
+      taskContext === undefined ||
+      scope === undefined ||
+      !scope.actorId ||
+      !scope.tenantId ||
+      scope.projectId !== taskContext.batchProject.id ||
+      scope.videoTaskId !== taskContext.videoTask.id
+    ) {
+      throw new Error("Agent session task context and authenticated scope must match.");
+    }
+  }
+
+  #scopeMatches(expected: AgentSessionScope | undefined, actual: AgentSessionScope | undefined): boolean {
+    if (expected === undefined || actual === undefined) return expected === actual;
+    return expected.actorId === actual.actorId &&
+      expected.tenantId === actual.tenantId &&
+      expected.projectId === actual.projectId &&
+      expected.videoTaskId === actual.videoTaskId;
+  }
+
+  async authorizeSession(sessionId: string, scope?: AgentSessionScope): Promise<void> {
+    const active = await this.#getActive(sessionId);
+    if (!active) throw new Error(`Session '${sessionId}' was not found.`);
+    if (!this.#scopeMatches(active.scope, scope)) {
+      throw new LocalAgentRunError(
+        "AIC-AUTH-SESSION_SCOPE_DENIED",
+        "当前认证账号与任务无权访问该 Agent 会话。",
+        403,
+      );
+    }
+  }
+
+  async listSessions(scope?: AgentSessionScope): Promise<LocalSessionSummary[]> {
     const sessionIds = new Set(this.#sessions.keys());
     for (const persisted of await this.#store.list()) {
-      const persistedVideoTaskId = persisted.schemaVersion === 2
+      if (persisted.schemaVersion === 3 && !this.#scopeMatches(persisted.scope, scope)) continue;
+      const persistedVideoTaskId = persisted.schemaVersion === 2 || persisted.schemaVersion === 3
         ? persisted.taskContext?.videoTask.id
         : persisted.workId;
-      if (videoTaskId !== undefined && persistedVideoTaskId !== videoTaskId) continue;
+      if (scope !== undefined && persistedVideoTaskId !== scope.videoTaskId) continue;
       sessionIds.add(persisted.id);
     }
     const sessions: LocalSessionSummary[] = [];
     for (const sessionId of sessionIds) {
       const active = await this.#getActive(sessionId);
       if (!active) continue;
+      if (!this.#scopeMatches(active.scope, scope)) continue;
       const summary = this.#summary(sessionId, active);
-      if (videoTaskId !== undefined && summary.videoTaskId !== videoTaskId) continue;
       sessions.push(summary);
     }
     return sessions.sort((left, right) =>
@@ -765,9 +838,10 @@ export class LocalAgentRuntime {
 
   async #persist(sessionId: string, active: ActiveLocalSession): Promise<void> {
     const record: PersistedLocalSession = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       id: sessionId,
       ...(active.taskContext === undefined ? {} : { taskContext: structuredClone(active.taskContext) }),
+      ...(active.scope === undefined ? {} : { scope: structuredClone(active.scope) }),
       createdAt: active.createdAt,
       updatedAt: active.updatedAt,
       provider: this.config.provider,

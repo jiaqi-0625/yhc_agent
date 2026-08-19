@@ -3,20 +3,26 @@ import { fileURLToPath } from "node:url";
 
 import { LocalAgentRuntime } from "@firefly/agent";
 
-import { handleAgentRoute } from "./agent-routes.ts";
+import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
 import { LocalBusinessRuntime } from "./business-runtime.ts";
+import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceRoute } from "./workspace-routes.ts";
 
 const version = "0.1.0";
+const resolveLocalAgentIdentity: AgentIdentityResolver = () => ({
+  actorId: LOCAL_SCOPE.actorId,
+  tenantId: LOCAL_SCOPE.tenantId,
+});
 
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
   runtime: LocalAgentRuntime,
   business: LocalBusinessRuntime,
+  resolveAgentIdentity: AgentIdentityResolver,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -60,7 +66,7 @@ async function handleRequest(
   }
 
   if (await handleWorkspaceRoute(request, response, url, business)) return;
-  if (await handleAgentRoute(request, response, url, runtime, business)) return;
+  if (await handleAgentRoute(request, response, url, runtime, business, resolveAgentIdentity)) return;
 
   sendJson(response, 404, {
     code: "AIC-API-NOT_FOUND",
@@ -73,10 +79,11 @@ async function handleRequest(
 export function createApiServer(
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
+  resolveAgentIdentity: AgentIdentityResolver = resolveLocalAgentIdentity,
 ): Server {
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   return createServer((request, response) => {
-    void handleRequest(request, response, activeRuntime, business).catch((error: unknown) => {
+    void handleRequest(request, response, activeRuntime, business, resolveAgentIdentity).catch((error: unknown) => {
       sendRequestError(response, error);
     });
   });
@@ -87,8 +94,9 @@ export async function startApiServer(
   host = "127.0.0.1",
   runtime: LocalAgentRuntime | undefined = undefined,
   business = new LocalBusinessRuntime(),
+  resolveAgentIdentity: AgentIdentityResolver = resolveLocalAgentIdentity,
 ): Promise<Server> {
-  const server = createApiServer(runtime, business);
+  const server = createApiServer(runtime, business, resolveAgentIdentity);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, host, () => {

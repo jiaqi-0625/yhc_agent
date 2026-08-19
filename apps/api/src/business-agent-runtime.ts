@@ -36,12 +36,23 @@ export function createBusinessAgentRuntime(
         messages: context.messages,
         sessionId: context.sessionId,
         ...(context.getApiKey === undefined ? {} : { getApiKey: context.getApiKey }),
-        scope: LOCAL_AGENT_SCOPE,
+        scope: {
+          ...LOCAL_AGENT_SCOPE,
+          actorId: context.sessionScope.actorId,
+          tenantId: context.sessionScope.tenantId,
+          projectId: context.sessionScope.projectId,
+        },
         taskContext: context.taskContext,
         getWorkStatus: async () => (await business.getWork(context.taskContext.videoTask.id)).work.status,
         vehicleService: business.vehicleService,
         strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id),
       }),
     (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),
+    (taskContext) => ({
+      actorId: LOCAL_SCOPE.actorId,
+      tenantId: LOCAL_SCOPE.tenantId,
+      projectId: taskContext.batchProject.id,
+      videoTaskId: taskContext.videoTask.id,
+    }),
   );
 }

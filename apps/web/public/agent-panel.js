@@ -156,7 +156,7 @@ export function bindAgentPanel(options) {
     clearError();
     setBusy(true);
     try {
-      const result = await agentApi.resetSession(state.sessionId);
+      const result = await agentApi.resetSession(state.sessionId, state.sessionVideoTaskId);
       updateSession(result.session);
       clearMessages();
     } catch (error) { showError(error); }
@@ -167,7 +167,7 @@ export function bindAgentPanel(options) {
     if (!state.busy || !state.sessionId || !state.activeRunId) return;
     elements.cancelGeneration.disabled = true;
     try {
-      await agentApi.abortRun(state.sessionId, state.activeRunId);
+      await agentApi.abortRun(state.sessionId, state.activeRunId, state.sessionVideoTaskId);
     } catch (error) {
       showError(error);
       elements.cancelGeneration.disabled = false;

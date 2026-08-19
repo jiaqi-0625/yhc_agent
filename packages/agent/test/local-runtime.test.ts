@@ -18,8 +18,16 @@ import {
   toPublicLocalAgentConfig,
   type LocalAgentConfig,
   type LocalModelRuntime,
+  type AgentSessionScope,
 } from "../src/index.ts";
 import { MOCK_TASK_CONTEXT } from "./task-context-fixture.ts";
+
+const MOCK_SESSION_SCOPE: AgentSessionScope = {
+  actorId: "account_creator_001",
+  tenantId: "tenant_fixture_001",
+  projectId: MOCK_TASK_CONTEXT.batchProject.id,
+  videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+};
 
 test("timeline payloads are redacted and bounded before leaving the runtime", () => {
   assert.deepEqual(
@@ -135,15 +143,73 @@ test("task session listing restores persisted sessions in a stable task-scoped o
     dataDirectory: directory,
   };
   const firstRuntime = new LocalAgentRuntime(config);
-  await firstRuntime.createSession("session_task_list_b", { taskContext: MOCK_TASK_CONTEXT });
-  await firstRuntime.createSession("session_task_list_a", { taskContext: MOCK_TASK_CONTEXT });
+  await firstRuntime.createSession("session_task_list_b", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
+  await firstRuntime.createSession("session_task_list_a", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
   await firstRuntime.createSession("session_unbound_list");
 
   const restoredRuntime = new LocalAgentRuntime(config);
-  const sessions = await restoredRuntime.listSessions(MOCK_TASK_CONTEXT.videoTask.id);
+  const sessions = await restoredRuntime.listSessions(MOCK_SESSION_SCOPE);
   assert.deepEqual(sessions.map((session) => session.id), ["session_task_list_a", "session_task_list_b"]);
   assert.ok(sessions.every((session) => session.videoTaskId === MOCK_TASK_CONTEXT.videoTask.id));
-  assert.equal((await restoredRuntime.listSessions()).length, 3);
+  assert.deepEqual((await restoredRuntime.listSessions()).map((session) => session.id), ["session_unbound_list"]);
+});
+
+test("task sessions reject cross-task, cross-project, cross-account, and cross-tenant access after restore", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-session-scope-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  const runtime = new LocalAgentRuntime(config);
+  await assert.rejects(
+    () => runtime.createSession("session_invalid_binding", {
+      taskContext: MOCK_TASK_CONTEXT,
+      scope: { ...MOCK_SESSION_SCOPE, projectId: "project_other" },
+    }),
+    /task context and authenticated scope must match/u,
+  );
+  await runtime.createSession("session_scoped_restore", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
+  const restored = new LocalAgentRuntime(config);
+
+  await restored.authorizeSession("session_scoped_restore", MOCK_SESSION_SCOPE);
+  for (const scope of [
+    { ...MOCK_SESSION_SCOPE, videoTaskId: "video_task_other" },
+    { ...MOCK_SESSION_SCOPE, projectId: "project_other" },
+    { ...MOCK_SESSION_SCOPE, actorId: "account_other" },
+    { ...MOCK_SESSION_SCOPE, tenantId: "tenant_other" },
+  ]) {
+    await assert.rejects(
+      () => restored.authorizeSession("session_scoped_restore", scope),
+      (error: unknown) => (
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "AIC-AUTH-SESSION_SCOPE_DENIED"
+      ),
+    );
+    assert.deepEqual(await restored.listSessions(scope), []);
+  }
+  await assert.rejects(
+    () => restored.authorizeSession("session_scoped_restore"),
+    /无权访问/u,
+  );
+  assert.deepEqual(
+    (await restored.listSessions(MOCK_SESSION_SCOPE)).map((session) => session.id),
+    ["session_scoped_restore"],
+  );
 });
 
 test("prompt runs are idempotent by client request ID and retain replayable events", async () => {
@@ -239,6 +305,7 @@ test("task-bound sessions restore the same task context through the injected Age
     dataDirectory: directory,
   };
   const assembledTaskIds: string[] = [];
+  const assembledScopes: AgentSessionScope[] = [];
   const createRuntime = () =>
     new LocalAgentRuntime(
       config,
@@ -246,6 +313,7 @@ test("task-bound sessions restore the same task context through the injected Age
       new LocalSessionStore(directory, true),
       (factoryContext) => {
         assembledTaskIds.push(factoryContext.taskContext.videoTask.id);
+        assembledScopes.push(factoryContext.sessionScope);
         return createBaseAgent({
           model: factoryContext.model,
           streamFn: factoryContext.streamFn,
@@ -257,7 +325,10 @@ test("task-bound sessions restore the same task context through the injected Age
     );
 
   const firstRuntime = createRuntime();
-  const created = await firstRuntime.createSession("session_task_restore", { taskContext: MOCK_TASK_CONTEXT });
+  const created = await firstRuntime.createSession("session_task_restore", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
   assert.equal(created.videoTaskId, MOCK_TASK_CONTEXT.videoTask.id);
   await firstRuntime.prompt(created.id, "保存绑定");
 
@@ -266,9 +337,10 @@ test("task-bound sessions restore the same task context through the injected Age
   assert.deepEqual(restored?.taskContext, MOCK_TASK_CONTEXT);
   assert.equal(restored?.messageCount, 2);
   assert.deepEqual(assembledTaskIds, [MOCK_TASK_CONTEXT.videoTask.id, MOCK_TASK_CONTEXT.videoTask.id]);
+  assert.deepEqual(assembledScopes, [MOCK_SESSION_SCOPE, MOCK_SESSION_SCOPE]);
 });
 
-test("legacy work-bound sessions resolve once and persist back as task-context v2", async (context) => {
+test("legacy work-bound sessions resolve once and persist back with server scope", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-legacy-agent-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const config: LocalAgentConfig = {
@@ -305,6 +377,7 @@ test("legacy work-bound sessions resolve once and persist back as task-context v
       resolvedLegacyIds.push(workId);
       return MOCK_TASK_CONTEXT;
     },
+    () => MOCK_SESSION_SCOPE,
   );
 
   const restored = await runtime.getSession("session_legacy");
@@ -314,10 +387,12 @@ test("legacy work-bound sessions resolve once and persist back as task-context v
   const persisted = JSON.parse(await readFile(join(directory, "session_legacy.json"), "utf8")) as {
     schemaVersion: number;
     taskContext?: unknown;
+    scope?: unknown;
     workId?: string;
   };
-  assert.equal(persisted.schemaVersion, 2);
+  assert.equal(persisted.schemaVersion, 3);
   assert.deepEqual(persisted.taskContext, MOCK_TASK_CONTEXT);
+  assert.deepEqual(persisted.scope, MOCK_SESSION_SCOPE);
   assert.equal(persisted.workId, undefined);
 });
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
+import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -228,11 +229,14 @@ test("work-bound Agent sessions load only the advertising domain tools", async (
   ]);
   assert.doesNotMatch(sessionBody.session.toolNames.join(","), /bash|shell|http|browser|approve_strategy/u);
 
-  const promptResponse = await fetch(`${baseUrl}/v1/sessions/session_business_agent/messages`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ message: "检查当前作品工具" }),
-  });
+  const promptResponse = await fetch(
+    `${baseUrl}/v1/sessions/session_business_agent/messages?videoTaskId=${encodeURIComponent(created.work.id)}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: "检查当前作品工具" }),
+    },
+  );
   assert.equal(promptResponse.status, 200);
   const prompt = await json(promptResponse);
   assert.match(prompt.assistantText, /已装配当前作品的 5 个受控业务工具/u);
@@ -274,4 +278,96 @@ test("Agent session listing stays scoped to the selected video task", async (con
 
   const unscoped = await fetch(`${baseUrl}/v1/sessions`);
   assert.equal(unscoped.status, 400);
+});
+
+test("Agent session routes reject cross-task and cross-account access after persisted restore", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-api-session-scope-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    ...testConfig,
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  const business = new LocalBusinessRuntime(new LocalWorkStore(".data/test-works", false));
+  const resolveIdentity = (request: IncomingMessage) => {
+    const actor = request.headers["x-test-actor"];
+    const tenant = request.headers["x-test-tenant"];
+    return {
+      actorId: Array.isArray(actor) ? actor[0] ?? "account_a" : actor ?? "account_a",
+      tenantId: Array.isArray(tenant) ? tenant[0] ?? "tenant_a" : tenant ?? "tenant_a",
+    };
+  };
+  const firstServer = await startApiServer(
+    0,
+    "127.0.0.1",
+    new LocalAgentRuntime(config),
+    business,
+    resolveIdentity,
+  );
+  context.after(() => {
+    if (firstServer.listening) firstServer.close();
+  });
+  const firstAddress = firstServer.address();
+  assert.ok(firstAddress && typeof firstAddress === "object");
+  const firstBaseUrl = `http://127.0.0.1:${firstAddress.port}`;
+  const firstTask = await createWork(firstBaseUrl);
+  const secondTask = await createWork(firstBaseUrl);
+  const ownerHeaders = {
+    "content-type": "application/json",
+    "x-test-actor": "account_a",
+    "x-test-tenant": "tenant_a",
+  };
+  const createResponse = await fetch(`${firstBaseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: ownerHeaders,
+    body: JSON.stringify({ id: "session_api_scoped", videoTaskId: firstTask.work.id }),
+  });
+  assert.equal(createResponse.status, 201);
+  await new Promise<void>((resolve) => firstServer.close(() => resolve()));
+
+  const restoredServer = await startApiServer(
+    0,
+    "127.0.0.1",
+    new LocalAgentRuntime(config),
+    business,
+    resolveIdentity,
+  );
+  context.after(() => restoredServer.close());
+  const restoredAddress = restoredServer.address();
+  assert.ok(restoredAddress && typeof restoredAddress === "object");
+  const baseUrl = `http://127.0.0.1:${restoredAddress.port}`;
+  const sessionPath = `/v1/sessions/session_api_scoped`;
+  const ownerTaskQuery = `?videoTaskId=${encodeURIComponent(firstTask.work.id)}`;
+
+  assert.equal((await fetch(`${baseUrl}${sessionPath}${ownerTaskQuery}`, { headers: ownerHeaders })).status, 200);
+  assert.equal((await fetch(`${baseUrl}${sessionPath}`, { headers: ownerHeaders })).status, 403);
+  assert.equal((await fetch(
+    `${baseUrl}${sessionPath}?videoTaskId=${encodeURIComponent(secondTask.work.id)}`,
+    { headers: ownerHeaders },
+  )).status, 403);
+
+  const otherAccountHeaders = { ...ownerHeaders, "x-test-actor": "account_b" };
+  const otherTenantHeaders = { ...ownerHeaders, "x-test-tenant": "tenant_b" };
+  assert.equal((await fetch(`${baseUrl}${sessionPath}${ownerTaskQuery}`, {
+    headers: otherAccountHeaders,
+  })).status, 403);
+  assert.equal((await fetch(`${baseUrl}${sessionPath}/transcript${ownerTaskQuery}`, {
+    headers: otherTenantHeaders,
+  })).status, 403);
+  const deniedRun = await fetch(`${baseUrl}${sessionPath}/runs${ownerTaskQuery}`, {
+    method: "POST",
+    headers: otherAccountHeaders,
+    body: JSON.stringify({ message: "不应执行", requestId: "request_denied_scope" }),
+  });
+  assert.equal(deniedRun.status, 403);
+  const otherAccountList = await json(await fetch(
+    `${baseUrl}/v1/sessions?videoTaskId=${encodeURIComponent(firstTask.work.id)}`,
+    { headers: otherAccountHeaders },
+  ));
+  assert.deepEqual(otherAccountList.sessions, []);
+  const ownerTranscript = await json(await fetch(
+    `${baseUrl}${sessionPath}/transcript${ownerTaskQuery}`,
+    { headers: ownerHeaders },
+  ));
+  assert.deepEqual(ownerTranscript.messages, []);
 });

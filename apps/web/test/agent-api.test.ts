@@ -42,7 +42,7 @@ test("browser Agent API reconnects with the last event ID and suppresses replay 
       headers,
       ...(typeof init?.body === "string" ? { body: init.body } : {}),
     });
-    if (url.endsWith("/runs") && init?.method === "POST") {
+    if (new URL(url, "http://local").pathname.endsWith("/runs") && init?.method === "POST") {
       return Response.json({ run: { runId, requestId: "request_web_replay", sessionId: "session_web_replay" } }, { status: 202 });
     }
     eventConnections += 1;
@@ -58,6 +58,7 @@ test("browser Agent API reconnects with the last event ID and suppresses replay 
   const sequences: number[] = [];
   const result = await agentApi.streamMessage("session_web_replay", "续传测试", {
     requestId: "request_web_replay",
+    videoTaskId: "video_task_web_replay",
     maximumReconnects: 2,
     onEvent: (event: { sequence: number }) => sequences.push(event.sequence),
   });
@@ -66,6 +67,7 @@ test("browser Agent API reconnects with the last event ID and suppresses replay 
   assert.deepEqual(sequences, [1, 2]);
   assert.equal(eventConnections, 2);
   assert.equal(requests[2]?.headers["last-event-id"], first.eventId);
+  assert.ok(requests.every((request) => request.url.includes("videoTaskId=video_task_web_replay")));
   const startBody = JSON.parse(requests[0]?.body ?? "{}") as { requestId?: string };
   assert.equal(startBody.requestId, "request_web_replay");
 });
@@ -76,7 +78,7 @@ test("browser Agent API rejects a replay sequence gap", async (context) => {
   const runId = "run_web_gap";
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith("/runs") && init?.method === "POST") {
+    if (new URL(url, "http://local").pathname.endsWith("/runs") && init?.method === "POST") {
       return Response.json({ run: { runId } }, { status: 202 });
     }
     return new Response(sseAgent({
@@ -91,6 +93,7 @@ test("browser Agent API rejects a replay sequence gap", async (context) => {
   await assert.rejects(
     () => agentApi.streamMessage("session_web_gap", "缺口测试", {
       requestId: "request_web_gap",
+      videoTaskId: "video_task_web_gap",
       maximumReconnects: 0,
     }),
     /事件流出现缺口/u,
@@ -109,6 +112,7 @@ test("browser Agent API stops start retries when the request is cancelled", asyn
 
   await assert.rejects(
     () => agentApi.startRun("session_cancel_retry", "取消重试", "request_cancel_retry", {
+      videoTaskId: "video_task_cancel_retry",
       signal: controller.signal,
       onConnectionState: (state: string) => {
         if (state === "reconnecting") controller.abort();

@@ -16,7 +16,7 @@ export interface PersistedLocalSessionV1 {
   messages: AgentMessage[];
 }
 
-export interface PersistedLocalSession {
+export interface PersistedLocalSessionV2 {
   schemaVersion: 2;
   id: string;
   taskContext?: TaskContext;
@@ -27,7 +27,26 @@ export interface PersistedLocalSession {
   messages: AgentMessage[];
 }
 
-export type LoadedLocalSession = PersistedLocalSessionV1 | PersistedLocalSession;
+export interface AgentSessionScope {
+  actorId: string;
+  tenantId: string;
+  projectId: string;
+  videoTaskId: string;
+}
+
+export interface PersistedLocalSession {
+  schemaVersion: 3;
+  id: string;
+  taskContext?: TaskContext;
+  scope?: AgentSessionScope;
+  createdAt: string;
+  updatedAt: string;
+  provider: string;
+  modelId: string;
+  messages: AgentMessage[];
+}
+
+export type LoadedLocalSession = PersistedLocalSessionV1 | PersistedLocalSessionV2 | PersistedLocalSession;
 
 const sessionIdPattern = /^[A-Za-z0-9_-]{1,128}$/u;
 
@@ -48,13 +67,27 @@ function hasCommonSessionFields(record: Record<string, unknown>): boolean {
   );
 }
 
+function isSessionScope(value: unknown): value is AgentSessionScope {
+  if (!value || typeof value !== "object") return false;
+  const scope = value as Record<string, unknown>;
+  return [scope.actorId, scope.tenantId, scope.projectId, scope.videoTaskId]
+    .every((field) => typeof field === "string" && field.length > 0);
+}
+
 function isPersistedSession(value: unknown): value is LoadedLocalSession {
   if (!value || typeof value !== "object") return false;
   const record = value as Record<string, unknown>;
   if (!hasCommonSessionFields(record)) return false;
   if (record.schemaVersion === 1) return record.workId === undefined || typeof record.workId === "string";
-  return record.schemaVersion === 2 &&
-    (record.taskContext === undefined || Value.Check(TaskContextSchema, record.taskContext));
+  if (record.schemaVersion === 2) {
+    return record.taskContext === undefined || Value.Check(TaskContextSchema, record.taskContext);
+  }
+  if (record.schemaVersion !== 3) return false;
+  if (record.taskContext === undefined && record.scope === undefined) return true;
+  if (!Value.Check(TaskContextSchema, record.taskContext) || !isSessionScope(record.scope)) return false;
+  const taskContext = record.taskContext as TaskContext;
+  const scope = record.scope as AgentSessionScope;
+  return scope.projectId === taskContext.batchProject.id && scope.videoTaskId === taskContext.videoTask.id;
 }
 
 export class LocalSessionStore {

@@ -2,15 +2,51 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 
 import {
-  LocalAgentCredentialsError,
   LocalAgentRunError,
   LocalAgentRuntime,
+  type AgentSessionScope,
   type LocalPromptRunObservation,
 } from "@firefly/agent";
+import type { TaskContext } from "@firefly/schemas";
 
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 import { readJson, sendEvent, sendJson, startEventStream } from "./http-boundary.ts";
 import { resolveLocalTaskContext } from "./task-context.ts";
+
+export interface AuthenticatedAgentIdentity {
+  actorId: string;
+  tenantId: string;
+}
+
+export type AgentIdentityResolver = (
+  request: IncomingMessage,
+) => AuthenticatedAgentIdentity | Promise<AuthenticatedAgentIdentity>;
+
+async function sessionScope(
+  request: IncomingMessage,
+  taskContext: TaskContext,
+  resolveIdentity: AgentIdentityResolver,
+): Promise<AgentSessionScope> {
+  const identity = await resolveIdentity(request);
+  return {
+    actorId: identity.actorId,
+    tenantId: identity.tenantId,
+    projectId: taskContext.batchProject.id,
+    videoTaskId: taskContext.videoTask.id,
+  };
+}
+
+async function routeScope(
+  request: IncomingMessage,
+  url: URL,
+  business: LocalBusinessRuntime,
+  resolveIdentity: AgentIdentityResolver,
+): Promise<AgentSessionScope | undefined> {
+  const videoTaskId = url.searchParams.get("videoTaskId");
+  if (!videoTaskId) return undefined;
+  const taskContext = await resolveLocalTaskContext(business, videoTaskId);
+  return sessionScope(request, taskContext, resolveIdentity);
+}
 
 function sessionRoute(pathname: string): { sessionId: string; action?: string } | undefined {
   const match = pathname.match(/^\/v1\/sessions\/([^/]+)(?:\/([^/]+))?$/u);
@@ -74,12 +110,14 @@ export async function handleAgentRoute(
   url: URL,
   runtime: LocalAgentRuntime,
   business: LocalBusinessRuntime,
+  resolveIdentity: AgentIdentityResolver,
 ): Promise<boolean> {
   if (request.method === "GET" && url.pathname === "/v1/sessions") {
     const videoTaskId = url.searchParams.get("videoTaskId");
     if (!videoTaskId) throw new Error("Video task id is required when listing Agent sessions.");
-    await resolveLocalTaskContext(business, videoTaskId);
-    sendJson(response, 200, { sessions: await runtime.listSessions(videoTaskId) });
+    const taskContext = await resolveLocalTaskContext(business, videoTaskId);
+    const scope = await sessionScope(request, taskContext, resolveIdentity);
+    sendJson(response, 200, { sessions: await runtime.listSessions(scope) });
     return true;
   }
   if (request.method === "POST" && url.pathname === "/v1/sessions") {
@@ -96,9 +134,12 @@ export async function handleAgentRoute(
     const taskContext = videoTaskId === undefined
       ? undefined
       : await resolveLocalTaskContext(business, videoTaskId);
+    const options = taskContext === undefined
+      ? {}
+      : { taskContext, scope: await sessionScope(request, taskContext, resolveIdentity) };
     const session = await runtime.createSession(
       body.id as string | undefined,
-      taskContext === undefined ? {} : { taskContext },
+      options,
     );
     sendJson(response, 201, { session });
     return true;
@@ -106,6 +147,10 @@ export async function handleAgentRoute(
 
   const matchedRun = runRoute(url.pathname);
   if (matchedRun) {
+    await runtime.authorizeSession(
+      matchedRun.sessionId,
+      await routeScope(request, url, business, resolveIdentity),
+    );
     if (request.method === "POST" && matchedRun.runId === undefined) {
       const body = await readJson(request);
       if (typeof body.message !== "string") throw new Error("Message must be a string.");
@@ -134,6 +179,10 @@ export async function handleAgentRoute(
 
   const route = sessionRoute(url.pathname);
   if (!route) return false;
+  await runtime.authorizeSession(
+    route.sessionId,
+    await routeScope(request, url, business, resolveIdentity),
+  );
   if (request.method === "GET" && route.action === undefined) {
     const session = await runtime.getSession(route.sessionId);
     if (!session) throw new Error(`Session '${route.sessionId}' was not found.`);

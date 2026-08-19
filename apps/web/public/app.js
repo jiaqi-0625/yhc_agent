@@ -1106,13 +1106,13 @@ async function loadTaskSessions(videoTaskId) {
 }
 
 async function activateSession(sessionId) {
-  const body = await agentApi.getSession(sessionId);
   const selectedVideoTaskId = state.work?.work.id || null;
+  const body = await agentApi.getSession(sessionId, selectedVideoTaskId);
   if ((body.session.videoTaskId || null) !== selectedVideoTaskId) {
     throw new Error("该 Agent 会话不属于当前任务，已拒绝切换。");
   }
   updateSession(body.session);
-  const transcript = await agentApi.getTranscript(sessionId);
+  const transcript = await agentApi.getTranscript(sessionId, selectedVideoTaskId);
   restoreTranscriptTimeline(transcript.messages);
 }
 
@@ -1211,6 +1211,7 @@ async function sendMessage(text) {
       state.sessionId,
       message,
       {
+        videoTaskId: state.sessionVideoTaskId,
         onRunStarted: function (run) {
           state.activeRunId = run.runId;
         },

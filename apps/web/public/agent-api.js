@@ -19,6 +19,12 @@ function newRunRequestId() {
   return "request_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
 
+function scopedSessionUrl(path, videoTaskId) {
+  if (!videoTaskId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return path + separator + "videoTaskId=" + encodeURIComponent(videoTaskId);
+}
+
 function waitForRetry(delayMs, signal) {
   return new Promise(function (resolve, reject) {
     if (signal?.aborted) {
@@ -49,7 +55,10 @@ async function startAgentRun(sessionId, message, requestId, options = {}) {
   let attempt = 0;
   while (true) {
     try {
-      const response = await fetch("/v1/sessions/" + encodeURIComponent(sessionId) + "/runs", {
+      const response = await fetch(scopedSessionUrl(
+        "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs",
+        options.videoTaskId,
+      ), {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: message, requestId: requestId }),
@@ -136,7 +145,10 @@ async function streamRunEvents(sessionId, runId, options = {}) {
       const headers = { accept: "text/event-stream" };
       if (state.lastEventId) headers["last-event-id"] = state.lastEventId;
       const response = await fetch(
-        "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/events",
+        scopedSessionUrl(
+          "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/events",
+          options.videoTaskId,
+        ),
         { method: "GET", headers: headers, signal: options.signal },
       );
       if (!response.ok) throw await responseError(response);
@@ -177,18 +189,21 @@ export const agentApi = {
       body: JSON.stringify(videoTaskId ? { videoTaskId: videoTaskId } : {}),
     });
   },
-  getSession: function (sessionId) {
-    return api("/v1/sessions/" + encodeURIComponent(sessionId));
+  getSession: function (sessionId, videoTaskId) {
+    return api(scopedSessionUrl("/v1/sessions/" + encodeURIComponent(sessionId), videoTaskId));
   },
-  getTranscript: function (sessionId) {
-    return api("/v1/sessions/" + encodeURIComponent(sessionId) + "/transcript");
+  getTranscript: function (sessionId, videoTaskId) {
+    return api(scopedSessionUrl("/v1/sessions/" + encodeURIComponent(sessionId) + "/transcript", videoTaskId));
   },
-  resetSession: function (sessionId) {
-    return api("/v1/sessions/" + encodeURIComponent(sessionId) + "/reset", { method: "POST" });
+  resetSession: function (sessionId, videoTaskId) {
+    return api(scopedSessionUrl("/v1/sessions/" + encodeURIComponent(sessionId) + "/reset", videoTaskId), { method: "POST" });
   },
-  abortRun: function (sessionId, runId) {
+  abortRun: function (sessionId, runId, videoTaskId) {
     return api(
-      "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/abort",
+      scopedSessionUrl(
+        "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/abort",
+        videoTaskId,
+      ),
       { method: "POST" },
     );
   },
