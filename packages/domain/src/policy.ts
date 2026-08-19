@@ -2,6 +2,7 @@ import type { Role, WorkStatus } from "@firefly/schemas";
 
 export type ToolRisk = "read" | "proposal" | "draft" | "expensive" | "approval_request" | "export";
 
+/** @deprecated Workspace V1 Agent tool scope. Use WorkspaceSessionScope for V2 resource authorization. */
 export interface SessionScope {
   actorId: string;
   tenantId: string;

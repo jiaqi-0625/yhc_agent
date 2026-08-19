@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import type { ConfirmStageCommand, VideoTaskProductionRecord } from "@firefly/domain";
-import { RevisionConflictError } from "@firefly/domain";
+import { RevisionConflictError, WorkspaceAccessDeniedError } from "@firefly/domain";
+import type { BatchProject, WorkspaceAccessGrant } from "@firefly/schemas";
 
 import { StageConfirmationRuntime } from "../src/stage-confirmation-runtime.ts";
 import {
@@ -86,10 +87,46 @@ const command: ConfirmStageCommand = {
   dependencies: [{ kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" }],
 };
 
+const project: BatchProject = {
+  id: "project_launch",
+  tenantId: "tenant_firefly",
+  brandId: "brand_firefly",
+  vehicleId: "vehicle_e5",
+  name: "萤火 E5 9:16 上市",
+  batchName: "上市",
+  aspectRatio: "9:16",
+  visualStylePresetId: "style_default",
+  assetPoolId: "asset_pool_e5",
+  status: "active",
+  revision: 1,
+  createdAt: "2026-08-18T08:00:00.000Z",
+  createdBy: "account_owner",
+  updatedAt: "2026-08-18T08:00:00.000Z",
+  updatedBy: "account_owner",
+};
+
+const projectGrant: WorkspaceAccessGrant = {
+  id: "grant_owner_e5",
+  tenantId: "tenant_firefly",
+  accountId: "account_owner",
+  access: {
+    kind: "vehicle_project",
+    brandId: project.brandId,
+    vehicleId: project.vehicleId,
+  },
+  status: "active",
+  revision: 1,
+  createdAt: "2026-08-18T08:00:00.000Z",
+  createdBy: "account_admin",
+  updatedAt: "2026-08-18T08:00:00.000Z",
+  updatedBy: "account_admin",
+};
+
 const session = {
   tenantId: "tenant_firefly",
-  batchProjectId: "project_launch",
   actorAccountId: "account_owner",
+  role: "creator" as const,
+  accessGrants: [projectGrant],
 };
 
 test("confirmation persists the task, immutable version, and audit event in one record", async (context) => {
@@ -103,7 +140,7 @@ test("confirmation persists the task, immutable version, and audit event in one 
     (kind) => (kind === "confirmation" ? "confirmation_1" : "artifact_version_1"),
   );
 
-  const result = await runtime.confirmStage("task_persisted", command, session);
+  const result = await runtime.confirmStage("task_persisted", command, project, session);
   assert.equal(result.videoTask.revision, 6);
   assert.equal(result.stageArtifactVersions.length, 1);
   assert.equal(result.stageConfirmations.length, 1);
@@ -111,7 +148,7 @@ test("confirmation persists the task, immutable version, and audit event in one 
   const restored = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
   assert.deepEqual(restored, result);
   await assert.rejects(
-    runtime.confirmStage("task_persisted", command, session),
+    runtime.confirmStage("task_persisted", command, project, session),
     RevisionConflictError,
   );
   assert.deepEqual(await new LocalVideoTaskProductionStore(directory).load("task_persisted"), result);
@@ -134,7 +171,7 @@ test("a failed atomic save leaves the previously loaded aggregate unchanged", as
   const runtime = new StageConfirmationRuntime(failingStore);
 
   await assert.rejects(
-    runtime.confirmStage("task_persisted", command, session),
+    runtime.confirmStage("task_persisted", command, project, session),
     /simulated disk failure/u,
   );
   assert.equal(original.videoTask.revision, 5);
@@ -169,7 +206,7 @@ test("rollback audit and version selection are persisted atomically and reject d
     reason: "恢复首版策略",
   };
 
-  const result = await runtime.rollbackStage("task_persisted", request, session);
+  const result = await runtime.rollbackStage("task_persisted", request, project, session);
   assert.equal(result.videoTask.revision, 8);
   assert.equal(result.activeStageArtifactVersionIds.strategy, "strategy_v1");
   assert.equal(result.stageRollbacks[0]?.id, "rollback_persisted");
@@ -178,7 +215,7 @@ test("rollback audit and version selection are persisted atomically and reject d
     result,
   );
   await assert.rejects(
-    runtime.rollbackStage("task_persisted", request, session),
+    runtime.rollbackStage("task_persisted", request, project, session),
     RevisionConflictError,
   );
   assert.deepEqual(
@@ -208,6 +245,7 @@ test("a failed rollback save does not partially update the loaded aggregate", as
         targetArtifactVersionId: "strategy_v1",
         reason: "恢复首版策略",
       },
+      project,
       session,
     ),
     /simulated rollback disk failure/u,
@@ -216,6 +254,68 @@ test("a failed rollback save does not partially update the loaded aggregate", as
   assert.equal(original.activeStageArtifactVersionIds.strategy, "strategy_v2");
   assert.equal(original.stageRollbacks.length, 0);
   assert.equal(original.stageArtifactInvalidations.length, 0);
+});
+
+test("stage writes reject missing, cross-brand, and non-owner access before changing the aggregate", async () => {
+  const original = rollbackRecord();
+  const store = new LocalVideoTaskProductionStore(".data/test-video-task-access", false);
+  await store.save(original);
+  const runtime = new StageConfirmationRuntime(store);
+  const noProjectAccess = { ...session, accessGrants: [] };
+
+  await assert.rejects(
+    runtime.rollbackStage(
+      "task_persisted",
+      {
+        expectedTaskRevision: 7,
+        stage: "strategy",
+        targetArtifactVersionId: "strategy_v1",
+        reason: "尝试越权回退",
+      },
+      project,
+      noProjectAccess,
+    ),
+    WorkspaceAccessDeniedError,
+  );
+  await assert.rejects(
+    runtime.rollbackStage(
+      "task_persisted",
+      {
+        expectedTaskRevision: 7,
+        stage: "strategy",
+        targetArtifactVersionId: "strategy_v1",
+        reason: "尝试跨品牌回退",
+      },
+      { ...project, brandId: "brand_other" },
+      session,
+    ),
+    WorkspaceAccessDeniedError,
+  );
+  const memberGrant = {
+    ...projectGrant,
+    id: "grant_member_e5",
+    accountId: "account_member",
+  };
+  await assert.rejects(
+    runtime.rollbackStage(
+      "task_persisted",
+      {
+        expectedTaskRevision: 7,
+        stage: "strategy",
+        targetArtifactVersionId: "strategy_v1",
+        reason: "尝试非负责人回退",
+      },
+      project,
+      {
+        tenantId: "tenant_firefly",
+        actorAccountId: "account_member",
+        role: "creator",
+        accessGrants: [memberGrant],
+      },
+    ),
+    WorkspaceAccessDeniedError,
+  );
+  assert.deepEqual(await store.load("task_persisted"), original);
 });
 
 test("store upgrades WS-102 schema v1 records and selects each stage's latest version", async (context) => {

@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import {
+  assertCanOperateVideoTask,
   confirmVideoTaskStage,
   rollbackVideoTaskStage,
   type ConfirmStageCommand,
   type VideoTaskProductionRecord,
+  type WorkspaceSessionScope,
 } from "@firefly/domain";
-import type { RollbackStageRequest } from "@firefly/schemas";
+import type { BatchProject, RollbackStageRequest } from "@firefly/schemas";
 
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
 
@@ -16,12 +18,6 @@ const idPrefixes = {
   rollback: "sr",
   invalidation: "sai",
 } as const;
-
-export interface HumanSessionScope {
-  tenantId: string;
-  batchProjectId: string;
-  actorAccountId: string;
-}
 
 export class VideoTaskNotFoundError extends Error {
   readonly code = "AIC-VIDEO-TASK-NOT-FOUND";
@@ -44,12 +40,16 @@ export class StageConfirmationRuntime {
   async confirmStage(
     videoTaskId: string,
     command: Readonly<ConfirmStageCommand>,
-    session: Readonly<HumanSessionScope>,
+    project: Readonly<BatchProject>,
+    session: Readonly<WorkspaceSessionScope>,
   ): Promise<VideoTaskProductionRecord> {
     const current = await this.store.load(videoTaskId);
     if (!current) throw new VideoTaskNotFoundError(videoTaskId);
+    assertCanOperateVideoTask(session, project, current.videoTask);
     const next = confirmVideoTaskStage(current, command, {
-      ...session,
+      tenantId: session.tenantId,
+      batchProjectId: project.id,
+      actorAccountId: session.actorAccountId,
       occurredAt: this.now(),
       createId: this.createId,
     });
@@ -60,12 +60,16 @@ export class StageConfirmationRuntime {
   async rollbackStage(
     videoTaskId: string,
     request: Readonly<RollbackStageRequest>,
-    session: Readonly<HumanSessionScope>,
+    project: Readonly<BatchProject>,
+    session: Readonly<WorkspaceSessionScope>,
   ): Promise<VideoTaskProductionRecord> {
     const current = await this.store.load(videoTaskId);
     if (!current) throw new VideoTaskNotFoundError(videoTaskId);
+    assertCanOperateVideoTask(session, project, current.videoTask);
     const next = rollbackVideoTaskStage(current, request, {
-      ...session,
+      tenantId: session.tenantId,
+      batchProjectId: project.id,
+      actorAccountId: session.actorAccountId,
       occurredAt: this.now(),
       createId: this.createId,
     });

@@ -68,6 +68,48 @@ export const CatalogRecordStatusSchema = Type.Union([
 ]);
 export type CatalogRecordStatus = Static<typeof CatalogRecordStatusSchema>;
 
+export const WorkspaceAccessGrantStatusSchema = Type.Union([
+  Type.Literal("active"),
+  Type.Literal("revoked"),
+]);
+export type WorkspaceAccessGrantStatus = Static<typeof WorkspaceAccessGrantStatusSchema>;
+
+export const WorkspaceAccessScopeSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("brand"),
+      brandId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("vehicle_project"),
+      brandId: Identifier,
+      vehicleId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type WorkspaceAccessScope = Static<typeof WorkspaceAccessScopeSchema>;
+
+export const WorkspaceAccessGrantSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    accountId: Identifier,
+    access: WorkspaceAccessScopeSchema,
+    status: WorkspaceAccessGrantStatusSchema,
+    revision: Type.Integer({ minimum: 1 }),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type WorkspaceAccessGrant = Static<typeof WorkspaceAccessGrantSchema>;
+
 export const BrandSchema = Type.Object(
   {
     id: Identifier,

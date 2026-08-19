@@ -43,6 +43,7 @@ LocalAgentRuntime
 ## 信任边界
 
 - 身份、租户、项目、品牌范围和预算来自认证后的服务端会话，通过闭包注入工具；模型参数中不存在这些字段。
+- Workspace V2 使用服务端解析的 `WorkspaceSessionScope` 和持久化 `WorkspaceAccessGrant`：品牌级授权只允许管理范围内的管理员维护和查看品牌资源，车型项目级授权允许制作成员创建/查看对应车型项目。任务可见性继承项目权限，但确认、回退和其他状态写入还必须由当前 `ownerAccountId` 执行；品牌管理员若没有车型项目成员资格只能查看，不能接管任务。旧 `SessionScope` 仅保留给 V1 Agent 工具策略兼容链路。
 - Agent 按当前作品装配车型读取、事实校验、策略校验，以及“建议生成策略”“建议请求人工审批”白名单工具。建议工具只返回版本化操作卡片，不写入业务状态；负责人点击卡片后，由服务端/UI 使用 revision 守卫执行生成或审批请求。生产运行时不得注册 shell、文件系统、SQL、任意 HTTP、浏览器、直接状态变更或人工批准工具。
 - 每次工具调用先经过 `beforeToolCall` 的角色、状态、审批通道和预算策略；未知工具默认拒绝。
 - Workspace V2 的权威任务流程使用 `VideoTask.currentStage + stageStatus`：`strategy → asset_matching → script → storyboard → video_preview → delivery`。当前阶段只能从 `in_progress` 提交为 `awaiting_confirmation`，再由显式 `human_action` 确认后进入紧邻下一阶段；交付确认后任务才成为 `completed`。旧 `WorkStatus` 状态机仅供现有策略纵向链路和迁移读取，不得用于新的 V2 写路径。
