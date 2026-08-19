@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-shell-ws401-v2" />
-    <link rel="stylesheet" href="/agent-panel.css?build=workspace-shell-ws401-v2" />
+    <link rel="stylesheet" href="/app.css?build=project-library-ws402-v1" />
+    <link rel="stylesheet" href="/agent-panel.css?build=project-library-ws402-v1" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -44,7 +44,7 @@
           <div class="topbar-context" aria-label="当前位置">
             <span class="context-label">广告项目</span>
             <span class="context-separator" aria-hidden="true">/</span>
-            <strong id="topbar-work-name">未选择项目</strong>
+            <strong id="topbar-work-name">项目库</strong>
           </div>
           <div class="topbar-actions">
             <section class="topbar-brand-switcher" aria-label="品牌切换">
@@ -78,13 +78,83 @@
           </div>
         </header>
 
-        <nav class="mobile-panel-switcher" aria-label="移动端工作区切换">
+        <main id="project-library-view" class="project-library-page" aria-labelledby="project-library-title" aria-busy="true">
+          <div class="project-library-inner">
+            <header class="project-library-header">
+              <div>
+                <h1 id="project-library-title">项目库</h1>
+              </div>
+              <span id="project-library-count" class="library-count" role="status" aria-live="polite">正在加载</span>
+            </header>
+
+            <section id="my-tasks-section" class="my-tasks-section" aria-labelledby="my-tasks-title">
+              <header class="library-section-heading">
+                <h2 id="my-tasks-title">我的进行中任务</h2>
+                <span id="my-task-count" class="library-count">—</span>
+              </header>
+              <div id="my-task-list" class="my-task-list" aria-live="polite">
+                <span class="my-task-skeleton"></span><span class="my-task-skeleton"></span><span class="my-task-skeleton"></span>
+              </div>
+            </section>
+
+            <section class="project-catalog" aria-labelledby="all-projects-title">
+              <header class="project-catalog-header">
+                <h2 id="all-projects-title">项目</h2>
+                <div class="project-library-filters" role="group" aria-label="项目筛选">
+                  <label class="library-search" for="work-search">
+                    <span class="sr-only">搜索项目</span>
+                    <input id="work-search" type="search" placeholder="搜索项目或车型" autocomplete="off" disabled />
+                  </label>
+                  <label class="library-select" for="project-vehicle-filter">
+                    <span>车型</span>
+                    <select id="project-vehicle-filter" aria-label="按车型筛选" disabled><option value="all">全部车型</option></select>
+                  </label>
+                  <label class="library-select" for="project-status-filter">
+                    <span>状态</span>
+                    <select id="project-status-filter" aria-label="按项目状态筛选" disabled>
+                      <option value="all">全部状态</option>
+                      <option value="active">可用</option>
+                      <option value="archived">已归档</option>
+                    </select>
+                  </label>
+                  <label class="library-select" for="project-sort">
+                    <span>排序</span>
+                    <select id="project-sort" aria-label="项目排序" disabled>
+                      <option value="recent">最近活动</option>
+                      <option value="name">项目名称</option>
+                    </select>
+                  </label>
+                </div>
+              </header>
+
+              <div id="project-library-error" class="library-error" role="alert" hidden>
+                <span id="project-library-error-message">项目加载失败</span>
+                <button id="project-library-retry" class="text-button" type="button">重试</button>
+              </div>
+
+              <div class="project-table-wrap">
+                <table class="project-table" aria-labelledby="all-projects-title">
+                  <thead>
+                    <tr><th scope="col">项目</th><th scope="col">车型</th><th scope="col">任务</th><th scope="col">画幅</th><th scope="col">状态</th><th scope="col">最近活动</th></tr>
+                  </thead>
+                  <tbody id="project-library-list" aria-live="polite">
+                    <tr class="library-skeleton-row"><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td></tr>
+                    <tr class="library-skeleton-row"><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td></tr>
+                    <tr class="library-skeleton-row"><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td><td><span></span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <nav class="mobile-panel-switcher" aria-label="移动端工作区切换" hidden>
           <button type="button" data-mobile-target="projects"><svg class="icon"><use href="#i-folder" /></svg>项目</button>
           <button class="active" type="button" data-mobile-target="canvas"><svg class="icon"><use href="#i-grid" /></svg>工作区</button>
           <button type="button" data-mobile-target="agent"><svg class="icon"><use href="#i-message" /></svg>助手</button>
         </nav>
 
-        <div id="workspace-shell" class="workspace-shell" data-mobile-pane="canvas">
+        <div id="workspace-shell" class="workspace-shell" data-mobile-pane="canvas" hidden>
         <aside class="project-sidebar" aria-label="项目列表">
           <div class="pane-header">
             <div><h1>广告项目</h1></div>
@@ -92,11 +162,6 @@
               <svg class="icon"><use href="#i-plus" /></svg>
             </button>
           </div>
-
-          <label class="search-field" for="work-search">
-            <span class="sr-only">搜索项目</span>
-            <input id="work-search" type="search" placeholder="搜索车型或项目…" autocomplete="off" />
-          </label>
 
           <div id="work-list" class="work-list" aria-live="polite">
             <div class="skeleton-list" aria-label="正在加载项目">
@@ -313,6 +378,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/app.js?build=workspace-shell-ws401-v2"></script>
+    <script type="module" src="/app.js?build=project-library-ws402-v1"></script>
   </body>
 </html>

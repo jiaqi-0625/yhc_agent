@@ -49,7 +49,7 @@ export function workSummaryMatchesNavigationBrand(summary, brand) {
 }
 
 export function bindWorkspaceShell(options) {
-  const { elements, state, renderWorkList, selectNavigationBrand, retryNavigationBrands } = options;
+  const { elements, selectNavigationBrand, retryNavigationBrands } = options;
 
   document.querySelectorAll("[data-workspace-view]").forEach(function (button) {
     button.setAttribute("aria-current", button.classList.contains("active") ? "page" : "false");
@@ -71,11 +71,6 @@ export function bindWorkspaceShell(options) {
         candidate.classList.toggle("active", candidate === button);
       });
     });
-  });
-
-  elements.workSearch.addEventListener("input", function () {
-    state.workFilter = elements.workSearch.value;
-    renderWorkList();
   });
 
   elements.brandNavigation.addEventListener("change", function () {

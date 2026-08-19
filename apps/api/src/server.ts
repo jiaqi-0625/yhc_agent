@@ -17,6 +17,11 @@ import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
+import {
+  handleProjectLibraryRoute,
+  ProjectLibraryPath,
+} from "./project-library-routes.ts";
+import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
 import { handleProjectCreationRoute } from "./project-creation-routes.ts";
 import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { handleVideoTaskRoute } from "./video-task-routes.ts";
@@ -96,6 +101,7 @@ async function handleRequest(
   videoTaskStages: VideoTaskStageRuntime | undefined,
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
+  projectLibrary: ProjectLibraryRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -119,6 +125,7 @@ async function handleRequest(
         "human_strategy_approval",
         "work_bound_agent",
         "task_context_v1",
+        ...(projectLibrary === undefined ? [] : ["project_library_v1"]),
       ],
       domainTools: [
         "get_vehicle_snapshot",
@@ -145,6 +152,26 @@ async function handleRequest(
       url,
       workspaceSessions,
       developmentAccountsEnabled,
+    )
+  ) return;
+  if (
+    projectLibrary === undefined &&
+    url.pathname === ProjectLibraryPath
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-PROJECT-LIBRARY-RUNTIME-NOT-CONFIGURED",
+      "Project library APIs must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    projectLibrary !== undefined &&
+    await handleProjectLibraryRoute(
+      request,
+      response,
+      url,
+      projectLibrary,
+      workspaceSessions,
     )
   ) return;
   if (
@@ -278,6 +305,7 @@ export function createApiServer(
   videoTasks: VideoTaskRuntime | undefined = undefined,
   agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
   videoTaskStages: VideoTaskStageRuntime | undefined = undefined,
+  projectLibrary: ProjectLibraryRuntime | undefined = undefined,
 ): Server {
   if (
     workspaceSessions === undefined &&
@@ -286,7 +314,8 @@ export function createApiServer(
       projectCreation !== undefined ||
       videoTasks !== undefined ||
       agentActionCommands !== undefined ||
-      videoTaskStages !== undefined
+      videoTaskStages !== undefined ||
+      projectLibrary !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -344,6 +373,11 @@ export function createApiServer(
     videoTaskStore!,
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
+  const activeProjectLibrary = projectLibrary ?? (adminStore === undefined ? undefined : new ProjectLibraryRuntime(
+    adminStore,
+    batchProjectStore!,
+    videoTaskStore!,
+  ));
   const activeAgentActionCommands = agentActionCommands ?? (
     adminStore === undefined
       ? undefined
@@ -383,6 +417,7 @@ export function createApiServer(
       activeVideoTaskStages,
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
+      activeProjectLibrary,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -403,6 +438,7 @@ export async function startApiServer(
   videoTasks: VideoTaskRuntime | undefined = undefined,
   agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
   videoTaskStages: VideoTaskStageRuntime | undefined = undefined,
+  projectLibrary: ProjectLibraryRuntime | undefined = undefined,
 ): Promise<Server> {
   const server = createApiServer(
     runtime,
@@ -416,6 +452,7 @@ export async function startApiServer(
     videoTasks,
     agentActionCommands,
     videoTaskStages,
+    projectLibrary,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);

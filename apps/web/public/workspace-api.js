@@ -11,6 +11,7 @@ function jsonOptions(method, body) {
 export const workspaceApi = {
   listAdminBrands: function () { return api("/v1/admin/brands"); },
   getProjectCreationOptions: function () { return api("/v1/workspace/project-creation/options"); },
+  getProjectLibrary: function () { return api("/v1/workspace/project-library"); },
   listWorks: function () { return api("/v1/works"); },
   getWork: function (workId) { return api("/v1/works/" + encodeURIComponent(workId)); },
   createWork: function (input) { return api("/v1/works", jsonOptions("POST", input)); },

@@ -67,7 +67,12 @@ test("workspace brand API uses the role-specific server endpoints", async (conte
 
   await workspaceApi.listAdminBrands();
   await workspaceApi.getProjectCreationOptions();
-  assert.deepEqual(requests, ["/v1/admin/brands", "/v1/workspace/project-creation/options"]);
+  await workspaceApi.getProjectLibrary();
+  assert.deepEqual(requests, [
+    "/v1/admin/brands",
+    "/v1/workspace/project-creation/options",
+    "/v1/workspace/project-library",
+  ]);
 });
 
 test("workspace shell markup is Chinese-first, embed-ready, and declares its desktop boundary", async () => {
@@ -78,6 +83,12 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.doesNotMatch(page, /platform-sidebar/u);
   assert.match(page, /<select id="brand-navigation" aria-label="切换品牌"/u);
   assert.match(page, /id="agent-account-select" aria-label="切换当前账号"/u);
+  assert.match(page, /id="project-library-view"[^>]*aria-labelledby="project-library-title"/u);
+  assert.match(page, /id="my-tasks-title">我的进行中任务</u);
+  assert.match(page, /id="project-vehicle-filter"[^>]*aria-label="按车型筛选"/u);
+  assert.match(page, /id="project-status-filter"[^>]*aria-label="按项目状态筛选"/u);
+  assert.match(page, /id="project-sort"[^>]*aria-label="项目排序"/u);
+  assert.match(page, /id="workspace-shell"[^>]*hidden/u);
   assert.match(page, /请使用桌面端打开/u);
   assert.doesNotMatch(page, />[^<]*(?:Projects|Current work|Strategy workspace|Agent)[^<]*</u);
   assert.doesNotMatch(styles, /--platform-sidebar-width:/u);

@@ -9,6 +9,11 @@ import {
 } from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
+import {
+  bindProjectLibrary,
+  normalizeProjectLibrary,
+  renderProjectLibrary,
+} from "./project-library.js";
 import { workspaceApi } from "./workspace-api.js";
 import {
   bindWorkspaceShell,
@@ -37,9 +42,17 @@ const state = {
   navigationBrandId: null,
   navigationBrandsLoading: true,
   navigationBrandsError: null,
+  projectLibrary: [],
+  projectLibraryLoading: true,
+  projectLibraryError: null,
+  projectLibraryInitializationError: false,
+  projectLibraryVehicleId: "all",
+  projectLibraryStatus: "all",
+  projectLibrarySort: "recent",
   workspaceHydrating: true,
 };
 let navigationBrandsRequest = 0;
+let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
 const elements = {
   messages: document.querySelector("#messages"),
@@ -111,6 +124,34 @@ const elements = {
   agentContextStage: document.querySelector("#agent-context-stage"),
   agentContextRevision: document.querySelector("#agent-context-revision"),
   agentContextQuota: document.querySelector("#agent-context-quota"),
+  libraryView: document.querySelector("#project-library-view"),
+  myTasksSection: document.querySelector("#my-tasks-section"),
+  myTaskCount: document.querySelector("#my-task-count"),
+  myTaskList: document.querySelector("#my-task-list"),
+  projectCount: document.querySelector("#project-library-count"),
+  projectList: document.querySelector("#project-library-list"),
+  vehicleFilter: document.querySelector("#project-vehicle-filter"),
+  statusFilter: document.querySelector("#project-status-filter"),
+  sort: document.querySelector("#project-sort"),
+  libraryError: document.querySelector("#project-library-error"),
+  libraryErrorMessage: document.querySelector("#project-library-error-message"),
+  libraryRetry: document.querySelector("#project-library-retry"),
+};
+
+const projectLibraryElements = {
+  libraryView: elements.libraryView,
+  myTasksSection: elements.myTasksSection,
+  myTaskCount: elements.myTaskCount,
+  myTaskList: elements.myTaskList,
+  projectCount: elements.projectCount,
+  projectList: elements.projectList,
+  search: elements.workSearch,
+  vehicleFilter: elements.vehicleFilter,
+  statusFilter: elements.statusFilter,
+  sort: elements.sort,
+  libraryError: elements.libraryError,
+  libraryErrorMessage: elements.libraryErrorMessage,
+  libraryRetry: elements.libraryRetry,
 };
 
 const roleLabels = {
@@ -211,6 +252,77 @@ function isCurrentWorkspaceScope(scope) {
 
 function selectedNavigationBrand() {
   return state.navigationBrands.find(function (brand) { return brand.id === state.navigationBrandId; }) || null;
+}
+
+function projectLibraryOptions() {
+  return {
+    elements: projectLibraryElements,
+    state,
+    retry: function () {
+      if (state.projectLibraryInitializationError) void initialize();
+      else void loadProjectLibrary();
+    },
+  };
+}
+
+function renderProjectLibraryPage() {
+  renderProjectLibrary(projectLibraryOptions());
+}
+
+function clearProjectLibrary(resetFilters = false) {
+  projectLibraryRequest += 1;
+  state.projectLibrary = [];
+  state.projectLibraryLoading = true;
+  state.projectLibraryError = null;
+  state.projectLibraryInitializationError = false;
+  state.projectLibraryVehicleId = "all";
+  if (resetFilters) {
+    state.workFilter = "";
+    state.projectLibraryStatus = "all";
+    state.projectLibrarySort = "recent";
+  }
+  renderProjectLibraryPage();
+}
+
+function projectLibraryFailureMessage(error) {
+  if (error && error.status === 401) return "账号会话已失效，请重新切换账号。";
+  if (error && error.status === 403) return "当前账号无权查看项目库。";
+  return "项目加载失败，请稍后重试。";
+}
+
+async function loadProjectLibrary(scope = captureWorkspaceScope()) {
+  const request = ++projectLibraryRequest;
+  state.projectLibrary = [];
+  state.projectLibraryLoading = true;
+  state.projectLibraryError = null;
+  state.projectLibraryInitializationError = false;
+  renderProjectLibraryPage();
+  if (
+    !state.navigationBrandId ||
+    !state.navigationBrands.some(function (brand) { return brand.id === state.navigationBrandId; })
+  ) {
+    state.projectLibraryLoading = false;
+    renderProjectLibraryPage();
+    return true;
+  }
+  try {
+    const response = await workspaceApi.getProjectLibrary();
+    if (request !== projectLibraryRequest || !isCurrentWorkspaceScope(scope)) return false;
+    if (!response || !Array.isArray(response.projects)) {
+      throw new Error("项目库响应格式无效。");
+    }
+    state.projectLibrary = normalizeProjectLibrary(response);
+    return true;
+  } catch (error) {
+    if (request !== projectLibraryRequest || !isCurrentWorkspaceScope(scope)) return false;
+    state.projectLibraryError = projectLibraryFailureMessage(error);
+    state.projectLibraryInitializationError = Boolean(error && error.status === 401);
+    return false;
+  } finally {
+    if (request !== projectLibraryRequest || !isCurrentWorkspaceScope(scope)) return;
+    state.projectLibraryLoading = false;
+    renderProjectLibraryPage();
+  }
 }
 
 function resetWorkspaceContext() {
@@ -356,7 +468,7 @@ function renderWork(view) {
     elements.workStatus.textContent = "尚未创建";
     elements.workStatus.className = "badge neutral";
     elements.workRevision.textContent = "—";
-    elements.topbarWorkName.textContent = "未选择项目";
+    elements.topbarWorkName.textContent = "项目库";
     elements.studioWorkTitle.textContent = "开始第一个汽车广告项目";
     elements.studioWorkDescription.textContent = "请选择或新建项目。";
     elements.studioStatus.textContent = "未开始";
@@ -1246,43 +1358,32 @@ async function loadNavigationBrands() {
     if (request !== navigationBrandsRequest || state.account?.accountId !== account.accountId) return;
     state.navigationBrandsLoading = false;
     renderNavigationBrands();
+    renderProjectLibraryPage();
   }
 }
 
-async function selectNavigationBrand(brandId) {
+function selectNavigationBrand(brandId) {
   if (state.navigationBrandsLoading || !state.account || state.busy || state.workflowBusy || state.workspaceHydrating) return;
   if (!state.navigationBrands.some(function (brand) { return brand.id === brandId; })) return;
   if (state.navigationBrandId === brandId) return;
   clearError();
   clearWorkflowError();
-  state.workspaceHydrating = true;
-  workspaceScopeGeneration += 1;
   state.navigationBrandId = brandId;
+  state.projectLibraryVehicleId = "all";
   localStorage.setItem(navigationBrandStorageKey(state.account.accountId), brandId);
-  const scope = captureWorkspaceScope();
-  setBusy(true);
-  setWorkflowBusy(true);
   resetWorkspaceContext();
   renderNavigationBrands();
-  try {
-    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
-    await restoreSession(scope);
-  } catch (error) {
-    if (isCurrentWorkspaceScope(scope)) showError(error);
-  } finally {
-    if (isCurrentWorkspaceScope(scope)) {
-      state.workspaceHydrating = false;
-      setWorkflowBusy(false);
-      setBusy(false);
-      renderAccount();
-      renderNavigationBrands();
-    }
-  }
+  renderProjectLibraryPage();
 }
 
-function retryNavigationBrands() {
+async function retryNavigationBrands() {
   if (state.busy || state.workflowBusy) return;
-  void loadNavigationBrands();
+  const accountId = state.account?.accountId;
+  await loadNavigationBrands();
+  if (
+    accountId && state.account?.accountId === accountId && state.navigationBrandId &&
+    state.navigationBrands.some(function (brand) { return brand.id === state.navigationBrandId; })
+  ) await loadProjectLibrary();
 }
 
 function renderAgentBudget(presentation) {
@@ -1490,8 +1591,16 @@ async function switchWorkspaceAccount(accountId) {
   const previousNavigation = {
     brands: state.navigationBrands,
     brandId: state.navigationBrandId,
-    loading: state.navigationBrandsLoading,
     error: state.navigationBrandsError,
+  };
+  const previousProjectLibrary = {
+    projects: state.projectLibrary,
+    error: state.projectLibraryError,
+    initializationError: state.projectLibraryInitializationError,
+    vehicleId: state.projectLibraryVehicleId,
+    status: state.projectLibraryStatus,
+    sort: state.projectLibrarySort,
+    search: state.workFilter,
   };
   let sessionSwitched = false;
   clearError();
@@ -1502,6 +1611,7 @@ async function switchWorkspaceAccount(accountId) {
   setWorkflowBusy(true);
   renderAccount();
   clearNavigationBrands();
+  clearProjectLibrary(true);
   let scope = captureWorkspaceScope();
   try {
     applyWorkspaceSession((await authApi.createOrSwitchSession(accountId)).session);
@@ -1509,17 +1619,27 @@ async function switchWorkspaceAccount(accountId) {
     sessionSwitched = true;
     resetWorkspaceContext();
     await Promise.all([refreshAgentBudget(), loadNavigationBrands()]);
-    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
-    await restoreSession(scope);
+    await loadProjectLibrary(scope);
   } catch (error) {
     if (isCurrentWorkspaceScope(scope)) showError(error);
     renderAccount();
     if (!sessionSwitched) {
       state.navigationBrands = previousNavigation.brands;
       state.navigationBrandId = previousNavigation.brandId;
-      state.navigationBrandsLoading = previousNavigation.loading;
+      state.navigationBrandsLoading = false;
       state.navigationBrandsError = previousNavigation.error;
+      state.projectLibrary = previousProjectLibrary.projects;
+      state.projectLibraryLoading = false;
+      state.projectLibraryError = previousProjectLibrary.error;
+      state.projectLibraryInitializationError = previousProjectLibrary.initializationError;
+      state.projectLibraryVehicleId = previousProjectLibrary.vehicleId;
+      state.projectLibraryStatus = previousProjectLibrary.status;
+      state.projectLibrarySort = previousProjectLibrary.sort;
+      state.workFilter = previousProjectLibrary.search;
       renderNavigationBrands();
+      renderProjectLibraryPage();
+      await loadNavigationBrands();
+      await loadProjectLibrary(captureWorkspaceScope());
     }
   } finally {
     if (isCurrentWorkspaceScope(scope)) {
@@ -1534,10 +1654,15 @@ async function switchWorkspaceAccount(accountId) {
 
 async function initialize() {
   state.workspaceHydrating = true;
+  clearProjectLibrary(false);
   renderAccount();
   try {
     const meta = await api("/v1/meta");
-    if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("task_context_v1")) {
+    if (
+      !Array.isArray(meta.capabilities) ||
+      !meta.capabilities.includes("task_context_v1") ||
+      !meta.capabilities.includes("project_library_v1")
+    ) {
       throw new Error("服务版本较旧，请重启服务后刷新页面。");
     }
     elements.provider.textContent = meta.model.provider;
@@ -1546,11 +1671,9 @@ async function initialize() {
     await initializeWorkspaceAccount();
     await loadNavigationBrands();
     const scope = captureWorkspaceScope();
-    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
-    await restoreSession(scope);
+    await loadProjectLibrary(scope);
     if (state.modelReady) {
       setStatus("online", "服务正常");
-      elements.prompt.focus();
     } else {
       setStatus("warning", "等待模型密钥");
       elements.prompt.placeholder = "请先配置模型服务";
@@ -1559,6 +1682,10 @@ async function initialize() {
     }
   } catch (error) {
     setStatus("error", "连接失败");
+    state.projectLibraryLoading = false;
+    state.projectLibraryError = projectLibraryFailureMessage(error);
+    state.projectLibraryInitializationError = true;
+    renderProjectLibraryPage();
     showError(error);
   } finally {
     state.workspaceHydrating = false;
@@ -1645,10 +1772,10 @@ bindAgentPanel({
   setBusy,
 });
 
+bindProjectLibrary(projectLibraryOptions());
+
 bindWorkspaceShell({
   elements,
-  state,
-  renderWorkList,
   selectNavigationBrand,
   retryNavigationBrands,
 });
