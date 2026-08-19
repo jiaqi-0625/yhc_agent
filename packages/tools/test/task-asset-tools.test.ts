@@ -169,6 +169,25 @@ test("task asset tool reads only the server-bound immutable snapshot", async () 
     requiresAttention: true,
     warningCount: 1,
   });
+  assert.deepEqual(result.details.assetRecommendations, {
+    schemaVersion: 1,
+    usesLockedSnapshotOnly: true,
+    vehicleAssetsReplaceable: false,
+    lockedVehicleAssets: [{
+      reference: companyReference,
+      displayName: "锁定车型素材",
+      replacementAllowed: false,
+      summary: "车型素材已由当前任务快照锁定，只能用于推荐组合，不能被其他车型素材替换。",
+    }],
+    recommendations: [{
+      category: "scene",
+      reference: localReference,
+      displayName: "项目临时素材 temporary_scene_locked",
+      tags: [],
+      sourceStatus: "requires_manual_review",
+      recommendationReason: "可作为任务候选，但画面适配性、原始来源说明和使用权声明必须由人工复核。",
+    }],
+  });
   assert.deepEqual(result.details.sourceAssessments, [
     {
       assetId: "asset_vehicle_locked",
@@ -192,6 +211,69 @@ test("task asset tool reads only the server-bound immutable snapshot", async () 
   assert.doesNotMatch(JSON.stringify(result.details.sourceAssessments), /rightsConfirmed|rightsDeclaration|sourceDescription/u);
   assert.equal("tenantId" in result.details.snapshot, false);
   assert.equal("createdBy" in result.details.snapshot, false);
+});
+
+test("task asset recommendations use only locked person and scene versions", async () => {
+  const companyPersonReference = {
+    assetId: "asset_person_locked",
+    version: 4,
+    source: "company_catalog",
+    sourceProvider: "catalog_test",
+    category: "person",
+  } as const satisfies CompanyAssetReference;
+  const companySceneReference = {
+    assetId: "asset_scene_locked",
+    version: 7,
+    source: "company_catalog",
+    sourceProvider: "catalog_test",
+    category: "scene",
+  } as const satisfies CompanyAssetReference;
+  const visualStyleReference = {
+    assetId: "asset_style_locked",
+    version: 3,
+    source: "company_catalog",
+    sourceProvider: "catalog_test",
+    category: "visual_style",
+  } as const satisfies CompanyAssetReference;
+  const record = productionRecord();
+  record.taskAssetSnapshots[0]!.assets = [
+    companyReference,
+    companyPersonReference,
+    companySceneReference,
+    visualStyleReference,
+    localReference,
+  ];
+  const reader = createScopedTaskAssetSnapshotReader({
+    taskContext,
+    store: { async load() { return record; } },
+    provider: provider((references) => references.map((reference) => ({
+      ...catalogItem(reference),
+      displayName: `素材 ${reference.assetId}`,
+      tags: reference.category === "person" ? ["family", "warm"] : ["city"],
+    }))),
+    providerScope,
+  });
+
+  const result = await reader.read();
+  assert.deepEqual(
+    result.assetRecommendations.recommendations.map(({ category, reference, sourceStatus }) => ({
+      category,
+      reference,
+      sourceStatus,
+    })),
+    [
+      { category: "person", reference: companyPersonReference, sourceStatus: "verified" },
+      { category: "scene", reference: companySceneReference, sourceStatus: "verified" },
+      { category: "scene", reference: localReference, sourceStatus: "requires_manual_review" },
+    ],
+  );
+  assert.equal(
+    result.assetRecommendations.recommendations.some(({ reference }) => reference.assetId === visualStyleReference.assetId),
+    false,
+  );
+  assert.deepEqual(result.assetRecommendations.lockedVehicleAssets.map(({ reference }) => reference), [companyReference]);
+  assert.match(result.assetRecommendations.recommendations[0]?.recommendationReason ?? "", /family、warm/u);
+  assert.equal("tenantId" in result.assetRecommendations, false);
 });
 
 test("task asset source assessments report no warning when every locked asset is an exact company reference", async () => {

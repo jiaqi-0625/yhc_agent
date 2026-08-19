@@ -30,6 +30,29 @@ export interface ReadonlyTaskAssetSnapshotView {
     readonly warningCount: number;
   };
   readonly sourceAssessments: readonly TaskAssetSourceAssessment[];
+  readonly assetRecommendations: {
+    readonly schemaVersion: 1;
+    readonly usesLockedSnapshotOnly: true;
+    readonly vehicleAssetsReplaceable: false;
+    readonly lockedVehicleAssets: readonly LockedTaskVehicleAsset[];
+    readonly recommendations: readonly TaskAssetRecommendation[];
+  };
+}
+
+export interface LockedTaskVehicleAsset {
+  readonly reference: CompanyAssetReference;
+  readonly displayName: string;
+  readonly replacementAllowed: false;
+  readonly summary: string;
+}
+
+export interface TaskAssetRecommendation {
+  readonly category: "person" | "scene";
+  readonly reference: CompanyAssetReference | TemporaryAssetReference;
+  readonly displayName: string;
+  readonly tags: readonly string[];
+  readonly sourceStatus: "verified" | "requires_manual_review";
+  readonly recommendationReason: string;
 }
 
 export interface TaskAssetSourceAssessment {
@@ -177,6 +200,36 @@ export function createScopedTaskAssetSnapshotReader(
         })),
       ];
       const warningCount = sourceAssessments.filter((assessment) => assessment.riskLevel === "warning").length;
+      const lockedVehicleAssets: LockedTaskVehicleAsset[] = companyAssets
+        .filter((item) => item.reference.category === "vehicle")
+        .map((item) => ({
+          reference: structuredClone(item.reference),
+          displayName: item.displayName,
+          replacementAllowed: false,
+          summary: "车型素材已由当前任务快照锁定，只能用于推荐组合，不能被其他车型素材替换。",
+        }));
+      const companyRecommendations: TaskAssetRecommendation[] = companyAssets
+        .filter((item) => item.reference.category === "person" || item.reference.category === "scene")
+        .map((item) => ({
+          category: item.reference.category as "person" | "scene",
+          reference: structuredClone(item.reference),
+          displayName: item.displayName,
+          tags: [...item.tags],
+          sourceStatus: "verified",
+          recommendationReason: item.tags.length > 0
+            ? `可结合任务受众与主题，按锁定标签“${item.tags.join("、")}”评估画面适配性。`
+            : "可结合任务受众与主题评估画面适配性。",
+        }));
+      const localRecommendations: TaskAssetRecommendation[] = localAssets
+        .filter((reference) => reference.category === "person" || reference.category === "scene")
+        .map((reference) => ({
+          category: reference.category as "person" | "scene",
+          reference: structuredClone(reference),
+          displayName: `项目临时素材 ${reference.assetId}`,
+          tags: [],
+          sourceStatus: "requires_manual_review",
+          recommendationReason: "可作为任务候选，但画面适配性、原始来源说明和使用权声明必须由人工复核。",
+        }));
 
       return {
         schemaVersion: 1,
@@ -196,6 +249,13 @@ export function createScopedTaskAssetSnapshotReader(
           warningCount,
         },
         sourceAssessments,
+        assetRecommendations: {
+          schemaVersion: 1,
+          usesLockedSnapshotOnly: true,
+          vehicleAssetsReplaceable: false,
+          lockedVehicleAssets,
+          recommendations: [...companyRecommendations, ...localRecommendations],
+        },
       };
     },
   };
@@ -205,7 +265,7 @@ export function createTaskAssetTools(reader: TaskAssetSnapshotReader): readonly 
   const getTaskAssetSnapshot: AgentTool<typeof GetTaskAssetSnapshotRequestSchema> = {
     name: "get_task_asset_snapshot",
     label: "读取任务素材快照",
-    description: "读取服务端绑定任务在策略开始时锁定的素材快照、精确版本公司素材与逐项来源风险；本地上传必须提示人工复核来源和使用权，不查询项目最新素材池。",
+    description: "读取服务端绑定任务在策略开始时锁定的素材快照、精确版本公司素材、逐项来源风险和人物/场景推荐；车型素材不可替换，本地上传必须提示人工复核来源和使用权，不查询项目最新素材池。",
     parameters: GetTaskAssetSnapshotRequestSchema,
     async execute(_toolCallId, _params, signal) {
       const details = await reader.read(signal);
