@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { LocalAgentCredentialsError } from "@firefly/agent";
 import {
+  AccountBudgetError,
   AccountHighCostTaskRunningError,
   AccountRunLockDeniedError,
   AccountRunLockTokenMismatchError,
@@ -72,6 +73,7 @@ export function errorStatus(error: Error): number {
   if (error instanceof LocalAgentCredentialsError) return 503;
   if (
     error instanceof RevisionConflictError ||
+    error instanceof AccountBudgetError ||
     error instanceof AccountHighCostTaskRunningError ||
     error instanceof AccountRunLockDeniedError ||
     error instanceof AccountRunLockTokenMismatchError
@@ -89,6 +91,7 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
     code:
       normalized instanceof BusinessRuntimeError ||
       normalized instanceof RevisionConflictError ||
+      normalized instanceof AccountBudgetError ||
       normalized instanceof LocalAgentCredentialsError ||
       normalized instanceof AccountHighCostTaskRunningError ||
       normalized instanceof AccountRunLockDeniedError ||

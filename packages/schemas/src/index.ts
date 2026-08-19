@@ -279,6 +279,115 @@ export const AccountHighCostTaskRunLockSchema = Type.Object(
 );
 export type AccountHighCostTaskRunLock = Static<typeof AccountHighCostTaskRunLockSchema>;
 
+export const CurrencyCodeSchema = Type.String({ pattern: "^[A-Z]{3}$" });
+export type CurrencyCode = Static<typeof CurrencyCodeSchema>;
+
+export const HighCostOperationCostEstimateSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    accountId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    taskRevision: Type.Integer({ minimum: 1 }),
+    operation: HighCostTaskOperationSchema,
+    amountMinor: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    currency: CurrencyCodeSchema,
+    pricingVersion: Identifier,
+    estimatedAt: IsoDateTime,
+    expiresAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type HighCostOperationCostEstimate = Static<
+  typeof HighCostOperationCostEstimateSchema
+>;
+
+export const AccountBudgetReservationEntrySchema = Type.Object(
+  {
+    id: Identifier,
+    kind: Type.Literal("reservation"),
+    estimateId: Identifier,
+    tenantId: Identifier,
+    accountId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    taskRevision: Type.Integer({ minimum: 1 }),
+    operation: HighCostTaskOperationSchema,
+    amountMinor: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    currency: CurrencyCodeSchema,
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type AccountBudgetReservationEntry = Static<
+  typeof AccountBudgetReservationEntrySchema
+>;
+
+export const AccountBudgetChargeEntrySchema = Type.Object(
+  {
+    id: Identifier,
+    kind: Type.Literal("charge"),
+    tenantId: Identifier,
+    accountId: Identifier,
+    reservationId: Identifier,
+    amountMinor: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    currency: CurrencyCodeSchema,
+    operationResultId: Identifier,
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type AccountBudgetChargeEntry = Static<typeof AccountBudgetChargeEntrySchema>;
+
+export const AccountBudgetReleaseReasonSchema = Type.Union([
+  Type.Literal("operation_failed"),
+  Type.Literal("operation_cancelled"),
+  Type.Literal("reservation_expired"),
+]);
+export type AccountBudgetReleaseReason = Static<typeof AccountBudgetReleaseReasonSchema>;
+
+export const AccountBudgetReleaseEntrySchema = Type.Object(
+  {
+    id: Identifier,
+    kind: Type.Literal("release"),
+    tenantId: Identifier,
+    accountId: Identifier,
+    reservationId: Identifier,
+    reason: AccountBudgetReleaseReasonSchema,
+    failureCode: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type AccountBudgetReleaseEntry = Static<typeof AccountBudgetReleaseEntrySchema>;
+
+export const AccountBudgetLedgerEntrySchema = Type.Union([
+  AccountBudgetReservationEntrySchema,
+  AccountBudgetChargeEntrySchema,
+  AccountBudgetReleaseEntrySchema,
+]);
+export type AccountBudgetLedgerEntry = Static<typeof AccountBudgetLedgerEntrySchema>;
+
+export const AccountBudgetSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    id: Identifier,
+    tenantId: Identifier,
+    accountId: Identifier,
+    currency: CurrencyCodeSchema,
+    limitAmountMinor: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    revision: Type.Integer({ minimum: 1 }),
+    entries: Type.Array(AccountBudgetLedgerEntrySchema),
+    createdAt: IsoDateTime,
+    createdBy: Identifier,
+    updatedAt: IsoDateTime,
+    updatedBy: Identifier,
+  },
+  { additionalProperties: false },
+);
+export type AccountBudget = Static<typeof AccountBudgetSchema>;
+
 export const AssetCategorySchema = Type.Union([
   Type.Literal("vehicle"),
   Type.Literal("person"),
