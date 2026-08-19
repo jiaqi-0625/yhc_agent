@@ -33,7 +33,8 @@ export function createVehicleTools(
   const validateVehicleClaims: AgentTool<typeof ClaimValidationRequestSchema> = {
     name: "validate_vehicle_claims",
     label: "校验车型宣传表述",
-    description: "对照当前项目的车型快照校验广告表述，识别已支持、禁用和未验证内容。",
+    description:
+      "对照当前项目的车型快照校验广告表述；支持项返回事实来源与风险备注，禁用项返回命中的具体表达，未验证内容不得作为官方事实使用。",
     parameters: ClaimValidationRequestSchema,
     async execute(_toolCallId, params: ClaimValidationRequest) {
       return textResult(service.validateClaims(params, scope));

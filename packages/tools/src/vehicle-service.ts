@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   Claim,
+  ClaimEvidence,
   ClaimValidationRequest,
   VehicleSnapshot,
   VehicleSnapshotRequest,
@@ -30,14 +31,36 @@ export interface VehicleCatalogEntry {
   referenceAssetIds: readonly string[];
 }
 
+export interface ClaimFactReference {
+  claimId: string;
+  claimName: string;
+  approvedStatement: string;
+  riskNotes: string[];
+  evidence?: ClaimEvidence;
+}
+
+export type ClaimValidationItem =
+  | {
+      statement: string;
+      status: "supported";
+      reason: string;
+      factReferences: ClaimFactReference[];
+    }
+  | {
+      statement: string;
+      status: "prohibited";
+      reason: string;
+      prohibitedExpressions: string[];
+    }
+  | {
+      statement: string;
+      status: "unverified";
+      reason: string;
+    };
+
 export interface ClaimValidationResult {
   snapshotId: string;
-  results: Array<{
-    statement: string;
-    status: "supported" | "prohibited" | "unverified";
-    matchedClaimIds: string[];
-    reason: string;
-  }>;
+  results: ClaimValidationItem[];
 }
 
 export class VehicleAccessError extends Error {
@@ -147,13 +170,15 @@ export class InMemoryVehicleService {
       snapshotId: snapshot.id,
       results: request.statements.map((statement) => {
         const normalized = normalize(statement);
-        const prohibited = snapshot.prohibitedClaims.find((term) => normalized.includes(normalize(term)));
-        if (prohibited) {
+        const prohibitedExpressions = snapshot.prohibitedClaims.filter((term) =>
+          normalized.includes(normalize(term)),
+        );
+        if (prohibitedExpressions.length > 0) {
           return {
             statement,
             status: "prohibited" as const,
-            matchedClaimIds: [],
-            reason: `Statement contains prohibited claim '${prohibited}'.`,
+            reason: `检测到禁用表达：${prohibitedExpressions.map((term) => `“${term}”`).join("、")}。`,
+            prohibitedExpressions,
           };
         }
 
@@ -165,16 +190,21 @@ export class InMemoryVehicleService {
           return {
             statement,
             status: "supported" as const,
-            matchedClaimIds: matches.map((claim) => claim.id),
-            reason: "Statement is supported by the scoped vehicle snapshot.",
+            reason: `该表述由车型事实${matches.map((claim) => `“${claim.name}”`).join("、")}支持。`,
+            factReferences: matches.map((claim) => ({
+              claimId: claim.id,
+              claimName: claim.name,
+              approvedStatement: claim.statement,
+              riskNotes: [...claim.riskNotes],
+              ...(claim.evidence === undefined ? {} : { evidence: structuredClone(claim.evidence) }),
+            })),
           };
         }
 
         return {
           statement,
           status: "unverified" as const,
-          matchedClaimIds: [],
-          reason: "No approved claim in the scoped vehicle snapshot supports this statement.",
+          reason: "当前车型快照中没有可支持该表述的官方事实。",
         };
       }),
     };
