@@ -123,6 +123,86 @@ test("mock runtime persists and restores a multi-turn Pi transcript", async (con
   assert.equal(reset.messageCount, 0);
 });
 
+test("prompt runs are idempotent by client request ID and retain replayable events", async () => {
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: false,
+    dataDirectory: ".data/test-sessions",
+  };
+  const baseRuntime = createLocalModelRuntime(config);
+  let modelCalls = 0;
+  const runtime = new LocalAgentRuntime(config, {
+    ...baseRuntime,
+    streamFn: (...args) => {
+      modelCalls += 1;
+      return baseRuntime.streamFn(...args);
+    },
+  });
+  await runtime.createSession("session_idempotent_run");
+
+  const first = await runtime.startPromptRun("session_idempotent_run", "只执行一次", "request_same_message");
+  const duplicate = await runtime.startPromptRun("session_idempotent_run", "只执行一次", "request_same_message");
+  assert.equal(duplicate.runId, first.runId);
+  const initialObservation = runtime.observePromptRun("session_idempotent_run", first.runId);
+  const initialEvents: Array<{ eventId: string; sequence: number }> = [];
+  const unsubscribe = initialObservation.activate((event) => initialEvents.push(event));
+  const outcome = await initialObservation.outcome;
+  unsubscribe();
+  assert.equal(outcome.status, "completed");
+  assert.equal(modelCalls, 1);
+  assert.ok(initialEvents.length > 4);
+
+  const cursor = initialEvents[1]?.eventId;
+  assert.ok(cursor);
+  const replayObservation = runtime.observePromptRun("session_idempotent_run", first.runId, cursor);
+  const replayed: Array<{ eventId: string; sequence: number }> = [];
+  replayObservation.activate((event) => replayed.push(event))();
+  await replayObservation.outcome;
+  assert.deepEqual(
+    replayed.map((event) => event.sequence),
+    initialEvents.slice(2).map((event) => event.sequence),
+  );
+  assert.equal(new Set(replayed.map((event) => event.eventId)).size, replayed.length);
+
+  await assert.rejects(
+    () => runtime.startPromptRun("session_idempotent_run", "另一条消息", "request_same_message"),
+    /already bound to a different message/u,
+  );
+  assert.throws(
+    () => runtime.observePromptRun("session_idempotent_run", first.runId, "event_unknown_cursor"),
+    /cursor is not available/u,
+  );
+  assert.equal(modelCalls, 1);
+});
+
+test("detaching a run observer does not abort the run", async () => {
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: false,
+    dataDirectory: ".data/test-sessions",
+  };
+  const runtime = new LocalAgentRuntime(config);
+  await runtime.createSession("session_detach_run");
+  const run = await runtime.startPromptRun("session_detach_run", "断开订阅", "request_detach");
+  const observation = runtime.observePromptRun("session_detach_run", run.runId);
+  const unsubscribe = observation.activate(() => {});
+  unsubscribe();
+  const outcome = await observation.outcome;
+  assert.equal(outcome.status, "completed");
+  if (outcome.status === "completed") assert.notEqual(outcome.result.stopReason, "aborted");
+
+  const replay = runtime.observePromptRun("session_detach_run", run.runId);
+  const events: Array<{ sequence: number }> = [];
+  replay.activate((event) => events.push(event))();
+  assert.deepEqual(events.map((event) => event.sequence), events.map((_event, index) => index + 1));
+});
+
 test("task-bound sessions restore the same task context through the injected Agent factory", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-bound-agent-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
@@ -287,9 +367,17 @@ test("runtime cancellation aborts the active Pi model request", async () => {
   const modelRuntime: LocalModelRuntime = { model, streamFn };
   const runtime = new LocalAgentRuntime(config, modelRuntime);
   await runtime.createSession("session_cancel_test");
-  const pending = runtime.prompt("session_cancel_test", "等待取消");
+  const run = await runtime.startPromptRun("session_cancel_test", "等待取消", "request_cancel_test");
+  const observation = runtime.observePromptRun("session_cancel_test", run.runId);
+  const events: Array<{ type: string; stopReason?: string }> = [];
+  const unsubscribe = observation.activate((event) => events.push(event));
   await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(await runtime.abortSession("session_cancel_test"), true);
-  const result = await pending;
-  assert.equal(result.stopReason, "aborted");
+  assert.equal(await runtime.abortPromptRun("session_cancel_test", run.runId), true);
+  assert.equal(await runtime.abortPromptRun("session_cancel_test", run.runId), true);
+  const outcome = await observation.outcome;
+  unsubscribe();
+  assert.equal(outcome.status, "completed");
+  if (outcome.status === "completed") assert.equal(outcome.result.stopReason, "aborted");
+  assert.equal(events.filter((event) => event.type === "run_completed").length, 1);
+  assert.equal(events.find((event) => event.type === "run_completed")?.stopReason, "aborted");
 });

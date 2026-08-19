@@ -14,6 +14,15 @@ const testConfig: LocalAgentConfig = {
   dataDirectory: ".data/test-sessions",
 };
 
+function agentEvents(stream: string): Array<{ eventId: string; sequence: number; runId: string; type: string }> {
+  return stream.split("\n\n").flatMap((frame) => {
+    const eventName = frame.split("\n").find((line) => line.startsWith("event:"))?.slice(6).trim();
+    const data = frame.split("\n").find((line) => line.startsWith("data:"))?.slice(5).trim();
+    if (eventName !== "agent" || !data) return [];
+    return [JSON.parse(data) as { eventId: string; sequence: number; runId: string; type: string }];
+  });
+}
+
 test("health and metadata endpoints expose the current bounded vertical slice", async (context) => {
   const server = await startApiServer(0, "127.0.0.1", new LocalAgentRuntime(testConfig));
   context.after(() => server.close());
@@ -117,10 +126,11 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /firefly\.workId/u);
   assert.match(script, /\.\/agent-api\.js/u);
   assert.match(script, /\.\/workspace-api\.js/u);
-  assert.match(agentApiScript, /messages-stream/u);
+  assert.match(agentApiScript, /\/runs/u);
+  assert.match(agentApiScript, /last-event-id/u);
   assert.match(agentApiScript, /seenEventIds/u);
   assert.match(agentPanelScript, /bindAgentPanel/u);
-  assert.match(agentPanelScript, /abortSession/u);
+  assert.match(agentPanelScript, /abortRun/u);
   assert.match(workspaceApiScript, /generateStrategy/u);
   assert.match(await workspaceShellResponse.text(), /bindWorkspaceShell/u);
   assert.match(script, /读取车型事实快照/u);
@@ -216,6 +226,94 @@ test("streaming message endpoint emits lifecycle events and a completion payload
   assert.match(stream, /event: complete/u);
   assert.match(stream, /"assistantText":"本地 Mock Agent 已收到：流式测试/u);
   assert.doesNotMatch(stream, /"events":/u);
+});
+
+test("run endpoints start idempotently and replay strictly after Last-Event-ID", async (context) => {
+  const server = await startApiServer(0, "127.0.0.1", new LocalAgentRuntime(testConfig));
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "session_run_replay_test" }),
+  });
+  const start = () => fetch(`${baseUrl}/v1/sessions/session_run_replay_test/runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "只运行一次并支持续传", requestId: "request_api_replay" }),
+  });
+  const firstStart = await start();
+  assert.equal(firstStart.status, 202);
+  const firstBody = (await firstStart.json()) as { run: { runId: string } };
+  const duplicateStart = await start();
+  assert.equal(duplicateStart.status, 202);
+  const duplicateBody = (await duplicateStart.json()) as { run: { runId: string } };
+  assert.equal(duplicateBody.run.runId, firstBody.run.runId);
+
+  const initialResponse = await fetch(
+    `${baseUrl}/v1/sessions/session_run_replay_test/runs/${encodeURIComponent(firstBody.run.runId)}/events`,
+  );
+  assert.equal(initialResponse.status, 200);
+  const initialStream = await initialResponse.text();
+  const initialEvents = agentEvents(initialStream);
+  assert.ok(initialEvents.length > 4);
+  assert.deepEqual(initialEvents.map((event) => event.sequence), initialEvents.map((_event, index) => index + 1));
+  const cursor = initialEvents[1]?.eventId;
+  assert.ok(cursor);
+
+  const replayResponse = await fetch(
+    `${baseUrl}/v1/sessions/session_run_replay_test/runs/${encodeURIComponent(firstBody.run.runId)}/events`,
+    { headers: { "last-event-id": cursor } },
+  );
+  assert.equal(replayResponse.status, 200);
+  const replayStream = await replayResponse.text();
+  const replayed = agentEvents(replayStream);
+  assert.deepEqual(
+    replayed.map((event) => event.eventId),
+    initialEvents.slice(2).map((event) => event.eventId),
+  );
+  assert.match(replayStream, /event: complete/u);
+
+  const transcript = await fetch(`${baseUrl}/v1/sessions/session_run_replay_test/transcript`);
+  const transcriptBody = (await transcript.json()) as { messages: unknown[] };
+  assert.equal(transcriptBody.messages.length, 2);
+});
+
+test("run endpoints reject conflicting request IDs and invalid replay cursors without rerunning", async (context) => {
+  const server = await startApiServer(0, "127.0.0.1", new LocalAgentRuntime(testConfig));
+  context.after(() => server.close());
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  await fetch(`${baseUrl}/v1/sessions`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id: "session_run_invalid_test" }),
+  });
+  const startResponse = await fetch(`${baseUrl}/v1/sessions/session_run_invalid_test/runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "原始消息", requestId: "request_api_conflict" }),
+  });
+  const startBody = (await startResponse.json()) as { run: { runId: string } };
+  const conflict = await fetch(`${baseUrl}/v1/sessions/session_run_invalid_test/runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ message: "不同消息", requestId: "request_api_conflict" }),
+  });
+  assert.equal(conflict.status, 409);
+  assert.equal(((await conflict.json()) as { code: string }).code, "AIC-AGENT-RUN_REQUEST_CONFLICT");
+
+  const invalidCursor = await fetch(
+    `${baseUrl}/v1/sessions/session_run_invalid_test/runs/${encodeURIComponent(startBody.run.runId)}/events`,
+    { headers: { "last-event-id": "event_not_in_this_run" } },
+  );
+  assert.equal(invalidCursor.status, 409);
+  assert.equal(((await invalidCursor.json()) as { code: string }).code, "AIC-AGENT-REPLAY_CURSOR_INVALID");
 });
 
 test("DeepSeek stays selected while a missing server key blocks model calls with 503", async (context) => {

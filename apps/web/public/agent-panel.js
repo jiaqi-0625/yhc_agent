@@ -49,14 +49,13 @@ export function bindAgentPanel(options) {
   });
 
   elements.cancelGeneration.addEventListener("click", async function () {
-    if (!state.busy || !state.sessionId || !state.activeAbortController) return;
+    if (!state.busy || !state.sessionId || !state.activeRunId) return;
     elements.cancelGeneration.disabled = true;
     try {
-      await agentApi.abortSession(state.sessionId);
+      await agentApi.abortRun(state.sessionId, state.activeRunId);
     } catch (error) {
       showError(error);
-    } finally {
-      state.activeAbortController.abort();
+      elements.cancelGeneration.disabled = false;
     }
   });
 

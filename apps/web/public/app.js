@@ -9,6 +9,7 @@ const state = {
   sessionVideoTaskId: null,
   taskContext: null,
   activeAbortController: null,
+  activeRunId: null,
   lastPrompt: "",
   busy: false,
   work: null,
@@ -1141,6 +1142,13 @@ async function sendMessage(text) {
       message,
       {
         signal: controller.signal,
+        onRunStarted: function (run) {
+          state.activeRunId = run.runId;
+        },
+        onConnectionState: function (connectionState) {
+          if (connectionState === "reconnecting") setStatus("warning", "正在恢复连接");
+          if (connectionState === "connected") setStatus("online", "服务正常");
+        },
         onEvent: function (event) {
           if (event.type === "thinking_status" && event.status === "completed") finishThinkingEvent(turn);
           if (event.type === "text_delta") {
@@ -1158,7 +1166,11 @@ async function sendMessage(text) {
         },
       },
     );
-    if (!completeStreamingAnswer(liveAnswer, result.assistantText)) finishAgentTurn(turn, result.assistantText);
+    if (result.stopReason === "aborted") {
+      failAgentTurn(turn, "已取消当前生成。");
+    } else if (!completeStreamingAnswer(liveAnswer, result.assistantText)) {
+      finishAgentTurn(turn, result.assistantText);
+    }
     updateSession(result.session);
   } catch (error) {
     const cancelled = error instanceof DOMException && error.name === "AbortError";
@@ -1170,6 +1182,7 @@ async function sendMessage(text) {
     }
   } finally {
     state.activeAbortController = null;
+    state.activeRunId = null;
     elements.cancelGeneration.disabled = false;
     setBusy(false);
     elements.prompt.focus();

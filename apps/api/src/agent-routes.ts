@@ -1,6 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 
-import { LocalAgentCredentialsError, LocalAgentRuntime } from "@firefly/agent";
+import {
+  LocalAgentCredentialsError,
+  LocalAgentRunError,
+  LocalAgentRuntime,
+  type LocalPromptRunObservation,
+} from "@firefly/agent";
 
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 import { readJson, sendEvent, sendJson, startEventStream } from "./http-boundary.ts";
@@ -13,6 +19,56 @@ function sessionRoute(pathname: string): { sessionId: string; action?: string } 
     sessionId: decodeURIComponent(match[1]),
     ...(match[2] === undefined ? {} : { action: match[2] }),
   };
+}
+
+function runRoute(pathname: string): { sessionId: string; runId?: string; action?: string } | undefined {
+  const match = pathname.match(/^\/v1\/sessions\/([^/]+)\/runs(?:\/([^/]+)(?:\/([^/]+))?)?$/u);
+  if (!match?.[1]) return undefined;
+  return {
+    sessionId: decodeURIComponent(match[1]),
+    ...(match[2] === undefined ? {} : { runId: decodeURIComponent(match[2]) }),
+    ...(match[3] === undefined ? {} : { action: match[3] }),
+  };
+}
+
+function replayCursor(request: IncomingMessage, url: URL): string | undefined {
+  const queryCursor = url.searchParams.get("afterEventId") ?? undefined;
+  const headerValue = request.headers["last-event-id"];
+  const headerCursor = Array.isArray(headerValue) ? headerValue[0] : headerValue;
+  if (queryCursor !== undefined && headerCursor !== undefined && queryCursor !== headerCursor) {
+    throw new LocalAgentRunError(
+      "AIC-AGENT-REPLAY_CURSOR_CONFLICT",
+      "Last-Event-ID and afterEventId must identify the same Agent event.",
+      400,
+    );
+  }
+  return headerCursor ?? queryCursor;
+}
+
+async function streamRunObservation(response: ServerResponse, observation: LocalPromptRunObservation): Promise<void> {
+  let unsubscribe = observation.release;
+  let completed = false;
+  const close = () => unsubscribe();
+  try {
+    startEventStream(response);
+    unsubscribe = observation.activate((event) => {
+      sendEvent(response, "agent", event, event.eventId);
+    });
+    response.once("close", close);
+    const outcome = await observation.outcome;
+    completed = true;
+    if (outcome.status === "completed") {
+      const { events: _events, ...completion } = outcome.result;
+      sendEvent(response, "complete", completion);
+    } else {
+      sendEvent(response, "error", outcome.error);
+    }
+  } finally {
+    unsubscribe();
+    response.off("close", close);
+    if (!completed) observation.release();
+    if (!response.writableEnded) response.end();
+  }
 }
 
 export async function handleAgentRoute(
@@ -44,6 +100,34 @@ export async function handleAgentRoute(
     return true;
   }
 
+  const matchedRun = runRoute(url.pathname);
+  if (matchedRun) {
+    if (request.method === "POST" && matchedRun.runId === undefined) {
+      const body = await readJson(request);
+      if (typeof body.message !== "string") throw new Error("Message must be a string.");
+      if (typeof body.requestId !== "string") throw new Error("Run request ID must be a string.");
+      const run = await runtime.startPromptRun(matchedRun.sessionId, body.message, body.requestId);
+      sendJson(response, 202, { run });
+      return true;
+    }
+    if (request.method === "GET" && matchedRun.runId !== undefined && matchedRun.action === "events") {
+      const observation = runtime.observePromptRun(
+        matchedRun.sessionId,
+        matchedRun.runId,
+        replayCursor(request, url),
+      );
+      await streamRunObservation(response, observation);
+      return true;
+    }
+    if (request.method === "POST" && matchedRun.runId !== undefined && matchedRun.action === "abort") {
+      sendJson(response, 202, {
+        aborted: await runtime.abortPromptRun(matchedRun.sessionId, matchedRun.runId),
+      });
+      return true;
+    }
+    return false;
+  }
+
   const route = sessionRoute(url.pathname);
   if (!route) return false;
   if (request.method === "GET" && route.action === undefined) {
@@ -68,34 +152,13 @@ export async function handleAgentRoute(
   if (request.method === "POST" && route.action === "messages-stream") {
     const body = await readJson(request);
     if (typeof body.message !== "string") throw new Error("Message must be a string.");
-    startEventStream(response);
-    let completed = false;
-    const abort = () => {
-      if (!completed) void runtime.abortSession(route.sessionId);
-    };
-    request.once("aborted", abort);
-    response.once("close", abort);
-    try {
-      const result = await runtime.prompt(route.sessionId, body.message, (event) => {
-        sendEvent(response, "agent", event, event.eventId);
-      });
-      completed = true;
-      const { events: _events, ...completion } = result;
-      sendEvent(response, "complete", completion);
-    } catch (error) {
-      completed = true;
-      const normalized = error instanceof Error ? error : new Error("Unknown Agent stream error.");
-      sendEvent(response, "error", {
-        code: normalized instanceof LocalAgentCredentialsError ? normalized.code : "AIC-AGENT-STREAM_FAILED",
-        message: normalized.message,
-        retryable: false,
-        charged: false,
-      });
-    } finally {
-      request.off("aborted", abort);
-      response.off("close", abort);
-      if (!response.writableEnded) response.end();
+    if (body.requestId !== undefined && typeof body.requestId !== "string") {
+      throw new Error("Run request ID must be a string.");
     }
+    const requestId = (body.requestId as string | undefined) ?? `legacy_${randomUUID()}`;
+    const run = await runtime.startPromptRun(route.sessionId, body.message, requestId);
+    const observation = runtime.observePromptRun(route.sessionId, run.runId, replayCursor(request, url));
+    await streamRunObservation(response, observation);
     return true;
   }
   if (request.method === "POST" && route.action === "reset") {

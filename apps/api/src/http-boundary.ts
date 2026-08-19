@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { LocalAgentCredentialsError } from "@firefly/agent";
+import { LocalAgentCredentialsError, LocalAgentRunError } from "@firefly/agent";
 import {
   AccountBudgetError,
   AccountHighCostTaskRunningError,
@@ -70,6 +70,7 @@ export function validateBody<T>(schema: TSchema, body: Record<string, unknown>):
 
 export function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
+  if (error instanceof LocalAgentRunError) return error.statusCode;
   if (error instanceof LocalAgentCredentialsError) return 503;
   if (
     error instanceof RevisionConflictError ||
@@ -92,10 +93,11 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof BusinessRuntimeError ||
       normalized instanceof RevisionConflictError ||
       normalized instanceof AccountBudgetError ||
-      normalized instanceof LocalAgentCredentialsError ||
       normalized instanceof AccountHighCostTaskRunningError ||
       normalized instanceof AccountRunLockDeniedError ||
-      normalized instanceof AccountRunLockTokenMismatchError
+      normalized instanceof AccountRunLockTokenMismatchError ||
+      normalized instanceof LocalAgentRunError ||
+      normalized instanceof LocalAgentCredentialsError
         ? normalized.code
         : "AIC-API-INVALID_REQUEST",
     message: normalized.message,
