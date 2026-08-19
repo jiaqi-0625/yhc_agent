@@ -67,7 +67,7 @@
 | `projectId` | 绑定旧 Project 语义，不能区分任务快照 | 改为明确的 `batchProjectId`/`videoTaskId` 关联，旧值只用于迁移追溯 |
 | `referenceAssetIds` | 只有 ID，没有资产版本与来源 | 迁入 WS-003 定义的版本化资产快照引用 |
 | `region`、`campaignDate` | 参与快照 ID 计算但未写入快照 | 新 Schema 显式保存，旧数据标记为未知 |
-| 快照存储 | 相同快照重复内嵌在多个 Work 文件 | 迁移时去重为独立快照记录，任务通过 ID 引用 |
+| 快照存储 | 相同快照重复内嵌在多个 Work 文件 | WS-305/WS-306 已冻结任务聚合作为锁定快照的持久化权威：迁移器按 ID/事实去重校验后，在每个任务聚合中保存同一份不可变 canonical 快照并通过 ID 锁定；不新增第二套独立快照写权威 |
 
 当前 `InMemoryVehicleService` 的快照 Map 只存在于进程内；服务重启后，通过 Work 内嵌数据恢复业务页面，但无法通过 `vehicleService.getSnapshot` 恢复该快照。
 
@@ -178,8 +178,8 @@ WS-101 已冻结 V2 写路径枚举：`VideoTask.currentStage` 依次为 `strate
 2. 按 `tenantId + brandId + vehicleId + aspectRatio` 对 v1 Work 分组并创建 `BatchProject`。
 3. 当前 v1 不含画幅，迁移器必须使用显式配置的默认画幅，不能在代码深处静默猜测。
 4. 每个 Work 生成一个 `VideoTask`，保留原 `work_<uuid>` 作为任务 ID。
-5. 车型快照按快照 ID 去重后独立保存；任务锁定该快照。
-6. 策略版本和审批记录转换 ID 外键后原样导入，并记录 `migratedFromSchemaVersion: 1`。
+5. 车型快照按快照 ID 和事实内容去重校验；V6 任务聚合保存 canonical 不可变副本并由任务 ID 指针锁定。旧服务重启造成的同 ID `createdAt` 漂移只可确定性取最早值，并须在迁移 summary 中计数；任何其他内容差异都拒绝迁移。
+6. 策略版本和审批记录转换 ID 外键后原样导入，并记录 `migratedFromSchemaVersion: 1` 及原 `Strategy.status`。
 7. 根据上表转换阶段进度；任何推断产生的记录带 `legacy_inferred` 来源。
 8. 更新有 `workId` 的 Agent Session 绑定；无绑定 Session 不变。
 9. 首次加载 Web 时迁移 `firefly.workId`，服务端仍重新校验任务可见性和负责人权限。

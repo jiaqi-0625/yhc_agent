@@ -6,6 +6,7 @@ import test from "node:test";
 
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import type { TaskContext } from "@firefly/schemas";
 
 import {
   createBaseAgent,
@@ -28,6 +29,44 @@ const MOCK_SESSION_SCOPE: AgentSessionScope = {
   projectId: MOCK_TASK_CONTEXT.batchProject.id,
   videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
 };
+
+function createSlowMockModelRuntime(config: LocalAgentConfig): LocalModelRuntime {
+  const runtime = createLocalModelRuntime(config);
+  const streamFn: StreamFn = (_model, _context, options) => {
+    const stream = createAssistantMessageEventStream();
+    const partial: AssistantMessage = {
+      role: "assistant",
+      content: [],
+      api: "mock-local",
+      provider: "mock",
+      model: config.modelId,
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "pending",
+      timestamp: Date.now(),
+    };
+    stream.push({ type: "start", partial });
+    options?.signal?.addEventListener(
+      "abort",
+      () => {
+        stream.push({
+          type: "error",
+          reason: "aborted",
+          error: { ...partial, stopReason: "aborted", errorMessage: "Request aborted." },
+        });
+      },
+      { once: true },
+    );
+    return stream;
+  };
+  return { ...runtime, streamFn };
+}
 
 test("timeline payloads are redacted and bounded before leaving the runtime", () => {
   assert.deepEqual(
@@ -341,6 +380,134 @@ test("task-bound sessions restore the same task context through the injected Age
   assert.equal(restored?.messageCount, 2);
   assert.deepEqual(assembledTaskIds, [MOCK_TASK_CONTEXT.videoTask.id, MOCK_TASK_CONTEXT.videoTask.id]);
   assert.deepEqual(assembledScopes, [MOCK_SESSION_SCOPE, MOCK_SESSION_SCOPE]);
+});
+
+test("idle task authorization rebuilds the Agent from fresh server context and persists it", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-task-context-refresh-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  const assembled: Array<{ revision: number; messageCount: number }> = [];
+  const runtime = new LocalAgentRuntime(
+    config,
+    createLocalModelRuntime(config),
+    new LocalSessionStore(directory, true),
+    (factoryContext) => {
+      assembled.push({
+        revision: factoryContext.taskContext.videoTask.revision,
+        messageCount: factoryContext.messages.length,
+      });
+      return createBaseAgent({
+        model: factoryContext.model,
+        streamFn: factoryContext.streamFn,
+        systemPrompt: `Task revision ${factoryContext.taskContext.videoTask.revision}`,
+        messages: factoryContext.messages,
+        sessionId: factoryContext.sessionId,
+      });
+    },
+  );
+  await runtime.createSession("session_task_context_refresh", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
+  await runtime.prompt("session_task_context_refresh", "保留历史消息");
+
+  const current: TaskContext = structuredClone(MOCK_TASK_CONTEXT);
+  current.videoTask.revision += 1;
+  current.videoTask.currentStage = "script";
+  await runtime.authorizeSession(
+    "session_task_context_refresh",
+    MOCK_SESSION_SCOPE,
+    current,
+  );
+
+  const refreshed = await runtime.getSession("session_task_context_refresh");
+  assert.equal(refreshed?.taskContext?.videoTask.revision, current.videoTask.revision);
+  assert.equal(refreshed?.taskContext?.videoTask.currentStage, "script");
+  assert.equal(refreshed?.messageCount, 2);
+  assert.deepEqual(assembled, [
+    { revision: MOCK_TASK_CONTEXT.videoTask.revision, messageCount: 0 },
+    { revision: current.videoTask.revision, messageCount: 2 },
+  ]);
+
+  const persisted = JSON.parse(
+    await readFile(join(directory, "session_task_context_refresh.json"), "utf8"),
+  ) as { taskContext: typeof current; messages: unknown[] };
+  assert.equal(persisted.taskContext.videoTask.revision, current.videoTask.revision);
+  assert.equal(persisted.taskContext.videoTask.currentStage, "script");
+  assert.equal(persisted.messages.length, 2);
+
+  const stale = structuredClone(MOCK_TASK_CONTEXT);
+  await assert.rejects(
+    runtime.authorizeSession(
+      "session_task_context_refresh",
+      MOCK_SESSION_SCOPE,
+      stale,
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "AIC-AGENT-TASK_CONTEXT_STALE",
+  );
+});
+
+test("task authorization rejects context drift while an Agent run is active", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-running-context-refresh-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "slow-mock",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: false,
+    dataDirectory: directory,
+  };
+  const runtime = new LocalAgentRuntime(
+    config,
+    createSlowMockModelRuntime(config),
+    new LocalSessionStore(directory, false),
+    (factoryContext) => createBaseAgent({
+      model: factoryContext.model,
+      streamFn: factoryContext.streamFn,
+      systemPrompt: `Task revision ${factoryContext.taskContext.videoTask.revision}`,
+      messages: factoryContext.messages,
+      sessionId: factoryContext.sessionId,
+    }),
+  );
+  await runtime.createSession("session_running_context_refresh", {
+    taskContext: MOCK_TASK_CONTEXT,
+    scope: MOCK_SESSION_SCOPE,
+  });
+  const run = await runtime.startPromptRun(
+    "session_running_context_refresh",
+    "保持运行",
+    "request_running_context_refresh",
+  );
+  const current = structuredClone(MOCK_TASK_CONTEXT);
+  current.videoTask.revision += 1;
+  await assert.rejects(
+    runtime.authorizeSession(
+      "session_running_context_refresh",
+      MOCK_SESSION_SCOPE,
+      current,
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "AIC-AGENT-TASK_CONTEXT_CHANGED",
+  );
+  assert.equal(await runtime.abortPromptRun("session_running_context_refresh", run.runId), true);
+  const outcome = await runtime.observePromptRun(
+    "session_running_context_refresh",
+    run.runId,
+  ).outcome;
+  assert.equal(outcome.status, "completed");
 });
 
 test("legacy work-bound sessions resolve once and persist back with server scope", async (context) => {

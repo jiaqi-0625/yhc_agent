@@ -334,6 +334,10 @@ test("generate, approval request, explicit confirmation, and stage reads form on
   assert.equal(versions.activeArtifactVersionId, confirmed.artifactVersion.id);
   assert.deepEqual(versions.versions.map(({ id }) => id), [confirmed.artifactVersion.id]);
   assert.deepEqual(versions.confirmations.map(({ id }) => id), [confirmed.confirmation.id]);
+  assert.deepEqual(
+    versions.strategyDrafts?.map(({ id }) => id),
+    [confirmed.artifactVersion.content.artifactId],
+  );
   assert.equal(versions.activeStrategyDraft?.id, confirmed.artifactVersion.content.artifactId);
   assert.equal(
     versions.confirmationRequest?.strategyDraftId,
@@ -345,6 +349,85 @@ test("generate, approval request, explicit confirmation, and stage reads form on
     await value.stages.getStageAudit(project.id, value.taskId, value.creator),
     { videoTask: confirmed.videoTask, rollbacks: [], invalidations: [] },
   );
+});
+
+test("migrated strategy awaiting confirmation resumes without a fabricated request", async () => {
+  const generated = await fixture();
+  await prepareStrategyApproval(generated);
+  const generatedRecord = await generated.tasks.load(generated.taskId);
+  assert.ok(generatedRecord);
+  await generated.tasks.save({
+    ...structuredClone(generatedRecord),
+    stageConfirmationRequests: [],
+    commandReceipts: generatedRecord.commandReceipts.filter(
+      (receipt) => receipt.action !== "request_strategy_approval",
+    ),
+  });
+
+  await assert.rejects(
+    generated.stages.confirmStage(project.id, generated.taskId, "strategy", {
+      requestId: "request_generated_without_confirmation_request",
+      expectedTaskRevision: generatedRecord.videoTask.revision,
+    }, generated.creator),
+    hasBusinessCode("AIC-STAGE-CONFIRMATION_REQUEST_NOT_FOUND"),
+  );
+  const unchangedGenerated = await generated.tasks.load(generated.taskId);
+  assert.equal(unchangedGenerated?.stageConfirmations.length, 0);
+  assert.equal(unchangedGenerated?.stageArtifactVersions.length, 0);
+  assert.equal(unchangedGenerated?.stageMutationReceipts.length, 0);
+
+  const migrated = await fixture();
+  await prepareStrategyApproval(migrated);
+  const migratedRecord = await migrated.tasks.load(migrated.taskId);
+  assert.ok(migratedRecord);
+  const migratedDraft = migratedRecord.strategyDrafts[0];
+  assert.ok(migratedDraft);
+  migratedDraft.generation = {
+    kind: "legacy_migration",
+    migratedFromSchemaVersion: 1,
+    migrationId: "migration_ws307_resume",
+    legacyStrategyId: "legacy_strategy_awaiting_confirmation",
+    legacyStrategyStatus: "awaiting_approval",
+    model: "legacy-model",
+    templateVersion: "legacy-template-v1",
+    approvals: [],
+  };
+  migratedRecord.stageConfirmationRequests = [];
+  migratedRecord.commandReceipts = [];
+  await migrated.tasks.save(migratedRecord);
+
+  const confirmed = await migrated.stages.confirmStage(
+    project.id,
+    migrated.taskId,
+    "strategy",
+    {
+      requestId: "request_confirm_migrated_strategy",
+      expectedTaskRevision: migratedRecord.videoTask.revision,
+      comment: "对迁移策略执行当前人工确认。",
+    },
+    migrated.creator,
+  );
+
+  assert.equal(confirmed.replayed, false);
+  assert.equal(confirmed.confirmation.source, "human_action");
+  assert.equal(confirmed.confirmation.actorAccountId, migrated.creator.actorAccountId);
+  assert.equal(confirmed.artifactVersion.content.artifactId, migratedDraft.id);
+  assert.equal(confirmed.artifactVersion.provenance.kind, "human_confirmation");
+  assert.deepEqual(confirmed.artifactVersion.dependencies, [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: migratedDraft.vehicleSnapshotId },
+    { kind: "asset_snapshot", assetSnapshotId: migratedRecord.videoTask.assetSnapshotId },
+  ]);
+  assert.equal(confirmed.receipt.action, "confirm_stage");
+  assert.equal(confirmed.receipt.expectedTaskRevision, migratedRecord.videoTask.revision);
+  assert.equal(confirmed.receipt.resultingTaskRevision, migratedRecord.videoTask.revision + 1);
+  assert.equal(confirmed.videoTask.currentStage, "asset_matching");
+  assert.equal(confirmed.videoTask.stageStatus, "in_progress");
+
+  const persisted = await migrated.tasks.load(migrated.taskId);
+  assert.equal(persisted?.stageConfirmationRequests.length, 0);
+  assert.equal(persisted?.stageConfirmations.length, 1);
+  assert.equal(persisted?.stageArtifactVersions.length, 1);
+  assert.equal(persisted?.stageMutationReceipts.length, 1);
 });
 
 test("stage reads and writes enforce dynamic grants, project scope, owner, and creator role", async () => {
@@ -851,6 +934,7 @@ test("rollback replay atomically persists recursive invalidations and stage audi
     assetHistory.invalidations.map(({ artifactVersionId }) => artifactVersionId),
     [graph.assetV1.id],
   );
+  assert.equal(assetHistory.strategyDrafts, undefined);
   const audit = await value.stages.getStageAudit(project.id, value.taskId, value.creator);
   assert.deepEqual(audit.rollbacks.map(({ id }) => id), [rolledBack.rollback.id]);
   assert.deepEqual(
@@ -898,6 +982,12 @@ test("rollback replay atomically persists recursive invalidations and stage audi
     value.creator,
   );
   assert.equal(selectedHistory.activeArtifactVersionId, graph.strategyV1.id);
+  assert.deepEqual(
+    selectedHistory.strategyDrafts?.map(({ id }) => id),
+    [...selectionRecord.strategyDrafts]
+      .sort((left, right) => left.version - right.version || left.id.localeCompare(right.id, "en"))
+      .map(({ id }) => id),
+  );
   assert.equal(selectedHistory.activeStrategyDraft?.id, selectedDraft.id);
   assert.equal(selectedHistory.confirmationRequest?.strategyDraftId, selectedDraft.id);
 });

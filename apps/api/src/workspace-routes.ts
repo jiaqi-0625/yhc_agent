@@ -9,7 +9,7 @@ import {
   UpdateStrategyRequestSchema,
 } from "@firefly/schemas";
 
-import { LocalBusinessRuntime } from "./business-runtime.ts";
+import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { readJson, sendJson, validateBody } from "./http-boundary.ts";
 
 function workRoute(pathname: string): { workId: string; action?: string } | undefined {
@@ -25,14 +25,30 @@ function workRoute(pathname: string): { workId: string; action?: string } | unde
   };
 }
 
+function isLegacyWorkPath(pathname: string): boolean {
+  return pathname === "/v1/works" || pathname.startsWith("/v1/works/");
+}
+
 export async function handleWorkspaceRoute(
   request: IncomingMessage,
   response: ServerResponse,
   url: URL,
   business: LocalBusinessRuntime,
   legacyLocalAccessEnabled: boolean,
+  legacyWritesDisabled = false,
 ): Promise<boolean> {
-  if (url.pathname.startsWith("/v1/works") && !legacyLocalAccessEnabled) return false;
+  if (isLegacyWorkPath(url.pathname) && !legacyLocalAccessEnabled) return false;
+  if (
+    legacyWritesDisabled &&
+    isLegacyWorkPath(url.pathname) &&
+    request.method !== "GET"
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-LEGACY-WORK-MIGRATED_READ_ONLY",
+      "Legacy works are read-only after the Workspace V2 migration.",
+      410,
+    );
+  }
   if (request.method === "GET" && url.pathname === "/v1/works") {
     sendJson(response, 200, { works: await business.listWorks() });
     return true;

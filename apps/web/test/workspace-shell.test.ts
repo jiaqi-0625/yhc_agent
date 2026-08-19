@@ -5,7 +5,46 @@ import test from "node:test";
 // @ts-expect-error The browser module is intentionally plain JavaScript.
 import { workspaceApi } from "../public/workspace-api.js";
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { navigationBrandStorageKey, normalizeNavigationBrands, resolveNavigationBrandId, workSummaryMatchesNavigationBrand } from "../public/workspace-shell.js";
+import { legacySelectedWorkStorageKey, migrateSelectedVideoTaskStorage, navigationBrandStorageKey, normalizeNavigationBrands, resolveNavigationBrandId, selectedVideoTaskStorageKey, workSummaryMatchesNavigationBrand } from "../public/workspace-shell.js";
+
+function memoryStorage(initial: Record<string, string> = {}) {
+  const values = new Map(Object.entries(initial));
+  return {
+    values,
+    storage: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+      removeItem(key: string) { values.delete(key); },
+    },
+  };
+}
+
+test("workspace shell migrates the legacy selected Work key exactly once", () => {
+  const state = memoryStorage({ [legacySelectedWorkStorageKey]: "work_legacy_001" });
+  assert.equal(migrateSelectedVideoTaskStorage(state.storage), "work_legacy_001");
+  assert.equal(state.values.get(selectedVideoTaskStorageKey), "work_legacy_001");
+  assert.equal(state.values.has(legacySelectedWorkStorageKey), false);
+
+  assert.equal(migrateSelectedVideoTaskStorage(state.storage), "work_legacy_001");
+  assert.deepEqual(Object.fromEntries(state.values), {
+    [selectedVideoTaskStorageKey]: "work_legacy_001",
+  });
+});
+
+test("workspace shell gives the new video task key priority and always removes the old key", () => {
+  const conflict = memoryStorage({
+    [selectedVideoTaskStorageKey]: "video_task_current",
+    [legacySelectedWorkStorageKey]: "work_stale",
+  });
+  assert.equal(migrateSelectedVideoTaskStorage(conflict.storage), "video_task_current");
+  assert.deepEqual(Object.fromEntries(conflict.values), {
+    [selectedVideoTaskStorageKey]: "video_task_current",
+  });
+
+  const empty = memoryStorage();
+  assert.equal(migrateSelectedVideoTaskStorage(empty.storage), null);
+  assert.deepEqual(Object.fromEntries(empty.values), {});
+});
 
 test("workspace shell normalizes only active administrator brands", () => {
   assert.deepEqual(normalizeNavigationBrands("content_admin", {

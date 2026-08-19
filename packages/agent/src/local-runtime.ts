@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import { type Agent, type AgentEvent, type AgentMessage, type StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model, Usage } from "@earendil-works/pi-ai";
@@ -232,6 +233,7 @@ function normalizeEvent(
 
 export class LocalAgentRuntime {
   readonly #sessions = new Map<string, ActiveLocalSession>();
+  readonly #authorizationTails = new Map<string, Promise<void>>();
   readonly #runs = new Map<string, LocalPromptRunRecord>();
   readonly #runIdsByRequest = new Map<string, string>();
   readonly #expiredRequestKeys = new Set<string>();
@@ -262,6 +264,11 @@ export class LocalAgentRuntime {
 
   get domainToolsAvailable(): boolean {
     return this.#taskAgentFactory !== undefined;
+  }
+
+  get legacyTaskResolutionAvailable(): boolean {
+    return this.#legacyTaskContextResolver !== undefined ||
+      this.#legacySessionScopeResolver !== undefined;
   }
 
   #requestKey(sessionId: string, requestId: string): string {
@@ -470,18 +477,89 @@ export class LocalAgentRuntime {
       expected.videoTaskId === actual.videoTaskId;
   }
 
-  async authorizeSession(sessionId: string, scope?: AgentSessionScope): Promise<void> {
-    const active = await this.#getActive(sessionId);
-    if (!active || !this.#scopeMatches(active.scope, scope)) {
-      throw new LocalAgentRunError(
-        "AIC-AUTH-SESSION_SCOPE_DENIED",
-        "当前认证账号与任务无权访问该 Agent 会话。",
-        403,
-      );
+  async #withAuthorizationLock<Result>(
+    sessionId: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    const previous = this.#authorizationTails.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.then(() => current);
+    this.#authorizationTails.set(sessionId, tail);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.#authorizationTails.get(sessionId) === tail) {
+        this.#authorizationTails.delete(sessionId);
+      }
     }
   }
 
-  async listSessions(scope?: AgentSessionScope): Promise<LocalSessionSummary[]> {
+  async authorizeSession(
+    sessionId: string,
+    scope?: AgentSessionScope,
+    currentTaskContext?: TaskContext,
+  ): Promise<void> {
+    await this.#withAuthorizationLock(sessionId, async () => {
+      const active = await this.#getActive(sessionId);
+      if (!active || !this.#scopeMatches(active.scope, scope)) {
+        throw new LocalAgentRunError(
+          "AIC-AUTH-SESSION_SCOPE_DENIED",
+          "当前认证账号与任务无权访问该 Agent 会话。",
+          403,
+        );
+      }
+      if (currentTaskContext === undefined) return;
+      this.#assertTaskBinding(currentTaskContext, scope);
+      if (active.taskContext === undefined) {
+        throw new LocalAgentRunError(
+          "AIC-AUTH-SESSION_SCOPE_DENIED",
+          "当前认证账号与任务无权访问该 Agent 会话。",
+          403,
+        );
+      }
+      if (isDeepStrictEqual(active.taskContext, currentTaskContext)) return;
+      if (currentTaskContext.videoTask.revision < active.taskContext.videoTask.revision) {
+        throw new LocalAgentRunError(
+          "AIC-AGENT-TASK_CONTEXT_STALE",
+          "当前请求携带的任务上下文早于 Agent 会话已知状态，请刷新后重试。",
+          409,
+        );
+      }
+      if (active.activeRunId !== undefined || active.agent.state.isStreaming) {
+        throw new LocalAgentRunError(
+          "AIC-AGENT-TASK_CONTEXT_CHANGED",
+          "任务状态已在 Agent 执行期间变化，请等待当前运行结束后重试。",
+          409,
+        );
+      }
+      const refreshed: ActiveLocalSession = {
+        ...active,
+        agent: this.#createAgent(
+          structuredClone(active.agent.state.messages),
+          sessionId,
+          currentTaskContext,
+          scope,
+        ),
+        taskContext: structuredClone(currentTaskContext),
+        scope: structuredClone(scope!),
+      };
+      await this.#persist(sessionId, refreshed);
+      this.#sessions.set(sessionId, refreshed);
+    });
+  }
+
+  async listSessions(
+    scope?: AgentSessionScope,
+    currentTaskContext?: TaskContext,
+  ): Promise<LocalSessionSummary[]> {
+    if (currentTaskContext !== undefined) {
+      this.#assertTaskBinding(currentTaskContext, scope);
+    }
     const sessionIds = new Set(this.#sessions.keys());
     for (const persisted of await this.#store.list()) {
       if (persisted.schemaVersion === 3 && !this.#scopeMatches(persisted.scope, scope)) continue;
@@ -493,10 +571,23 @@ export class LocalAgentRuntime {
     }
     const sessions: LocalSessionSummary[] = [];
     for (const sessionId of sessionIds) {
-      const active = await this.#getActive(sessionId);
+      let active = await this.#getActive(sessionId);
       if (!active) continue;
       if (!this.#scopeMatches(active.scope, scope)) continue;
+      if (
+        currentTaskContext !== undefined &&
+        active.activeRunId === undefined &&
+        !active.agent.state.isStreaming
+      ) {
+        await this.authorizeSession(sessionId, scope, currentTaskContext);
+        active = await this.#getActive(sessionId);
+        if (!active) continue;
+      }
       const summary = this.#summary(sessionId, active);
+      if (currentTaskContext !== undefined) {
+        summary.videoTaskId = currentTaskContext.videoTask.id;
+        summary.taskContext = structuredClone(currentTaskContext);
+      }
       sessions.push(summary);
     }
     return sessions.sort((left, right) =>
@@ -508,65 +599,67 @@ export class LocalAgentRuntime {
     this.#assertRequestId(requestId);
     const message = input.trim();
     if (!message) throw new Error("Prompt message must not be empty.");
-    const active = await this.#getActive(sessionId);
-    if (!active) throw new Error(`Session '${sessionId}' was not found.`);
+    return this.#withAuthorizationLock(sessionId, async () => {
+      const active = await this.#getActive(sessionId);
+      if (!active) throw new Error(`Session '${sessionId}' was not found.`);
 
-    const requestKey = this.#requestKey(sessionId, requestId);
-    if (this.#expiredRequestKeys.has(requestKey)) {
-      throw new LocalAgentRunError(
-        "AIC-AGENT-RUN_EXPIRED",
-        "This Agent run is no longer available for replay.",
-        410,
-      );
-    }
-    const existingRunId = this.#runIdsByRequest.get(requestKey);
-    if (existingRunId !== undefined) {
-      const existing = this.#runs.get(existingRunId);
-      if (!existing) throw new Error(`Agent run '${existingRunId}' has an inconsistent journal entry.`);
-      if (existing.message !== message) {
+      const requestKey = this.#requestKey(sessionId, requestId);
+      if (this.#expiredRequestKeys.has(requestKey)) {
         throw new LocalAgentRunError(
-          "AIC-AGENT-RUN_REQUEST_CONFLICT",
-          "The run request ID is already bound to a different message.",
+          "AIC-AGENT-RUN_EXPIRED",
+          "This Agent run is no longer available for replay.",
+          410,
+        );
+      }
+      const existingRunId = this.#runIdsByRequest.get(requestKey);
+      if (existingRunId !== undefined) {
+        const existing = this.#runs.get(existingRunId);
+        if (!existing) throw new Error(`Agent run '${existingRunId}' has an inconsistent journal entry.`);
+        if (existing.message !== message) {
+          throw new LocalAgentRunError(
+            "AIC-AGENT-RUN_REQUEST_CONFLICT",
+            "The run request ID is already bound to a different message.",
+            409,
+          );
+        }
+        return this.#runSummary(existing);
+      }
+
+      if (active.activeRunId !== undefined || active.agent.state.isStreaming) {
+        throw new LocalAgentRunError(
+          "AIC-AGENT-RUN_CONFLICT",
+          `Session '${sessionId}' is already running.`,
           409,
         );
       }
-      return this.#runSummary(existing);
-    }
+      if (this.config.provider !== "mock" && this.config.apiKey === undefined) {
+        throw new LocalAgentCredentialsError(this.config.provider);
+      }
 
-    if (active.activeRunId !== undefined || active.agent.state.isStreaming) {
-      throw new LocalAgentRunError(
-        "AIC-AGENT-RUN_CONFLICT",
-        `Session '${sessionId}' is already running.`,
-        409,
-      );
-    }
-    if (this.config.provider !== "mock" && this.config.apiKey === undefined) {
-      throw new LocalAgentCredentialsError(this.config.provider);
-    }
-
-    const runId = `run_${randomUUID()}`;
-    let resolveOutcome!: (outcome: LocalPromptRunOutcome) => void;
-    const outcome = new Promise<LocalPromptRunOutcome>((resolve) => {
-      resolveOutcome = resolve;
+      const runId = `run_${randomUUID()}`;
+      let resolveOutcome!: (outcome: LocalPromptRunOutcome) => void;
+      const outcome = new Promise<LocalPromptRunOutcome>((resolve) => {
+        resolveOutcome = resolve;
+      });
+      const record: LocalPromptRunRecord = {
+        requestId,
+        runId,
+        sessionId,
+        message,
+        status: "running",
+        createdAt: new Date().toISOString(),
+        events: [],
+        subscribers: new Set(),
+        outcome,
+        resolveOutcome,
+        cancelRequested: false,
+      };
+      this.#runs.set(runId, record);
+      this.#runIdsByRequest.set(requestKey, runId);
+      active.activeRunId = runId;
+      void this.#executePromptRun(active, record);
+      return this.#runSummary(record);
     });
-    const record: LocalPromptRunRecord = {
-      requestId,
-      runId,
-      sessionId,
-      message,
-      status: "running",
-      createdAt: new Date().toISOString(),
-      events: [],
-      subscribers: new Set(),
-      outcome,
-      resolveOutcome,
-      cancelRequested: false,
-    };
-    this.#runs.set(runId, record);
-    this.#runIdsByRequest.set(requestKey, runId);
-    active.activeRunId = runId;
-    void this.#executePromptRun(active, record);
-    return this.#runSummary(record);
   }
 
   observePromptRun(
@@ -755,34 +848,38 @@ export class LocalAgentRuntime {
   }
 
   async resetSession(sessionId: string): Promise<LocalSessionSummary> {
-    const active = await this.#getActive(sessionId);
-    if (!active) throw new Error(`Session '${sessionId}' was not found.`);
-    const activeRun = active.activeRunId === undefined ? undefined : this.#runs.get(active.activeRunId);
-    if (active.activeRunId !== undefined) await this.abortPromptRun(sessionId, active.activeRunId);
-    else if (active.agent.state.isStreaming) active.agent.abort();
-    await active.agent.waitForIdle();
-    if (activeRun) await activeRun.outcome;
-    active.agent.reset();
-    this.#removeSessionRuns(sessionId);
-    active.updatedAt = new Date().toISOString();
-    await this.#persist(sessionId, active);
-    return this.#summary(sessionId, active);
+    return this.#withAuthorizationLock(sessionId, async () => {
+      const active = await this.#getActive(sessionId);
+      if (!active) throw new Error(`Session '${sessionId}' was not found.`);
+      const activeRun = active.activeRunId === undefined ? undefined : this.#runs.get(active.activeRunId);
+      if (active.activeRunId !== undefined) await this.abortPromptRun(sessionId, active.activeRunId);
+      else if (active.agent.state.isStreaming) active.agent.abort();
+      await active.agent.waitForIdle();
+      if (activeRun) await activeRun.outcome;
+      active.agent.reset();
+      this.#removeSessionRuns(sessionId);
+      active.updatedAt = new Date().toISOString();
+      await this.#persist(sessionId, active);
+      return this.#summary(sessionId, active);
+    });
   }
 
   async deleteSession(sessionId: string): Promise<void> {
-    const active = this.#sessions.get(sessionId);
-    if (active?.activeRunId !== undefined) {
-      const activeRun = this.#runs.get(active.activeRunId);
-      await this.abortPromptRun(sessionId, active.activeRunId);
-      await active.agent.waitForIdle();
-      if (activeRun) await activeRun.outcome;
-    } else if (active?.agent.state.isStreaming) {
-      active.agent.abort();
-      await active.agent.waitForIdle();
-    }
-    this.#removeSessionRuns(sessionId);
-    this.#sessions.delete(sessionId);
-    await this.#store.delete(sessionId);
+    await this.#withAuthorizationLock(sessionId, async () => {
+      const active = this.#sessions.get(sessionId);
+      if (active?.activeRunId !== undefined) {
+        const activeRun = this.#runs.get(active.activeRunId);
+        await this.abortPromptRun(sessionId, active.activeRunId);
+        await active.agent.waitForIdle();
+        if (activeRun) await activeRun.outcome;
+      } else if (active?.agent.state.isStreaming) {
+        active.agent.abort();
+        await active.agent.waitForIdle();
+      }
+      this.#removeSessionRuns(sessionId);
+      this.#sessions.delete(sessionId);
+      await this.#store.delete(sessionId);
+    });
   }
 
   async abortPromptRun(sessionId: string, runId: string): Promise<boolean> {

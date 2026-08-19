@@ -1,3 +1,16 @@
+export const selectedVideoTaskStorageKey = "firefly.videoTaskId";
+export const legacySelectedWorkStorageKey = "firefly.workId";
+
+export function migrateSelectedVideoTaskStorage(storage) {
+  const current = storage.getItem(selectedVideoTaskStorageKey);
+  const legacy = storage.getItem(legacySelectedWorkStorageKey);
+  if (current === null && legacy !== null) {
+    storage.setItem(selectedVideoTaskStorageKey, legacy);
+  }
+  storage.removeItem(legacySelectedWorkStorageKey);
+  return current === null ? legacy : current;
+}
+
 function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }

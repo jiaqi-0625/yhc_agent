@@ -1357,6 +1357,44 @@ export const VideoTaskStrategyDraftStatusSchema = Type.Union([
 ]);
 export type VideoTaskStrategyDraftStatus = Static<typeof VideoTaskStrategyDraftStatusSchema>;
 
+export const MigratedStrategyApprovalSchema = Type.Object(
+  {
+    legacyApprovalId: Identifier,
+    decision: Type.Union([Type.Literal("approved"), Type.Literal("rejected")]),
+    actorAccountId: Identifier,
+    comment: Type.Optional(Type.String({ maxLength: 2000 })),
+    occurredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type MigratedStrategyApproval = Static<typeof MigratedStrategyApprovalSchema>;
+
+export const VideoTaskStrategyDraftGenerationSchema = Type.Union([
+  Type.Object(
+    {
+      kind: Type.Literal("vehicle_fact_projection"),
+      templateVersion: Type.Literal("v1"),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("legacy_migration"),
+      migratedFromSchemaVersion: Type.Literal(1),
+      migrationId: Identifier,
+      legacyStrategyId: Identifier,
+      legacyStrategyStatus: StrategyStatusSchema,
+      model: Type.String({ minLength: 1, maxLength: 200 }),
+      templateVersion: Type.String({ minLength: 1, maxLength: 200 }),
+      approvals: Type.Array(MigratedStrategyApprovalSchema, { maxItems: 100 }),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type VideoTaskStrategyDraftGeneration = Static<
+  typeof VideoTaskStrategyDraftGenerationSchema
+>;
+
 export const VideoTaskStrategyDraftSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -1371,13 +1409,7 @@ export const VideoTaskStrategyDraftSchema = Type.Object(
     theme: Type.String({ minLength: 1, maxLength: 500 }),
     items: Type.Array(StrategyItemSchema, { minItems: 1, maxItems: 20 }),
     validation: StrategyValidationResultSchema,
-    generation: Type.Object(
-      {
-        kind: Type.Literal("vehicle_fact_projection"),
-        templateVersion: Type.Literal("v1"),
-      },
-      { additionalProperties: false },
-    ),
+    generation: VideoTaskStrategyDraftGenerationSchema,
     createdAt: IsoDateTime,
     createdBy: Identifier,
     updatedAt: IsoDateTime,
@@ -1413,6 +1445,7 @@ export const VideoTaskStageVersionsResponseSchema = Type.Object(
     confirmations: Type.Array(StageConfirmationSchema),
     rollbacks: Type.Array(StageRollbackRecordSchema),
     invalidations: Type.Array(StageArtifactInvalidationSchema),
+    strategyDrafts: Type.Optional(Type.Array(VideoTaskStrategyDraftSchema)),
     activeStrategyDraft: Type.Optional(VideoTaskStrategyDraftSchema),
     confirmationRequest: Type.Optional(StageConfirmationRequestSchema),
   },

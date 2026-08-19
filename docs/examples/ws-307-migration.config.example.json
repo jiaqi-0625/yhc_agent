@@ -1,0 +1,230 @@
+{
+  "schemaVersion": 1,
+  "migration": {
+    "migrationId": "migration_ws307_example_20260819",
+    "migrationOccurredAt": "2026-08-19T20:00:00.000Z",
+    "migrationActorAccountId": "account_admin",
+    "tenantId": "tenant_firefly",
+    "brandId": "brand_firefly_demo",
+    "brandName": "萤火示例汽车",
+    "vehicleId": "vehicle_firefly_e5_2026_long_range",
+    "vehicleVersion": 1,
+    "batchProjectId": "batch_project_legacy_firefly_e5_916",
+    "assetPoolId": "asset_pool_legacy_firefly_e5_916",
+    "batchName": "历史作品迁移",
+    "aspectRatio": "9:16",
+    "visualStylePresetId": "asset_style_firefly_demo_clean",
+    "projectAssets": [
+      {
+        "assetId": "asset_firefly_demo_e5_hero",
+        "version": 1,
+        "source": "company_catalog",
+        "sourceProvider": "mock_company_assets",
+        "category": "vehicle",
+        "vehicleId": "vehicle_firefly_e5_2026_long_range"
+      },
+      {
+        "assetId": "asset_style_firefly_demo_clean",
+        "version": 1,
+        "source": "company_catalog",
+        "sourceProvider": "mock_company_assets",
+        "category": "visual_style"
+      }
+    ],
+    "taskOwnerAccountId": "account_creator_a",
+    "taskCreatedByAccountId": "account_creator_a",
+    "taskNamePrefix": "历史作品",
+    "defaultAudience": "历史受众待人工核对",
+    "defaultTheme": "历史主题待人工核对",
+    "defaultDurationSeconds": 30,
+    "defaultPlatformTags": [
+      "legacy",
+      "migration-review"
+    ]
+  },
+  "legacySessionOwnerAccountId": "account_creator_a",
+  "taskOwnerDisplayName": "制作账号 A",
+  "legacyV3SessionScopeMappings": [
+    {
+      "sourceActorId": "account_admin",
+      "sourceTenantId": "tenant_firefly",
+      "targetAccountId": "account_admin"
+    },
+    {
+      "sourceActorId": "account_creator_a",
+      "sourceTenantId": "tenant_firefly",
+      "targetAccountId": "account_creator_a"
+    }
+  ],
+  "administration": {
+    "brands": [
+      {
+        "id": "brand_firefly_demo",
+        "tenantId": "tenant_firefly",
+        "name": "萤火示例汽车",
+        "status": "active",
+        "revision": 1,
+        "defaultVisualStylePresetId": "asset_style_firefly_demo_clean",
+        "createdAt": "2026-08-19T00:00:00.000Z",
+        "createdBy": "account_admin",
+        "updatedAt": "2026-08-19T00:00:00.000Z",
+        "updatedBy": "account_admin"
+      }
+    ],
+    "vehicleVersions": [
+      {
+        "id": "vehicle_firefly_e5_2026_long_range",
+        "tenantId": "tenant_firefly",
+        "brandId": "brand_firefly_demo",
+        "version": 1,
+        "status": "active",
+        "series": "萤火 E5",
+        "modelYear": 2026,
+        "trim": "长续航示例版",
+        "parameters": {
+          "seats": 5,
+          "bodyStyle": "SUV",
+          "energyType": "纯电"
+        },
+        "fixedClaims": [
+          {
+            "id": "claim_cltc_range_550",
+            "kind": "fixed",
+            "name": "CLTC 纯电续航",
+            "statement": "CLTC 纯电续航 550 公里",
+            "value": 550,
+            "unit": "公里",
+            "evidence": {
+              "sourceName": "黄金样例车型配置表",
+              "sourceReference": "golden-vehicle-spec-v1#range",
+              "effectiveFrom": "2026-08-01"
+            },
+            "requiredInVoiceover": true,
+            "requiredInSubtitle": true,
+            "mayRephrase": false,
+            "riskNotes": [
+              "必须保留 CLTC 测试条件"
+            ]
+          },
+          {
+            "id": "claim_trunk_520",
+            "kind": "fixed",
+            "name": "后备厢空间",
+            "statement": "后备厢标准容积 520 升",
+            "value": 520,
+            "unit": "升",
+            "evidence": {
+              "sourceName": "黄金样例车型配置表",
+              "sourceReference": "golden-vehicle-spec-v1#trunk",
+              "effectiveFrom": "2026-08-01"
+            },
+            "requiredInVoiceover": false,
+            "requiredInSubtitle": true,
+            "mayRephrase": false,
+            "riskNotes": []
+          }
+        ],
+        "optionalClaims": [
+          {
+            "id": "claim_family_space",
+            "kind": "extended",
+            "name": "家庭出行空间体验",
+            "statement": "五座布局兼顾家庭日常乘坐与储物需求",
+            "evidence": {
+              "sourceName": "黄金样例车型配置表",
+              "sourceReference": "golden-vehicle-spec-v1#seats-trunk",
+              "effectiveFrom": "2026-08-01"
+            },
+            "requiredInVoiceover": false,
+            "requiredInSubtitle": false,
+            "mayRephrase": true,
+            "riskNotes": [
+              "不得扩展为同级最大空间"
+            ]
+          }
+        ],
+        "prohibitedClaims": [
+          "自动驾驶",
+          "全国最低价",
+          "同级第一",
+          "零风险"
+        ],
+        "createdAt": "2026-08-19T00:00:00.000Z",
+        "createdBy": "account_admin",
+        "updatedAt": "2026-08-19T00:00:00.000Z",
+        "updatedBy": "account_admin"
+      }
+    ],
+    "vehicleAssetAssociations": [
+      {
+        "id": "vehicle_asset_association_firefly_e5",
+        "tenantId": "tenant_firefly",
+        "brandId": "brand_firefly_demo",
+        "vehicleId": "vehicle_firefly_e5_2026_long_range",
+        "revision": 1,
+        "assets": [
+          {
+            "assetId": "asset_firefly_demo_e5_hero",
+            "version": 1,
+            "source": "company_catalog",
+            "sourceProvider": "mock_company_assets",
+            "category": "vehicle",
+            "vehicleId": "vehicle_firefly_e5_2026_long_range"
+          },
+          {
+            "assetId": "asset_style_firefly_demo_clean",
+            "version": 1,
+            "source": "company_catalog",
+            "sourceProvider": "mock_company_assets",
+            "category": "visual_style"
+          }
+        ],
+        "createdAt": "2026-08-19T00:00:00.000Z",
+        "createdBy": "account_admin",
+        "updatedAt": "2026-08-19T00:00:00.000Z",
+        "updatedBy": "account_admin"
+      }
+    ],
+    "accessGrants": [
+      {
+        "id": "grant_admin_firefly_demo",
+        "tenantId": "tenant_firefly",
+        "accountId": "account_admin",
+        "access": {
+          "kind": "brand",
+          "brandId": "brand_firefly_demo"
+        },
+        "status": "active",
+        "revision": 1,
+        "createdAt": "2026-08-19T00:00:00.000Z",
+        "createdBy": "account_admin",
+        "updatedAt": "2026-08-19T00:00:00.000Z",
+        "updatedBy": "account_admin"
+      },
+      {
+        "id": "grant_account_creator_a_firefly_e5",
+        "tenantId": "tenant_firefly",
+        "accountId": "account_creator_a",
+        "access": {
+          "kind": "vehicle_project",
+          "brandId": "brand_firefly_demo",
+          "vehicleId": "vehicle_firefly_e5_2026_long_range"
+        },
+        "status": "active",
+        "revision": 1,
+        "createdAt": "2026-08-19T00:00:00.000Z",
+        "createdBy": "account_admin",
+        "updatedAt": "2026-08-19T00:00:00.000Z",
+        "updatedBy": "account_admin"
+      }
+    ]
+  },
+  "directories": {
+    "works": "../../.data/works",
+    "sessions": "../../.data/sessions",
+    "workspaceAdmin": "../../.data/workspace-admin",
+    "batchProjects": "../../.data/batch-projects",
+    "videoTasks": "../../.data/video-tasks",
+    "migrations": "../../.data/workspace-migrations"
+  }
+}

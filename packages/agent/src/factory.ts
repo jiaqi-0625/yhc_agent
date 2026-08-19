@@ -14,10 +14,10 @@ import {
   createStrategyTools,
   createTaskAssetTools,
   createVehicleTools,
-  type InMemoryVehicleService,
   type StageSuggestionContextReader,
   type StrategyWorkflowPort,
   type TaskAssetSnapshotReader,
+  type VehicleServicePort,
 } from "@firefly/tools";
 
 import { createBaseAgent } from "./base-agent.ts";
@@ -44,7 +44,7 @@ export interface CreateAdvertisingAgentOptions {
   scope: SessionScope;
   taskContext?: TaskContext;
   getWorkStatus: () => WorkStatus | Promise<WorkStatus>;
-  vehicleService: InMemoryVehicleService;
+  vehicleService: VehicleServicePort;
   strategyService?: StrategyWorkflowPort;
   taskAssetReader?: TaskAssetSnapshotReader;
   stageSuggestionReader?: StageSuggestionContextReader;

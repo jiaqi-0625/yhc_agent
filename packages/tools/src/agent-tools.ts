@@ -6,7 +6,7 @@ import {
   type VehicleSnapshotRequest,
 } from "@firefly/schemas";
 
-import type { InMemoryVehicleService, ToolExecutionScope } from "./vehicle-service.ts";
+import type { ToolExecutionScope, VehicleServicePort } from "./vehicle-service.ts";
 
 function textResult<T>(details: T) {
   return {
@@ -16,7 +16,7 @@ function textResult<T>(details: T) {
 }
 
 export function createVehicleTools(
-  service: InMemoryVehicleService,
+  service: VehicleServicePort,
   scope: ToolExecutionScope,
 ): readonly AgentTool[] {
   const getVehicleSnapshot: AgentTool<typeof VehicleSnapshotRequestSchema> = {
@@ -26,7 +26,7 @@ export function createVehicleTools(
     parameters: VehicleSnapshotRequestSchema,
     executionMode: "sequential",
     async execute(_toolCallId, params: VehicleSnapshotRequest) {
-      return textResult(service.createSnapshot(params, scope));
+      return textResult(await service.createSnapshot(params, scope));
     },
   };
 
@@ -37,7 +37,7 @@ export function createVehicleTools(
       "对照当前项目的车型快照校验广告表述；支持项返回事实来源与风险备注，禁用项返回命中的具体表达，未验证内容不得作为官方事实使用。",
     parameters: ClaimValidationRequestSchema,
     async execute(_toolCallId, params: ClaimValidationRequest) {
-      return textResult(service.validateClaims(params, scope));
+      return textResult(await service.validateClaims(params, scope));
     },
   };
 

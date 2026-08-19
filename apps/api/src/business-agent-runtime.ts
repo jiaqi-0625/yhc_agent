@@ -9,9 +9,14 @@ import {
 } from "@firefly/agent";
 import type { SessionScope } from "@firefly/domain";
 import type { TaskContext } from "@firefly/schemas";
-import type { StageSuggestionContextReader, TaskAssetSnapshotReader } from "@firefly/tools";
+import type { WorkStatus } from "@firefly/schemas";
+import type {
+  StageSuggestionContextReader,
+  TaskAssetSnapshotReader,
+  VehicleServicePort,
+} from "@firefly/tools";
 
-import { LocalBusinessRuntime } from "./business-runtime.ts";
+import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { resolveLocalTaskContext } from "./task-context.ts";
 
@@ -22,7 +27,24 @@ const LOCAL_AGENT_SCOPE: SessionScope = {
   hasInteractiveApprovalChannel: true,
 };
 
+const migrationSafeBusinessAgentRuntimes = new WeakSet<LocalAgentRuntime>();
+
+export function isMigrationSafeAgentRuntime(runtime: Readonly<LocalAgentRuntime>): boolean {
+  return migrationSafeBusinessAgentRuntimes.has(runtime as LocalAgentRuntime) ||
+    (!runtime.domainToolsAvailable && !runtime.legacyTaskResolutionAvailable);
+}
+
 export interface BusinessAgentRuntimeOptions {
+  /** Completed V1 -> V2 migrations must not assemble tools backed by the V1 Work store. */
+  disableLegacyStrategyTools?: boolean;
+  resolveWorkStatus?: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => WorkStatus | Promise<WorkStatus>;
+  resolveVehicleService?: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => VehicleServicePort;
   resolveTaskAssetReader?: (
     taskContext: Readonly<TaskContext>,
     sessionScope: Readonly<AgentSessionScope>,
@@ -38,9 +60,19 @@ export function createBusinessAgentRuntime(
   config: LocalAgentConfig = loadLocalAgentConfig(),
   options: BusinessAgentRuntimeOptions = {},
 ): LocalAgentRuntime {
+  if (
+    options.disableLegacyStrategyTools &&
+    (options.resolveWorkStatus === undefined || options.resolveVehicleService === undefined)
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+      "Migrated Agent tools require explicit V2 status and locked vehicle snapshot readers.",
+      503,
+    );
+  }
   const modelRuntime = createLocalModelRuntime(config);
   const store = new LocalSessionStore(config.dataDirectory, config.persistSessions);
-  return new LocalAgentRuntime(
+  const runtime = new LocalAgentRuntime(
     config,
     modelRuntime,
     store,
@@ -53,6 +85,17 @@ export function createBusinessAgentRuntime(
         context.taskContext,
         context.sessionScope,
       );
+      const vehicleService = options.resolveVehicleService?.(
+        context.taskContext,
+        context.sessionScope,
+      );
+      if (vehicleService === undefined && options.disableLegacyStrategyTools) {
+        throw new BusinessRuntimeError(
+          "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+          "Migrated Agent vehicle tools cannot fall back to the V1 vehicle service.",
+          503,
+        );
+      }
       return createAdvertisingAgent({
         model: context.model,
         streamFn: context.streamFn,
@@ -64,21 +107,34 @@ export function createBusinessAgentRuntime(
           actorId: context.sessionScope.actorId,
           tenantId: context.sessionScope.tenantId,
           projectId: context.sessionScope.projectId,
+          allowedBrandIds: [context.taskContext.brand.id],
         },
         taskContext: context.taskContext,
-        getWorkStatus: async () => (await business.getWork(context.taskContext.videoTask.id)).work.status,
-        vehicleService: business.vehicleService,
-        strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id),
+        getWorkStatus: options.resolveWorkStatus === undefined
+          ? async () => (await business.getWork(context.taskContext.videoTask.id)).work.status
+          : () => options.resolveWorkStatus!(context.taskContext, context.sessionScope),
+        vehicleService: vehicleService ?? business.vehicleService,
+        ...(options.disableLegacyStrategyTools
+          ? {}
+          : { strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id) }),
         ...(taskAssetReader === undefined ? {} : { taskAssetReader }),
         ...(stageSuggestionReader === undefined ? {} : { stageSuggestionReader }),
       });
     },
-    (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),
-    (taskContext) => ({
-      actorId: LOCAL_SCOPE.actorId,
-      tenantId: LOCAL_SCOPE.tenantId,
-      projectId: taskContext.batchProject.id,
-      videoTaskId: taskContext.videoTask.id,
-    }),
+    options.disableLegacyStrategyTools
+      ? undefined
+      : (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),
+    options.disableLegacyStrategyTools
+      ? undefined
+      : (taskContext) => ({
+          actorId: LOCAL_SCOPE.actorId,
+          tenantId: LOCAL_SCOPE.tenantId,
+          projectId: taskContext.batchProject.id,
+          videoTaskId: taskContext.videoTask.id,
+        }),
   );
+  if (options.disableLegacyStrategyTools) {
+    migrationSafeBusinessAgentRuntimes.add(runtime);
+  }
+  return runtime;
 }

@@ -248,6 +248,14 @@ export class VideoTaskStageRuntime {
       invalidations: record.stageArtifactInvalidations
         .filter((invalidation) => invalidation.stage === stage)
         .map((invalidation) => structuredClone(invalidation)),
+      ...(stage === "strategy"
+        ? {
+            strategyDrafts: [...record.strategyDrafts]
+              .sort((left, right) =>
+                left.version - right.version || left.id.localeCompare(right.id, "en"))
+              .map((draft) => structuredClone(draft)),
+          }
+        : {}),
       ...(activeStrategyDraft === undefined
         ? {}
         : { activeStrategyDraft: structuredClone(activeStrategyDraft) }),
@@ -289,7 +297,7 @@ export class VideoTaskStageRuntime {
     const request = record.stageConfirmationRequests.find(
       (candidate) => candidate.strategyDraftId === draft.id,
     );
-    if (!request) {
+    if (!request && draft.generation.kind !== "legacy_migration") {
       throw runtimeError(
         "AIC-STAGE-CONFIRMATION_REQUEST_NOT_FOUND",
         "The active strategy draft has no persisted human confirmation request.",

@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 
-import { LocalAgentRuntime } from "@firefly/agent";
+import { loadLocalAgentConfig, LocalAgentRuntime } from "@firefly/agent";
 import { MockCompanyAssetProvider } from "@firefly/tools";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
@@ -11,9 +11,16 @@ import {
   matchAgentActionCommandPath,
 } from "./agent-action-command-routes.ts";
 import { AgentActionCommandRuntime } from "./agent-action-command-runtime.ts";
-import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
+import {
+  handleAgentRoute,
+  type AgentIdentityResolver,
+  type AgentTaskContextResolver,
+} from "./agent-routes.ts";
 import { LocalBatchProjectStore } from "./batch-project-store.ts";
-import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
+import {
+  createBusinessAgentRuntime,
+  isMigrationSafeAgentRuntime,
+} from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
@@ -52,6 +59,12 @@ import {
   WorkspaceSessionRuntime,
 } from "./workspace-session-runtime.ts";
 import { LocalWorkspaceSessionStore } from "./workspace-session-store.ts";
+import { WorkspaceMigrationStateStore } from "./workspace-migration-state.ts";
+import {
+  createWorkspaceTaskVehicleService,
+  readWorkspaceTaskPolicyStatus,
+  WorkspaceTaskContextResolver,
+} from "./workspace-task-context.ts";
 
 const version = "0.1.0";
 const resolveLocalAgentIdentity: AgentIdentityResolver = () => ({
@@ -94,6 +107,7 @@ async function handleRequest(
   business: LocalBusinessRuntime,
   resolveAgentIdentity: AgentIdentityResolver,
   workspaceSessions: WorkspaceSessionRuntime,
+  resolveAgentTaskContext: AgentTaskContextResolver | undefined,
   workspaceAdmin: WorkspaceAdminRuntime | undefined,
   projectCreation: ProjectCreationRuntime | undefined,
   videoTasks: VideoTaskRuntime | undefined,
@@ -102,6 +116,7 @@ async function handleRequest(
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
   projectLibrary: ProjectLibraryRuntime | undefined,
+  legacyWritesDisabled: boolean,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -272,7 +287,16 @@ async function handleRequest(
       workspaceSessions,
     )
   ) return;
-  if (await handleWorkspaceRoute(request, response, url, business, legacyLocalAccessEnabled)) return;
+  if (
+    await handleWorkspaceRoute(
+      request,
+      response,
+      url,
+      business,
+      legacyLocalAccessEnabled,
+      legacyWritesDisabled,
+    )
+  ) return;
   if (
     await handleAgentRoute(
       request,
@@ -282,6 +306,7 @@ async function handleRequest(
       business,
       resolveAgentIdentity,
       legacyLocalAccessEnabled,
+      resolveAgentTaskContext,
     )
   ) return;
 
@@ -306,7 +331,20 @@ export function createApiServer(
   agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
   videoTaskStages: VideoTaskStageRuntime | undefined = undefined,
   projectLibrary: ProjectLibraryRuntime | undefined = undefined,
+  legacyWritesDisabled = false,
+  resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
 ): Server {
+  if (
+    legacyWritesDisabled &&
+    runtime !== undefined &&
+    !isMigrationSafeAgentRuntime(runtime)
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+      "A completed Workspace migration cannot use an Agent runtime with unverified V1 dependencies.",
+      503,
+    );
+  }
   if (
     workspaceSessions === undefined &&
     (
@@ -399,7 +437,77 @@ export function createApiServer(
           videoTaskStore!,
         )
   );
-  const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
+  const workspaceTaskContext = legacyWritesDisabled && adminStore !== undefined
+    ? new WorkspaceTaskContextResolver(
+        adminStore,
+        batchProjectStore!,
+        videoTaskStore!,
+        (tenantId, accountId) => activeWorkspaceSessions.listDevelopmentAccounts().find(
+          (account) => account.tenantId === tenantId && account.accountId === accountId,
+        )?.displayName,
+      )
+    : undefined;
+  const activeAgentTaskContext = !legacyWritesDisabled
+    ? undefined
+    : resolveAgentTaskContext ?? (workspaceTaskContext === undefined
+      ? async () => {
+          throw new BusinessRuntimeError(
+            "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+            "Migrated Agent sessions require a configured V2 task-context resolver.",
+            503,
+          );
+        }
+      : async (request, videoTaskId) => {
+          const bearer = readOptionalWorkspaceBearer(request);
+          if (bearer === undefined) {
+            throw new BusinessRuntimeError(
+              "AIC-AUTH-SESSION_REQUIRED",
+              "A valid workspace bearer session is required.",
+              401,
+            );
+          }
+          const session = await activeWorkspaceSessions.resolveSession(bearer);
+          return workspaceTaskContext.resolve(videoTaskId, session.scope);
+        });
+  const activeRuntime = runtime ?? createBusinessAgentRuntime(
+    business,
+    loadLocalAgentConfig(),
+    {
+      disableLegacyStrategyTools: legacyWritesDisabled,
+      ...(legacyWritesDisabled
+        ? {
+            resolveWorkStatus: videoTaskStore === undefined
+              ? async () => {
+                  throw new BusinessRuntimeError(
+                    "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+                    "Migrated Agent tools require a configured V2 task store.",
+                    503,
+                  );
+                }
+              : (taskContext, sessionScope) =>
+                  readWorkspaceTaskPolicyStatus(
+                    videoTaskStore,
+                    taskContext,
+                    sessionScope.tenantId,
+                  ),
+            resolveVehicleService: videoTaskStore === undefined
+              ? () => {
+                  throw new BusinessRuntimeError(
+                    "AIC-AGENT-TASK_CONTEXT_RUNTIME_NOT_CONFIGURED",
+                    "Migrated Agent vehicle tools require a configured V2 task store.",
+                    503,
+                  );
+                }
+              : (taskContext, sessionScope) =>
+                  createWorkspaceTaskVehicleService(
+                    videoTaskStore,
+                    taskContext,
+                    sessionScope,
+                  ),
+          }
+        : {}),
+    },
+  );
   const activeIdentityResolver = resolveAgentIdentity ??
     createWorkspaceAgentIdentityResolver(activeWorkspaceSessions, legacyLocalAccessEnabled);
   return createServer((request, response) => {
@@ -410,6 +518,7 @@ export function createApiServer(
       business,
       activeIdentityResolver,
       activeWorkspaceSessions,
+      activeAgentTaskContext,
       activeWorkspaceAdmin,
       activeProjectCreation,
       activeVideoTasks,
@@ -418,6 +527,7 @@ export function createApiServer(
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
       activeProjectLibrary,
+      legacyWritesDisabled,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -439,29 +549,44 @@ export async function startApiServer(
   agentActionCommands: AgentActionCommandRuntime | undefined = undefined,
   videoTaskStages: VideoTaskStageRuntime | undefined = undefined,
   projectLibrary: ProjectLibraryRuntime | undefined = undefined,
+  migrationStateDirectory = process.env.WORKSPACE_MIGRATION_DATA_DIRECTORY ?? ".data/workspace-migrations",
+  resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
 ): Promise<Server> {
-  const server = createApiServer(
-    runtime,
-    business,
-    resolveAgentIdentity,
-    workspaceSessions,
-    developmentAccountsEnabled,
-    legacyLocalAccessEnabled,
-    workspaceAdmin,
-    projectCreation,
-    videoTasks,
-    agentActionCommands,
-    videoTaskStages,
-    projectLibrary,
-  );
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, host, () => {
-      server.off("error", reject);
-      resolve();
+  const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
+  const apiLease = await migrationState.acquireApiLease();
+  try {
+    const legacyWritesDisabled = (await migrationState.inspect()).completedMigrationIds.length > 0;
+    const server = createApiServer(
+      runtime,
+      business,
+      resolveAgentIdentity,
+      workspaceSessions,
+      developmentAccountsEnabled,
+      legacyLocalAccessEnabled,
+      workspaceAdmin,
+      projectCreation,
+      videoTasks,
+      agentActionCommands,
+      videoTaskStages,
+      projectLibrary,
+      legacyWritesDisabled,
+      resolveAgentTaskContext,
+    );
+    server.once("close", () => {
+      void apiLease.release().catch(() => undefined);
     });
-  });
-  return server;
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+    return server;
+  } catch (error) {
+    await apiLease.release();
+    throw error;
+  }
 }
 
 const isEntrypoint = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
@@ -469,11 +594,11 @@ if (isEntrypoint) {
   const configuredPort = Number.parseInt(process.env.PORT ?? "3100", 10);
   const configuredHost = process.env.HOST ?? "127.0.0.1";
   const business = new LocalBusinessRuntime();
-  const runtime = createBusinessAgentRuntime(business);
-  const server = await startApiServer(configuredPort, configuredHost, runtime, business);
+  const agentConfig = loadLocalAgentConfig();
+  const server = await startApiServer(configuredPort, configuredHost, undefined, business);
   const address = server.address();
   const activePort = typeof address === "object" && address ? address.port : configuredPort;
   console.log(
-    `Firefly Local Agent API listening on http://${configuredHost}:${activePort} provider=${runtime.config.provider} model=${runtime.config.modelId}`,
+    `Firefly Local Agent API listening on http://${configuredHost}:${activePort} provider=${agentConfig.provider} model=${agentConfig.modelId}`,
   );
 }

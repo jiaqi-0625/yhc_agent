@@ -133,7 +133,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   const agentApiScript = await agentApiResponse.text();
   const agentPanelScript = await agentPanelResponse.text();
   const workspaceApiScript = await workspaceApiResponse.text();
-  assert.match(script, /firefly\.workId/u);
+  assert.match(script, /selectedVideoTaskStorageKey/u);
+  assert.doesNotMatch(script, /firefly\.workId/u);
   assert.match(script, /\.\/agent-api\.js/u);
   assert.match(script, /\.\/workspace-api\.js/u);
   assert.match(script, /\.\/project-library\.js/u);

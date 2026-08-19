@@ -17,11 +17,15 @@ import {
 import { workspaceApi } from "./workspace-api.js";
 import {
   bindWorkspaceShell,
+  migrateSelectedVideoTaskStorage,
   navigationBrandStorageKey,
   normalizeNavigationBrands,
   resolveNavigationBrandId,
+  selectedVideoTaskStorageKey,
   workSummaryMatchesNavigationBrand,
 } from "./workspace-shell.js";
+
+migrateSelectedVideoTaskStorage(localStorage);
 
 const state = {
   sessionId: null,
@@ -462,7 +466,7 @@ function renderStrategyItems(strategy, editable) {
 function renderWork(view) {
   state.work = view;
   if (!view) {
-    localStorage.removeItem("firefly.workId");
+    localStorage.removeItem(selectedVideoTaskStorageKey);
     elements.createWorkCard.hidden = false;
     elements.activeWork.hidden = true;
     elements.workStatus.textContent = "尚未创建";
@@ -488,7 +492,7 @@ function renderWork(view) {
     renderNavigationBrands();
   }
   if (state.sessionVideoTaskId !== work.id) renderTaskContext(null);
-  localStorage.setItem("firefly.workId", work.id);
+  localStorage.setItem(selectedVideoTaskStorageKey, work.id);
   elements.createWorkCard.hidden = true;
   elements.activeWork.hidden = false;
   elements.workStatus.textContent = statusLabels[work.status] || work.status;
@@ -585,7 +589,7 @@ async function loadWorks(scope = captureWorkspaceScope()) {
     renderWork(null);
     return true;
   }
-  const saved = localStorage.getItem("firefly.workId");
+  const saved = localStorage.getItem(selectedVideoTaskStorageKey);
   const selected = scopedWorks.find(function (summary) { return summary.work.id === saved; }) || scopedWorks[0];
   const view = await workspaceApi.getWork(selected.work.id);
   if (!isCurrentWorkspaceScope(scope)) return false;

@@ -291,6 +291,9 @@ function validateRecord(
     (snapshot) => `${snapshot.vehicleId}:${snapshot.vehicleVersion}`,
   );
   const strategyDraftIds = new Set(record.strategyDrafts.map(({ id: draftId }) => draftId));
+  const strategyDraftsById = new Map(
+    record.strategyDrafts.map((draft) => [draft.id, draft] as const),
+  );
   const strategyDraftVersions = record.strategyDrafts.map(({ version }) => version);
   const latestStrategyDraft = record.strategyDrafts.reduce<
     VideoTaskProductionRecord["strategyDrafts"][number] | undefined
@@ -336,6 +339,14 @@ function validateRecord(
       : record.activeStrategyDraftId !== latestStrategyDraft.id)
   ) {
     throw new Error("Persisted video task has an invalid strategy draft or vehicle snapshot pointer.");
+  }
+  const migratedApprovalIds = record.strategyDrafts.flatMap((draft) =>
+    draft.generation.kind === "legacy_migration"
+      ? draft.generation.approvals.map(({ legacyApprovalId }) => legacyApprovalId)
+      : [],
+  );
+  if (new Set(migratedApprovalIds).size !== migratedApprovalIds.length) {
+    throw new Error("Persisted video task has duplicate migrated strategy approval identities.");
   }
   const artifactsById = new Map(
     record.stageArtifactVersions.map((artifact) => [artifact.id, artifact] as const),
@@ -385,6 +396,38 @@ function validateRecord(
         throw new Error("Persisted video task has an invalid stage artifact provenance graph.");
       }
     }
+  }
+  const referencedMigratedApprovalIds = new Set<string>();
+  for (const artifact of record.stageArtifactVersions) {
+    if (artifact.provenance.kind !== "migrated_confirmation") continue;
+    const legacyApprovalId = artifact.provenance.legacyApprovalId;
+    const draft = strategyDraftsById.get(artifact.content.artifactId);
+    // Aggregates predating explicit migrated strategy drafts used this
+    // provenance to preserve orphaned V1-V4 artifact confirmations. Keep
+    // those non-draft references readable, but bind every imported strategy
+    // draft to its exact approved legacy decision.
+    if (artifact.content.schemaName !== "video_task_strategy_draft" && draft === undefined) {
+      continue;
+    }
+    const approval = draft?.generation.kind === "legacy_migration"
+      ? draft.generation.approvals.find(
+          (candidate) => candidate.legacyApprovalId === legacyApprovalId,
+        )
+      : undefined;
+    if (
+      artifact.stage !== "strategy" ||
+      artifact.content.schemaName !== "video_task_strategy_draft" ||
+      draft === undefined ||
+      draft.generation.kind !== "legacy_migration" ||
+      approval === undefined ||
+      approval.decision !== "approved" ||
+      artifact.createdBy !== approval.actorAccountId ||
+      artifact.createdAt !== approval.occurredAt ||
+      referencedMigratedApprovalIds.has(approval.legacyApprovalId)
+    ) {
+      throw new Error("Persisted video task has an invalid migrated strategy approval graph.");
+    }
+    referencedMigratedApprovalIds.add(approval.legacyApprovalId);
   }
   for (const confirmation of record.stageConfirmations) {
     const artifact = artifactsById.get(confirmation.artifactVersionId);
@@ -620,6 +663,7 @@ function validateRecord(
         : undefined;
       if (
         draft === undefined ||
+        draft.generation.kind !== "vehicle_fact_projection" ||
         draft.createdBy !== receipt.actorAccountId ||
         draft.createdAt !== receipt.occurredAt
       ) {
@@ -729,9 +773,14 @@ function validateRecord(
       ? [receipt.result.strategyDraftId]
       : [],
   );
+  const generatedDraftIdSet = new Set(generatedDraftIds);
+  const commandGeneratedDraftIds = record.strategyDrafts
+    .filter((draft) => draft.generation.kind === "vehicle_fact_projection")
+    .map(({ id: draftId }) => draftId);
   if (
-    new Set(generatedDraftIds).size !== generatedDraftIds.length ||
-    generatedDraftIds.length !== record.strategyDrafts.length
+    generatedDraftIdSet.size !== generatedDraftIds.length ||
+    generatedDraftIds.length !== commandGeneratedDraftIds.length ||
+    commandGeneratedDraftIds.some((draftId) => !generatedDraftIdSet.has(draftId))
   ) {
     throw new Error("Persisted video task has an invalid strategy command receipt graph.");
   }

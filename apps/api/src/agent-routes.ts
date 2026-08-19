@@ -34,6 +34,11 @@ export type AgentIdentityResolver = (
   request: IncomingMessage,
 ) => AuthenticatedAgentIdentity | Promise<AuthenticatedAgentIdentity>;
 
+export type AgentTaskContextResolver = (
+  request: IncomingMessage,
+  videoTaskId: string,
+) => TaskContext | Promise<TaskContext>;
+
 async function sessionScope(
   request: IncomingMessage,
   taskContext: TaskContext,
@@ -48,13 +53,18 @@ async function sessionScope(
   };
 }
 
-async function routeScope(
+interface AgentRouteAuthorization {
+  scope?: AgentSessionScope;
+  taskContext?: TaskContext;
+}
+
+async function routeAuthorization(
   request: IncomingMessage,
   url: URL,
-  business: LocalBusinessRuntime,
+  resolveTaskContext: AgentTaskContextResolver,
   resolveIdentity: AgentIdentityResolver,
   required: boolean,
-): Promise<AgentSessionScope | undefined> {
+): Promise<AgentRouteAuthorization> {
   const videoTaskId = url.searchParams.get("videoTaskId");
   if (!videoTaskId) {
     if (required) {
@@ -64,10 +74,13 @@ async function routeScope(
         401,
       );
     }
-    return undefined;
+    return {};
   }
-  const taskContext = await resolveLocalTaskContext(business, videoTaskId);
-  return sessionScope(request, taskContext, resolveIdentity);
+  const taskContext = await resolveTaskContext(request, videoTaskId);
+  return {
+    taskContext,
+    scope: await sessionScope(request, taskContext, resolveIdentity),
+  };
 }
 
 function sessionRoute(pathname: string): { sessionId: string; action?: string } | undefined {
@@ -138,13 +151,17 @@ export async function handleAgentRoute(
   business: LocalBusinessRuntime,
   resolveIdentity: AgentIdentityResolver,
   legacyLocalAccessEnabled: boolean,
+  resolveAgentTaskContext?: AgentTaskContextResolver,
 ): Promise<boolean> {
+  const resolveTaskContext = resolveAgentTaskContext ??
+    ((_request: IncomingMessage, videoTaskId: string) =>
+      resolveLocalTaskContext(business, videoTaskId));
   if (request.method === "GET" && url.pathname === "/v1/sessions") {
     const videoTaskId = url.searchParams.get("videoTaskId");
     if (!videoTaskId) throw new Error("Video task id is required when listing Agent sessions.");
-    const taskContext = await resolveLocalTaskContext(business, videoTaskId);
+    const taskContext = await resolveTaskContext(request, videoTaskId);
     const scope = await sessionScope(request, taskContext, resolveIdentity);
-    sendJson(response, 200, { sessions: await runtime.listSessions(scope) });
+    sendJson(response, 200, { sessions: await runtime.listSessions(scope, taskContext) });
     return true;
   }
   if (request.method === "POST" && url.pathname === "/v1/sessions") {
@@ -164,7 +181,7 @@ export async function handleAgentRoute(
     const videoTaskId = (body.videoTaskId ?? body.workId) as string | undefined;
     const taskContext = videoTaskId === undefined
       ? undefined
-      : await resolveLocalTaskContext(business, videoTaskId);
+      : await resolveTaskContext(request, videoTaskId);
     if (taskContext === undefined && (workspaceBearer !== undefined || !legacyLocalAccessEnabled)) {
       throw new BusinessRuntimeError(
         "AIC-AUTH-SESSION_SCOPE_REQUIRED",
@@ -185,15 +202,17 @@ export async function handleAgentRoute(
 
   const matchedRun = runRoute(url.pathname);
   if (matchedRun) {
+    const authorization = await routeAuthorization(
+      request,
+      url,
+      resolveTaskContext,
+      resolveIdentity,
+      requiresTaskScope(request, legacyLocalAccessEnabled),
+    );
     await runtime.authorizeSession(
       matchedRun.sessionId,
-      await routeScope(
-        request,
-        url,
-        business,
-        resolveIdentity,
-        requiresTaskScope(request, legacyLocalAccessEnabled),
-      ),
+      authorization.scope,
+      authorization.taskContext,
     );
     if (request.method === "POST" && matchedRun.runId === undefined) {
       const body = await readJson(request);
@@ -223,15 +242,17 @@ export async function handleAgentRoute(
 
   const route = sessionRoute(url.pathname);
   if (!route) return false;
+  const authorization = await routeAuthorization(
+    request,
+    url,
+    resolveTaskContext,
+    resolveIdentity,
+    requiresTaskScope(request, legacyLocalAccessEnabled),
+  );
   await runtime.authorizeSession(
     route.sessionId,
-    await routeScope(
-      request,
-      url,
-      business,
-      resolveIdentity,
-      requiresTaskScope(request, legacyLocalAccessEnabled),
-    ),
+    authorization.scope,
+    authorization.taskContext,
   );
   if (request.method === "GET" && route.action === undefined) {
     const session = await runtime.getSession(route.sessionId);

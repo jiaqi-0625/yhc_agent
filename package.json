@@ -14,6 +14,7 @@
     "dev:api": "tsx --env-file-if-exists=.env watch apps/api/src/server.ts",
     "start:api": "tsx --env-file-if-exists=.env apps/api/src/server.ts",
     "dev:cli": "tsx --env-file-if-exists=.env apps/cli/src/main.ts",
+    "migrate:workspace-v2": "tsx apps/api/src/legacy-work-migration-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"packages/**/test/*.test.ts\" \"apps/**/test/*.test.ts\"",
     "security:check": "node scripts/security-check.mjs",

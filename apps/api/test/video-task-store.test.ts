@@ -177,6 +177,61 @@ function recordWithCommandState(): VideoTaskProductionRecord {
   return value;
 }
 
+function recordWithLegacyMigrationState(): VideoTaskProductionRecord {
+  const value = recordWithCommandState();
+  const draft = value.strategyDrafts[0]!;
+  draft.status = "draft";
+  draft.generation = {
+    kind: "legacy_migration",
+    migratedFromSchemaVersion: 1,
+    migrationId: "migration_ws307_v1",
+    legacyStrategyId: "legacy_strategy_1",
+    legacyStrategyStatus: "approved",
+    model: "legacy-model",
+    templateVersion: "legacy-template-v1",
+    approvals: [{
+      legacyApprovalId: "legacy_approval_approved_1",
+      decision: "approved",
+      actorAccountId: "reviewer_local",
+      comment: "历史人工审批通过。",
+      occurredAt: "2026-08-19T08:03:00.000Z",
+    }],
+  };
+  value.videoTask = {
+    ...value.videoTask,
+    currentStage: "asset_matching",
+    stageStatus: "in_progress",
+  };
+  value.stageConfirmationRequests = [];
+  value.commandReceipts = [];
+  value.stageArtifactVersions = [{
+    id: "artifact_migrated_strategy_v1",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    stage: "strategy",
+    version: 1,
+    content: {
+      artifactId: draft.id,
+      schemaName: "video_task_strategy_draft",
+      schemaVersion: draft.schemaVersion,
+      contentHashSha256: "d".repeat(64),
+    },
+    dependencies: [{
+      kind: "vehicle_snapshot",
+      vehicleSnapshotId: value.taskVehicleSnapshots[0]!.id,
+    }],
+    provenance: {
+      kind: "migrated_confirmation",
+      legacyApprovalId: "legacy_approval_approved_1",
+    },
+    createdAt: "2026-08-19T08:03:00.000Z",
+    createdBy: "reviewer_local",
+  }];
+  value.activeStageArtifactVersionIds = { strategy: "artifact_migrated_strategy_v1" };
+  return value;
+}
+
 function recordWithArtifactGraph(): VideoTaskProductionRecord {
   const value = record();
   value.videoTask = {
@@ -465,6 +520,131 @@ test("v6 command state accepts warnings and preserves its complete reference gra
     await new LocalVideoTaskProductionStore(directory).load(input.videoTask.id),
     input,
   );
+});
+
+test("legacy migration drafts persist without fabricated Agent command receipts", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-legacy-strategy-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const input = recordWithLegacyMigrationState();
+  const generation = input.strategyDrafts[0]!.generation;
+  assert.equal(generation.kind, "legacy_migration");
+  if (generation.kind === "legacy_migration") {
+    generation.approvals.unshift({
+      legacyApprovalId: "legacy_approval_rejected_1",
+      decision: "rejected",
+      actorAccountId: "reviewer_local",
+      comment: "历史驳回保留但不充当确认。",
+      occurredAt: "2026-08-19T08:02:30.000Z",
+    });
+  }
+  await new LocalVideoTaskProductionStore(directory).create(input, metadata());
+  assert.deepEqual(
+    await new LocalVideoTaskProductionStore(directory).load(input.videoTask.id),
+    input,
+  );
+  assert.deepEqual(input.stageConfirmations, []);
+  assert.deepEqual(input.commandReceipts, []);
+
+  const projectionWithoutGenerationReceipt = recordWithCommandState();
+  projectionWithoutGenerationReceipt.commandReceipts =
+    projectionWithoutGenerationReceipt.commandReceipts.filter(
+      (receipt) => receipt.action !== "generate_strategy",
+    );
+  await assert.rejects(
+    new LocalVideoTaskProductionStore(".data/test-video-task-projection-without-receipt", false)
+      .save(projectionWithoutGenerationReceipt),
+    /strategy command receipt graph/u,
+  );
+
+  const legacyWithFabricatedReceipt = recordWithLegacyMigrationState();
+  legacyWithFabricatedReceipt.commandReceipts = [{
+    schemaVersion: 1,
+    id: "fabricated_legacy_generation_receipt",
+    tenantId: legacyWithFabricatedReceipt.videoTask.tenantId,
+    batchProjectId: legacyWithFabricatedReceipt.videoTask.batchProjectId,
+    videoTaskId: legacyWithFabricatedReceipt.videoTask.id,
+    actorAccountId: "account_creator",
+    requestId: "fabricated_legacy_generation_request",
+    payloadHash: "e".repeat(64),
+    action: "generate_strategy",
+    expectedTaskRevision: 1,
+    resultingTaskRevision: 2,
+    cost: { kind: "free", amountMinor: 0, charged: false },
+    result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+    occurredAt: "2026-08-19T08:01:00.000Z",
+  }];
+  await assert.rejects(
+    new LocalVideoTaskProductionStore(".data/test-video-task-legacy-fabricated-receipt", false)
+      .save(legacyWithFabricatedReceipt),
+    /invalid strategy command receipt/u,
+  );
+});
+
+test("legacy migration approval identities and artifact provenance fail closed", async () => {
+  const secondDraft = (
+    candidate: VideoTaskProductionRecord,
+    duplicateApprovalId = false,
+  ): void => {
+    const first = candidate.strategyDrafts[0]!;
+    candidate.strategyDrafts.push({
+      ...structuredClone(first),
+      id: "strategy_draft_2",
+      version: 2,
+      generation: {
+        kind: "legacy_migration",
+        migratedFromSchemaVersion: 1,
+        migrationId: "migration_ws307_v1",
+        legacyStrategyId: "legacy_strategy_2",
+        legacyStrategyStatus: "approved",
+        model: "human-edit",
+        templateVersion: "legacy-template-v1",
+        approvals: [{
+          legacyApprovalId: duplicateApprovalId
+            ? "legacy_approval_approved_1"
+            : "legacy_approval_approved_2",
+          decision: "approved",
+          actorAccountId: "reviewer_local",
+          occurredAt: "2026-08-19T08:04:00.000Z",
+        }],
+      },
+      createdAt: "2026-08-19T08:03:30.000Z",
+      updatedAt: "2026-08-19T08:03:30.000Z",
+    });
+    candidate.activeStrategyDraftId = "strategy_draft_2";
+  };
+  const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
+    ["rejected approval used as confirmation", (candidate) => {
+      const generation = candidate.strategyDrafts[0]!.generation;
+      assert.equal(generation.kind, "legacy_migration");
+      if (generation.kind === "legacy_migration") generation.approvals[0]!.decision = "rejected";
+    }],
+    ["approval belongs to another draft", (candidate) => {
+      secondDraft(candidate);
+      candidate.stageArtifactVersions[0]!.content.artifactId = "strategy_draft_2";
+    }],
+    ["duplicate approval identity across drafts", (candidate) => {
+      secondDraft(candidate, true);
+    }],
+    ["approval actor mismatch", (candidate) => {
+      candidate.stageArtifactVersions[0]!.createdBy = "reviewer_other";
+    }],
+    ["approval time mismatch", (candidate) => {
+      candidate.stageArtifactVersions[0]!.createdAt = "2026-08-19T08:03:01.000Z";
+    }],
+    ["missing strategy draft", (candidate) => {
+      candidate.stageArtifactVersions[0]!.content.artifactId = "strategy_draft_missing";
+    }],
+  ];
+  for (const [label, mutate] of cases) {
+    const candidate = recordWithLegacyMigrationState();
+    mutate(candidate);
+    await assert.rejects(
+      new LocalVideoTaskProductionStore(`.data/test-video-task-legacy-${label}`, false)
+        .save(candidate),
+      /duplicate migrated strategy approval|invalid migrated strategy approval graph/u,
+      label,
+    );
+  }
 });
 
 test("v6 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {

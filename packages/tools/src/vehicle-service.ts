@@ -63,6 +63,22 @@ export interface ClaimValidationResult {
   results: ClaimValidationItem[];
 }
 
+/**
+ * Minimal server-side port used by the Agent vehicle tools. A persistent
+ * reader may be asynchronous; the local V1 implementation remains a valid
+ * synchronous implementation of the same contract.
+ */
+export interface VehicleServicePort {
+  createSnapshot(
+    request: VehicleSnapshotRequest,
+    scope: ToolExecutionScope,
+  ): VehicleSnapshot | Promise<VehicleSnapshot>;
+  validateClaims(
+    request: ClaimValidationRequest,
+    scope: ToolExecutionScope,
+  ): ClaimValidationResult | Promise<ClaimValidationResult>;
+}
+
 export class VehicleAccessError extends Error {
   readonly code = "AIC-AUTH-VEHICLE_SCOPE_DENIED";
 
@@ -98,6 +114,58 @@ function normalize(value: string): string {
   return value.normalize("NFKC").replace(/[\s，。！？、；：,.!?;:]/gu, "").toLocaleLowerCase("zh-CN");
 }
 
+/** Validate statements against one already-authorized immutable snapshot. */
+export function validateClaimsAgainstSnapshot(
+  request: Readonly<ClaimValidationRequest>,
+  snapshot: Readonly<VehicleSnapshot>,
+): ClaimValidationResult {
+  if (request.snapshotId !== snapshot.id) throw new SnapshotNotFoundError(request.snapshotId);
+  const claims = [...snapshot.fixedClaims, ...snapshot.optionalClaims];
+
+  return {
+    snapshotId: snapshot.id,
+    results: request.statements.map((statement) => {
+      const normalized = normalize(statement);
+      const prohibitedExpressions = snapshot.prohibitedClaims.filter((term) =>
+        normalized.includes(normalize(term)),
+      );
+      if (prohibitedExpressions.length > 0) {
+        return {
+          statement,
+          status: "prohibited" as const,
+          reason: `检测到禁用表达：${prohibitedExpressions.map((term) => `“${term}”`).join("、")}。`,
+          prohibitedExpressions: [...prohibitedExpressions],
+        };
+      }
+
+      const matches = claims.filter((claim) => {
+        const approved = normalize(claim.statement);
+        return normalized === approved || (claim.mayRephrase && normalized.includes(approved));
+      });
+      if (matches.length > 0) {
+        return {
+          statement,
+          status: "supported" as const,
+          reason: `该表述由车型事实${matches.map((claim) => `“${claim.name}”`).join("、")}支持。`,
+          factReferences: matches.map((claim) => ({
+            claimId: claim.id,
+            claimName: claim.name,
+            approvedStatement: claim.statement,
+            riskNotes: [...claim.riskNotes],
+            ...(claim.evidence === undefined ? {} : { evidence: structuredClone(claim.evidence) }),
+          })),
+        };
+      }
+
+      return {
+        statement,
+        status: "unverified" as const,
+        reason: "当前车型快照中没有可支持该表述的官方事实。",
+      };
+    }),
+  };
+}
+
 function snapshotIdentifier(scope: ToolExecutionScope, entry: VehicleCatalogEntry, request: VehicleSnapshotRequest): string {
   const source = JSON.stringify({
     tenantId: scope.tenantId,
@@ -111,7 +179,7 @@ function snapshotIdentifier(scope: ToolExecutionScope, entry: VehicleCatalogEntr
   return `vs_${createHash("sha256").update(source).digest("hex").slice(0, 24)}`;
 }
 
-export class InMemoryVehicleService {
+export class InMemoryVehicleService implements VehicleServicePort {
   readonly #catalog = new Map<string, VehicleCatalogEntry>();
   readonly #snapshots = new Map<string, VehicleSnapshot>();
 
@@ -164,49 +232,6 @@ export class InMemoryVehicleService {
 
   validateClaims(request: ClaimValidationRequest, scope: ToolExecutionScope): ClaimValidationResult {
     const snapshot = this.getSnapshot(request.snapshotId, scope);
-    const claims = [...snapshot.fixedClaims, ...snapshot.optionalClaims];
-
-    return {
-      snapshotId: snapshot.id,
-      results: request.statements.map((statement) => {
-        const normalized = normalize(statement);
-        const prohibitedExpressions = snapshot.prohibitedClaims.filter((term) =>
-          normalized.includes(normalize(term)),
-        );
-        if (prohibitedExpressions.length > 0) {
-          return {
-            statement,
-            status: "prohibited" as const,
-            reason: `检测到禁用表达：${prohibitedExpressions.map((term) => `“${term}”`).join("、")}。`,
-            prohibitedExpressions,
-          };
-        }
-
-        const matches = claims.filter((claim) => {
-          const approved = normalize(claim.statement);
-          return normalized === approved || (claim.mayRephrase && normalized.includes(approved));
-        });
-        if (matches.length > 0) {
-          return {
-            statement,
-            status: "supported" as const,
-            reason: `该表述由车型事实${matches.map((claim) => `“${claim.name}”`).join("、")}支持。`,
-            factReferences: matches.map((claim) => ({
-              claimId: claim.id,
-              claimName: claim.name,
-              approvedStatement: claim.statement,
-              riskNotes: [...claim.riskNotes],
-              ...(claim.evidence === undefined ? {} : { evidence: structuredClone(claim.evidence) }),
-            })),
-          };
-        }
-
-        return {
-          statement,
-          status: "unverified" as const,
-          reason: "当前车型快照中没有可支持该表述的官方事实。",
-        };
-      }),
-    };
+    return validateClaimsAgainstSnapshot(request, snapshot);
   }
 }
