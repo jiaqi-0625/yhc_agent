@@ -9,7 +9,7 @@ import {
 } from "@firefly/agent";
 import type { SessionScope } from "@firefly/domain";
 import type { TaskContext } from "@firefly/schemas";
-import type { TaskAssetSnapshotReader } from "@firefly/tools";
+import type { StageSuggestionContextReader, TaskAssetSnapshotReader } from "@firefly/tools";
 
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
@@ -27,6 +27,10 @@ export interface BusinessAgentRuntimeOptions {
     taskContext: Readonly<TaskContext>,
     sessionScope: Readonly<AgentSessionScope>,
   ) => TaskAssetSnapshotReader | undefined;
+  resolveStageSuggestionReader?: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => StageSuggestionContextReader | undefined;
 }
 
 export function createBusinessAgentRuntime(
@@ -42,6 +46,10 @@ export function createBusinessAgentRuntime(
     store,
     (context) => {
       const taskAssetReader = options.resolveTaskAssetReader?.(
+        context.taskContext,
+        context.sessionScope,
+      );
+      const stageSuggestionReader = options.resolveStageSuggestionReader?.(
         context.taskContext,
         context.sessionScope,
       );
@@ -62,6 +70,7 @@ export function createBusinessAgentRuntime(
         vehicleService: business.vehicleService,
         strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id),
         ...(taskAssetReader === undefined ? {} : { taskAssetReader }),
+        ...(stageSuggestionReader === undefined ? {} : { stageSuggestionReader }),
       });
     },
     (legacyWorkId) => resolveLocalTaskContext(business, legacyWorkId),

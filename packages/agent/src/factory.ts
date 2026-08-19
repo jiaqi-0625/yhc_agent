@@ -10,10 +10,12 @@ import type { Api, Model, TextContent } from "@earendil-works/pi-ai";
 import { evaluateToolPolicy, type SessionScope } from "@firefly/domain";
 import type { TaskContext, WorkStatus } from "@firefly/schemas";
 import {
+  createStageSuggestionTools,
   createStrategyTools,
   createTaskAssetTools,
   createVehicleTools,
   type InMemoryVehicleService,
+  type StageSuggestionContextReader,
   type StrategyWorkflowPort,
   type TaskAssetSnapshotReader,
 } from "@firefly/tools";
@@ -45,6 +47,7 @@ export interface CreateAdvertisingAgentOptions {
   vehicleService: InMemoryVehicleService;
   strategyService?: StrategyWorkflowPort;
   taskAssetReader?: TaskAssetSnapshotReader;
+  stageSuggestionReader?: StageSuggestionContextReader;
   auditSink?: AgentAuditSink;
 }
 
@@ -85,6 +88,13 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   ) {
     throw new Error("Task asset reader scope does not match the server-resolved task context.");
   }
+  if (
+    options.stageSuggestionReader !== undefined &&
+    (options.taskContext === undefined ||
+      options.taskContext.videoTask.id !== options.stageSuggestionReader.videoTaskId)
+  ) {
+    throw new Error("Stage suggestion reader scope does not match the server-resolved task context.");
+  }
   const vehicleTools = createVehicleTools(options.vehicleService, {
     actorId: options.scope.actorId,
     tenantId: options.scope.tenantId,
@@ -94,6 +104,7 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   const tools = [
     ...vehicleTools,
     ...(options.taskAssetReader === undefined ? [] : createTaskAssetTools(options.taskAssetReader)),
+    ...(options.stageSuggestionReader === undefined ? [] : createStageSuggestionTools(options.stageSuggestionReader)),
     ...(options.strategyService === undefined ? [] : createStrategyTools(options.strategyService)),
   ];
 

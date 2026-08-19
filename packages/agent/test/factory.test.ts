@@ -136,6 +136,42 @@ test("task-bound assembly adds the immutable asset snapshot reader only for the 
   );
 });
 
+test("task-bound assembly adds stage suggestions only for the matching server-bound task", () => {
+  const reader = {
+    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+    async read() { throw new Error("not called"); },
+  };
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    taskContext: MOCK_TASK_CONTEXT,
+    getWorkStatus: () => "script_draft",
+    vehicleService: new InMemoryVehicleService([]),
+    stageSuggestionReader: reader,
+  });
+  assert.deepEqual(agent.state.tools.map((tool) => tool.name), [
+    "get_vehicle_snapshot",
+    "validate_vehicle_claims",
+    "get_current_stage_suggestion_context",
+  ]);
+  assert.match(agent.state.systemPrompt, /脚本、分镜或交付阶段建议前/u);
+  assert.match(agent.state.systemPrompt, /已确认上游产物精确版本/u);
+  assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext: MOCK_TASK_CONTEXT,
+      getWorkStatus: () => "script_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      stageSuggestionReader: { ...reader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
+});
+
 test("before-tool hook blocks a registered tool in the wrong workflow state", async () => {
   const agent = createAgent("script_draft");
   assert.ok(agent.beforeToolCall);

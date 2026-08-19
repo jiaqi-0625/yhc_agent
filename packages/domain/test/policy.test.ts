@@ -27,6 +27,22 @@ test("policy allows the task-bound asset snapshot reader but not a catalog searc
   assert.equal(evaluateToolPolicy({ toolName: "search_company_assets", status: "created", scope }).allowed, false);
 });
 
+test("policy exposes stage suggestion reads only in script, storyboard, and delivery workflow states", () => {
+  for (const status of ["strategy_approved", "script_draft", "storyboard_draft", "export_ready"] as const) {
+    assert.deepEqual(
+      evaluateToolPolicy({ toolName: "get_current_stage_suggestion_context", status, scope }),
+      { allowed: true, risk: "read" },
+    );
+  }
+  const decision = evaluateToolPolicy({
+    toolName: "get_current_stage_suggestion_context",
+    status: "created",
+    scope,
+  });
+  assert.equal(decision.allowed, false);
+  if (!decision.allowed) assert.equal(decision.code, "AIC-WORKFLOW-TOOL_NOT_ALLOWED");
+});
+
 test("policy allows non-mutating action proposals but rejects model-callable state changes", () => {
   assert.deepEqual(evaluateToolPolicy({ toolName: "propose_strategy_generation", status: "created", scope }), {
     allowed: true,
