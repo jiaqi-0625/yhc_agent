@@ -5,7 +5,7 @@
 > 当前状态：阻塞
 > 当前任务：WS-307
 > 最近更新：2026-08-19
-> 最新功能提交：`064f74a`（WS-307 功能提交，待本轮推送 `origin/main`）
+> 最新功能提交：`064f74a`（WS-307 功能提交，已推送 `origin/main`）
 > 关联 PR：不适用（直接提交 `main`）
 
 本文是工作区开发线的实时任务账本。产品边界以 [`docs/workspace-v2-product-spec.md`](../workspace-v2-product-spec.md) 为准；本文只记录实施顺序、责任、依赖和进度。
