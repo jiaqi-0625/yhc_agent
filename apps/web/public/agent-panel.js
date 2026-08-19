@@ -6,6 +6,53 @@ const panelResizerWidth = 6;
 const compactDesktopMaximum = 1180;
 const mobileMaximum = 980;
 
+function validMinorAmount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function formatMinorAmount(amountMinor, currency) {
+  const formatter = new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: currency,
+    currencyDisplay: "symbol",
+  });
+  const fractionDigits = formatter.resolvedOptions().maximumFractionDigits;
+  return formatter.format(amountMinor / (10 ** fractionDigits));
+}
+
+export function agentBudgetPresentation(view, expectedAccountId) {
+  if (view === undefined || view === null) {
+    return {
+      text: "额度：当前账号未配置",
+      title: "管理员尚未为当前账号配置制作额度。",
+    };
+  }
+  const balance = view.balance;
+  if (
+    typeof view.accountId !== "string"
+    || view.accountId !== expectedAccountId
+    || typeof view.currency !== "string"
+    || !/^[A-Z]{3}$/u.test(view.currency)
+    || !balance
+    || balance.currency !== view.currency
+    || !validMinorAmount(balance.limitAmountMinor)
+    || !validMinorAmount(balance.spentAmountMinor)
+    || !validMinorAmount(balance.reservedAmountMinor)
+    || !validMinorAmount(balance.availableAmountMinor)
+    || balance.spentAmountMinor + balance.reservedAmountMinor + balance.availableAmountMinor !== balance.limitAmountMinor
+  ) {
+    throw new Error("额度数据与当前账号不一致。");
+  }
+  const available = formatMinorAmount(balance.availableAmountMinor, view.currency);
+  const spent = formatMinorAmount(balance.spentAmountMinor, view.currency);
+  const reserved = formatMinorAmount(balance.reservedAmountMinor, view.currency);
+  const limit = formatMinorAmount(balance.limitAmountMinor, view.currency);
+  return {
+    text: `可用额度 ${available} · 已用 ${spent}` + (balance.reservedAmountMinor > 0 ? ` · 预留 ${reserved}` : ""),
+    title: `账号总额度 ${limit}；可用 ${available}；已用 ${spent}；预留 ${reserved}。`,
+  };
+}
+
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
 }

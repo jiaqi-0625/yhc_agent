@@ -122,3 +122,16 @@ test("browser Agent API stops start retries when the request is cancelled", asyn
   );
   assert.equal(calls, 1);
 });
+
+test("browser Agent API loads only the current session budget view", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  let requestUrl = "";
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    requestUrl = String(input);
+    return Response.json({ budget: undefined });
+  }) as typeof fetch;
+
+  assert.deepEqual(await agentApi.getOwnBudget(), {});
+  assert.equal(requestUrl, "/v1/workspace/me/budget");
+});

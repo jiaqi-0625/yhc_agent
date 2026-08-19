@@ -1,5 +1,5 @@
 import { agentApi } from "./agent-api.js";
-import { bindAgentPanel } from "./agent-panel.js";
+import { agentBudgetPresentation, bindAgentPanel } from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { workspaceApi } from "./workspace-api.js";
@@ -1093,6 +1093,31 @@ function renderAccount() {
   elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || state.account.role : "—";
 }
 
+function renderAgentBudget(presentation) {
+  elements.agentContextQuota.textContent = presentation.text;
+  elements.agentContextQuota.title = presentation.title || "";
+}
+
+async function refreshAgentBudget() {
+  const accountId = state.account?.accountId;
+  if (!accountId) {
+    renderAgentBudget({ text: "额度：—", title: "" });
+    return;
+  }
+  renderAgentBudget({ text: "额度：正在读取…", title: "" });
+  try {
+    const body = await agentApi.getOwnBudget();
+    if (state.account?.accountId !== accountId) return;
+    renderAgentBudget(agentBudgetPresentation(body.budget, accountId));
+  } catch {
+    if (state.account?.accountId !== accountId) return;
+    renderAgentBudget({
+      text: "额度：暂时无法读取",
+      title: "额度查询失败，请稍后重试。高消耗操作仍以后端校验结果为准。",
+    });
+  }
+}
+
 function renderTaskContext(context) {
   elements.agentContextBrand.textContent = context?.brand.name || "—";
   elements.agentContextVehicle.textContent = context?.vehicle.displayName || "—";
@@ -1233,6 +1258,7 @@ async function initializeWorkspaceAccount() {
     setWorkspaceSessionToken(storedToken);
     try {
       applyWorkspaceSession((await authApi.getSession()).session);
+      await refreshAgentBudget();
       return;
     } catch {
       setWorkspaceSessionToken(null);
@@ -1244,6 +1270,7 @@ async function initializeWorkspaceAccount() {
     || state.accounts.find(function (account) { return account.role === "creator"; })
     || state.accounts[0];
   applyWorkspaceSession((await authApi.createOrSwitchSession(selected.accountId)).session);
+  await refreshAgentBudget();
 }
 
 async function switchWorkspaceAccount(accountId) {
@@ -1259,6 +1286,7 @@ async function switchWorkspaceAccount(accountId) {
     state.sessions = [];
     state.taskContext = null;
     renderTaskContext(null);
+    await refreshAgentBudget();
     await loadWorks();
     await restoreSession();
   } catch (error) {

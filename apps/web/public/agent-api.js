@@ -179,6 +179,9 @@ async function streamAgentMessage(sessionId, message, options = {}) {
 }
 
 export const agentApi = {
+  getOwnBudget: function () {
+    return api("/v1/workspace/me/budget");
+  },
   listSessions: function (videoTaskId) {
     return api("/v1/sessions?videoTaskId=" + encodeURIComponent(videoTaskId));
   },
