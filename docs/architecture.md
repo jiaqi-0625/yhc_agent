@@ -1,71 +1,117 @@
-# 架构说明
+# Firefly Ad Agent 架构
 
-## 当前目标
+## 当前能力与边界
 
-当前工作区已经在 Agent 框架之上完成第一条本地业务纵切：不可变车型快照、版本化卖点策略、事实校验、人工锁定、审批请求和人工决策。策略生成默认使用确定性 Mock，不宣称已经具备真实模型策略质量、脚本、分镜、视频生成或投放能力。
+当前仓库已实现任务级 Agent 对话纵切：认证账号与一条 `VideoTask` 绑定会话，服务端装配只读任务上下文和领域白名单工具，通过可恢复 SSE 传输运行事件，并把模型建议转换为需要人工点击的操作卡片。业务状态机、权限、预算、负责人、revision、幂等和人工确认仍由服务端负责；聊天记录不是业务状态来源。
 
-本地验收页的聊天会话现在由服务端绑定当前 `workId`，并装配车型与策略白名单工具；未绑定作品的 CLI/框架会话仍保持无工具模式。Mock 模型用于无费用地验收装配、会话恢复和权限链路，不会自主发起工具调用。人工批准始终只存在于后端/UI。
+已覆盖车型事实、策略、任务素材快照，以及脚本、分镜和交付阶段的只读建议上下文。当前操作卡片仍通过既有兼容命令入口执行。统一命令 API、完整三栏 Workspace 接入和端到端交付链路分别依赖 WS-305、WS-404、WS-503，依赖完成前不宣称 Agent 操作闭环或最终联调完成。
 
-## 分层
-
-```text
-apps/api             HTTP/API 边界、本地作品存储、作品摘要/复制、黄金样例与人工审批命令
-packages/agent       Pi Agent 装配、系统提示词、策略钩子、审计与脱敏
-packages/tools       车型快照、宣传表述校验和策略草稿白名单工具
-packages/domain      工作流状态机、revision 冲突和工具策略
-packages/schemas     跨层 TypeBox 契约
-```
-
-依赖方向为 `api -> agent -> domain/tools -> schemas`。业务状态只由后端状态机推进，Pi 的消息历史不承担持久化业务状态职责。
-
-## 本地 Agent 运行链路
+## 分层与依赖
 
 ```text
-CLI / Local HTTP API
-        |
-        v
-LocalAgentRuntime
-  ├─ 配置与密钥解析（Mock / DeepSeek / 火山方舟）
-  ├─ Pi Agent Core 生命周期与 AbortSignal
-  ├─ 会话创建、作品绑定、恢复、重置和取消
-  └─ .data/sessions 中的本地聊天记录与 workId
-        |
-        v
-未绑定作品 -> createBaseAgent（tools=[]）
-绑定作品   -> createAdvertisingAgent
-              ├─ 车型快照与宣传表述校验
-              ├─ 策略生成、校验与请求人工审批
-              └─ 每次调用前读取最新作品状态并执行策略检查
+apps/web             账号与任务切换、Agent 面板、SSE 客户端、人工操作卡片
+apps/api             HTTP/SSE、认证解析、TaskContext 装配、兼容命令入口
+packages/agent       Pi Agent 生命周期、会话/运行存储、事件日志、审计与脱敏
+packages/tools       车型、资产、阶段建议和策略领域工具
+packages/domain      工作流状态机、工具策略、权限/revision/版本规则
+packages/schemas     TaskContext、事件、卡片及业务共享契约
 ```
 
-聊天记录和业务产物必须分开保存。本地 JSON 会话仅用于开发调试，不作为作品、审批、车型快照或生成任务的数据源。
+依赖方向是 `web -> api -> agent/tools/domain -> schemas`。API 可以把业务服务端口注入 Agent，但 Agent 不得直接访问数据库、文件系统、任意网络或审批接口。
 
-## 信任边界
+## 权威状态与上下文
 
-- 身份、租户、项目、品牌范围和预算来自认证后的服务端会话，通过闭包注入工具；模型参数中不存在这些字段。
-- Workspace V2 使用服务端解析的 `WorkspaceSessionScope` 和持久化 `WorkspaceAccessGrant`：品牌级授权只允许管理范围内的管理员维护和查看品牌资源，车型项目级授权允许制作成员创建/查看对应车型项目。任务可见性继承项目权限，但确认、回退和其他状态写入还必须由当前 `ownerAccountId` 执行；品牌管理员若没有车型项目成员资格只能查看，不能接管任务。旧 `SessionScope` 仅保留给 V1 Agent 工具策略兼容链路。
-- Agent 按当前作品装配车型读取、事实校验、策略校验，以及“建议生成策略”“建议请求人工审批”白名单工具。建议工具只返回版本化操作卡片，不写入业务状态；负责人点击卡片后，由服务端/UI 使用 revision 守卫执行生成或审批请求。生产运行时不得注册 shell、文件系统、SQL、任意 HTTP、浏览器、直接状态变更或人工批准工具。
-- 每次工具调用先经过 `beforeToolCall` 的角色、状态、审批通道和预算策略；未知工具默认拒绝。
-- Workspace V2 的权威任务流程使用 `VideoTask.currentStage + stageStatus`：`strategy → asset_matching → script → storyboard → video_preview → delivery`。当前阶段只能从 `in_progress` 提交为 `awaiting_confirmation`，再由显式 `human_action` 确认后进入紧邻下一阶段；交付确认后任务才成为 `completed`。旧 `WorkStatus` 状态机仅供现有策略纵向链路和迁移读取，不得用于新的 V2 写路径。
-- Workspace V2 的阶段版本聚合同时保存不可变产物、人工确认、各阶段当前选中版本、回退记录和失效记录。负责人回退时，服务端从被替换版本沿 `stage_artifact` 依赖图递归标记所有下游版本失效、清除受影响的当前版本指针，并将任务重置到下一阶段；后续确认不得引用已失效或非当前选中的上游版本。回退、失效和任务 revision 使用同一聚合原子落盘，Agent 只能提出目标版本和原因。
-- 工具结果在 `afterToolCall` 中写入审计并进行敏感字段脱敏。
-- 车型快照按租户、项目、车型版本、颜色、地区和活动日期生成稳定 ID；保存和返回均使用副本，避免调用者回写历史事实。
-- 审批是服务端/UI 的人工事件。模型能提示“需要审批”，但没有批准工具。
-- revision 检查阻止旧 Agent 输出覆盖人工的新版本。
+系统将三类状态严格分开：
 
-## 部署边界
+| 状态 | 权威来源 | Agent 用途 |
+| --- | --- | --- |
+| 身份与授权范围 | Bearer workspace session | 服务端解析 `actorId`、`tenantId`，不接受模型或浏览器声明 |
+| 任务与阶段版本 | 领域聚合与工作流状态机 | 每次装配/执行前重新读取，确认和回退产生不可变版本 |
+| 对话与运行事件 | Agent session/run store | 恢复消息与 SSE，不作为任务、审批、预算或素材事实来源 |
+
+`TaskContext` 只包含品牌、车型、批次项目、视频任务和制作简报摘要。账号、租户、权限、额度、运行锁、凭据和供应商私有字段被有意排除。会话另存服务端解析的 `AgentSessionScope`，包含 `actorId`、`tenantId`、`projectId` 和 `videoTaskId`；所有读取、恢复、重置、删除和运行操作都必须重新通过该范围授权。
+
+切换账号时，Web 先清空旧会话 ID、任务上下文和列表，再加载新账号的额度、项目、任务及会话，避免旧账号上下文残留。
+
+## 会话与运行链路
 
 ```text
-不可信边界                         受控应用边界                         数据/供应商边界
-用户与模型输出  ->  HTTP/SSE API  ->  状态机 + 策略引擎  ->  领域服务端口  ->  数据库/队列/对象存储
-                                        |
-                                        +-> Pi Agent Core -> 已批准模型供应商
-
-禁止路径：模型 -X-> 数据库 / 任意网络 / 审批事件 / 广告发布账户
+认证账号选择任务
+  -> POST /v1/sessions { videoTaskId }
+  -> API 解析 TaskContext + AgentSessionScope
+  -> Runtime 按当前任务装配领域工具
+  -> POST /v1/sessions/:sessionId/runs { message, requestId }
+  -> 202 返回稳定 runId
+  -> GET /v1/sessions/:sessionId/runs/:runId/events?videoTaskId=...
+  -> SSE 按 eventId/sequence 推送并保存事件日志
+  -> 断线后携带 Last-Event-ID 重连，仅重放其后的事件
+  -> 完成、错误或显式 abort
 ```
 
-API 负责认证并建立 `SessionScope`；Agent 只看到最小业务上下文。未来数据库、队列、对象存储和模型适配器放在领域服务端口之后，供应商凭据仅存在于服务端密钥系统。
+`requestId` 使同一次启动请求幂等；断开 SSE 订阅不会取消后台运行。客户端校验 `sessionId`、`runId`、任务范围和严格递增的 `sequence`，按 `eventId` 去重。`Last-Event-ID` 与 `afterEventId` 同时出现时必须一致，否则服务端拒绝请求。
 
-## 下一条纵切
+旧 `messages-stream` 与 `workId` 只保留本地兼容读取；认证会话必须提供 `videoTaskId`。持久化会话格式当前为 v3，并可迁移读取 v1 `workId` 与 v2 `TaskContext` 记录。会话 ID 和落盘路径都经过约束，不能用于目录穿越。
 
-下一条纵切进入结构化脚本草稿，但先把本地文件存储替换为 PostgreSQL 适配器，并补齐命令幂等、并发写入串行化和审计查询。脚本生成必须只读取已批准策略，完成固定卖点覆盖、车型事实、禁用词和口播时长校验后停在独立人工审批点；仍不进入图片或视频生成。
+## Agent 事件协议
+
+`AgentStreamEvent` v1 的每个事件都包含稳定 `eventId`、单次运行内递增的 `sequence`、`sessionId`、`runId`、时间戳及可选 `videoTaskId`。
+
+| 事件 | 含义 |
+| --- | --- |
+| `run_started` | 运行已受理并绑定会话/任务 |
+| `thinking_status` | 可公开的阶段状态；不传输隐藏推理 |
+| `message_started` / `text_delta` / `message_completed` | 助手消息生命周期 |
+| `tool_status` | 领域工具开始、完成或失败的可展示摘要 |
+| `plan_updated` | 结构化计划更新，契约已冻结 |
+| `action_card` | 结构化建议卡片，必须人工点击且再次服务端校验 |
+| `run_error` / `run_completed` | 运行终态 |
+
+工具参数、结果、审计摘要和持久化消息在进入对话时间线前执行敏感字段脱敏与大小限制；Bearer、密钥、token、cookie、密码和隐藏思考不会透传给前端。
+
+## 领域工具白名单
+
+当前按任务状态和可用服务端口动态装配以下工具：
+
+- `get_vehicle_snapshot`、`validate_vehicle_claims`：读取版本化车型事实并校验宣传表述。
+- `get_task_asset_snapshot`：读取任务开始策略工作时锁定的不可变素材快照；车型素材不可跨车型替换，人物/场景可推荐，视觉风格不参与替换，本地素材保留人工复核风险。
+- `get_current_stage_suggestion_context`：仅为脚本、分镜、交付阶段读取精确且未失效的已确认上游版本链。
+- `propose_strategy_generation`、`validate_strategy`、`propose_strategy_approval`：生成/校验策略建议并提出人工确认请求。
+
+所有动态工具必须同时存在于领域策略表；未知工具默认拒绝。生产 Agent 禁止注册 shell、通用文件系统、SQL、任意 HTTP、浏览器、直接批准、发布或媒介投放工具。
+
+## 操作卡片与人工确认
+
+卡片是建议，不是命令授权。前端只接受精确版本的 `AgentActionCard` 结构和动作白名单，并在跨任务、revision 过期、非负责人或运行繁忙时禁用。用户点击后，服务端仍须重新检查认证身份、任务范围、负责人、工作流状态、revision、预算、并发锁和幂等。
+
+当前策略兼容入口已执行点击后的 revision 与人工动作检查；完整统一命令结果、真实成本和标准错误卡片等待 WS-305。模型可以请求人工确认，但不能确认自己的产物。
+
+## 工作流和版本
+
+Workspace V2 权威流程为：
+
+```text
+strategy -> asset_matching -> script -> storyboard -> video_preview -> delivery
+```
+
+每个阶段从 `in_progress` 提交到 `awaiting_confirmation`，只有显式 `human_action` 才能确认并进入相邻下一阶段。每次确认持久化不可变版本。回退会沿依赖图递归失效所有下游产物、清除受影响的当前版本指针并重置任务阶段；Agent 只能建议目标版本和原因。
+
+项目素材池跟随目录最新数据，但任务在策略开始时锁定车型和素材版本。脚本、分镜与交付建议只能引用当前选中、已确认、未失效的精确上游版本，不能从聊天内容重建事实。
+
+## 部署与供应商边界
+
+```text
+用户/模型输出 -> HTTP/SSE API -> 状态机与策略 -> 领域服务端口 -> 数据库/队列/对象存储
+                                      |
+                                      +-> Pi Agent Core -> 已批准模型供应商
+
+禁止：模型 -> 数据库 / 任意网络 / 审批事件 / 广告发布账户
+```
+
+自动化测试使用 Mock Provider，不消耗真实模型额度。真实模型凭据仅从服务端环境读取，不进入仓库、日志、提示词、工具结果或测试夹具。调试方法见 [Agent 对话区调试指南](./agent-dialog-debugging.md)。
+
+## 尚待依赖
+
+- WS-305：统一命令 API 到位后完成 AG-403/AG-405 及操作卡片执行闭环。
+- WS-404：三栏 Workspace 到位后完成 Agent 面板最终嵌入与布局验收。
+- WS-503：真实交付链路到位后完成交付阶段联调。
+- 上述依赖完成后执行 AG-504 全链路联调、AG-505 浏览器验收、AG-506 最终质量门禁，再将 AG-507 标记完成。
