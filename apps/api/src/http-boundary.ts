@@ -1,7 +1,12 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { LocalAgentCredentialsError } from "@firefly/agent";
-import { RevisionConflictError } from "@firefly/domain";
+import {
+  AccountHighCostTaskRunningError,
+  AccountRunLockDeniedError,
+  AccountRunLockTokenMismatchError,
+  RevisionConflictError,
+} from "@firefly/domain";
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
@@ -65,7 +70,14 @@ export function validateBody<T>(schema: TSchema, body: Record<string, unknown>):
 export function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
   if (error instanceof LocalAgentCredentialsError) return 503;
-  if (error instanceof RevisionConflictError) return 409;
+  if (
+    error instanceof RevisionConflictError ||
+    error instanceof AccountHighCostTaskRunningError ||
+    error instanceof AccountRunLockDeniedError ||
+    error instanceof AccountRunLockTokenMismatchError
+  ) {
+    return 409;
+  }
   if (error.message.includes("was not found")) return 404;
   if (error.message.includes("already exists") || error.message.includes("already running")) return 409;
   return 400;
@@ -77,7 +89,10 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
     code:
       normalized instanceof BusinessRuntimeError ||
       normalized instanceof RevisionConflictError ||
-      normalized instanceof LocalAgentCredentialsError
+      normalized instanceof LocalAgentCredentialsError ||
+      normalized instanceof AccountHighCostTaskRunningError ||
+      normalized instanceof AccountRunLockDeniedError ||
+      normalized instanceof AccountRunLockTokenMismatchError
         ? normalized.code
         : "AIC-API-INVALID_REQUEST",
     message: normalized.message,

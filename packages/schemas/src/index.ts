@@ -258,6 +258,27 @@ export const VideoTaskOwnershipTransferSchema = Type.Object(
 );
 export type VideoTaskOwnershipTransfer = Static<typeof VideoTaskOwnershipTransferSchema>;
 
+export const HighCostTaskOperationSchema = Type.Union([
+  Type.Literal("video_generation"),
+  Type.Literal("automatic_editing"),
+]);
+export type HighCostTaskOperation = Static<typeof HighCostTaskOperationSchema>;
+
+export const AccountHighCostTaskRunLockSchema = Type.Object(
+  {
+    id: Identifier,
+    tenantId: Identifier,
+    accountId: Identifier,
+    batchProjectId: Identifier,
+    videoTaskId: Identifier,
+    taskRevision: Type.Integer({ minimum: 1 }),
+    operation: HighCostTaskOperationSchema,
+    acquiredAt: IsoDateTime,
+  },
+  { additionalProperties: false },
+);
+export type AccountHighCostTaskRunLock = Static<typeof AccountHighCostTaskRunLockSchema>;
+
 export const AssetCategorySchema = Type.Union([
   Type.Literal("vehicle"),
   Type.Literal("person"),
