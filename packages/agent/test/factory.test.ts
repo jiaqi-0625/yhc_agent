@@ -6,6 +6,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import { InMemoryVehicleService } from "@firefly/tools";
 
 import { ADVERTISING_AGENT_SYSTEM_PROMPT, createAdvertisingAgent, redactSensitive } from "../src/index.ts";
+import { MOCK_TASK_CONTEXT } from "./task-context-fixture.ts";
 
 const model = {
   id: "test-model",
@@ -91,6 +92,40 @@ test("business assembly adds strategy tools without exposing an approval decisio
   assert.doesNotMatch(
     agent.state.tools.map((tool) => tool.name).join(","),
     /(?:^|,)(?:generate_strategy|request_strategy_approval|approve_strategy)(?:,|$)/u,
+  );
+});
+
+test("task-bound assembly adds the immutable asset snapshot reader only for the matching task", () => {
+  const reader = {
+    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+    assetSnapshotId: MOCK_TASK_CONTEXT.videoTask.assetSnapshotId,
+    async read() { throw new Error("not called"); },
+  };
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    taskContext: MOCK_TASK_CONTEXT,
+    getWorkStatus: () => "created",
+    vehicleService: new InMemoryVehicleService([]),
+    taskAssetReader: reader,
+  });
+  assert.deepEqual(agent.state.tools.map((tool) => tool.name), [
+    "get_vehicle_snapshot",
+    "validate_vehicle_claims",
+    "get_task_asset_snapshot",
+  ]);
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext: MOCK_TASK_CONTEXT,
+      getWorkStatus: () => "created",
+      vehicleService: new InMemoryVehicleService([]),
+      taskAssetReader: { ...reader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
   );
 });
 

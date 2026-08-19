@@ -19,6 +19,14 @@ test("policy allows an allowlisted read tool in the correct state", () => {
   });
 });
 
+test("policy allows the task-bound asset snapshot reader but not a catalog search tool", () => {
+  assert.deepEqual(evaluateToolPolicy({ toolName: "get_task_asset_snapshot", status: "created", scope }), {
+    allowed: true,
+    risk: "read",
+  });
+  assert.equal(evaluateToolPolicy({ toolName: "search_company_assets", status: "created", scope }).allowed, false);
+});
+
 test("policy allows non-mutating action proposals but rejects model-callable state changes", () => {
   assert.deepEqual(evaluateToolPolicy({ toolName: "propose_strategy_generation", status: "created", scope }), {
     allowed: true,

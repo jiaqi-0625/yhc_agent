@@ -11,9 +11,11 @@ import { evaluateToolPolicy, type SessionScope } from "@firefly/domain";
 import type { TaskContext, WorkStatus } from "@firefly/schemas";
 import {
   createStrategyTools,
+  createTaskAssetTools,
   createVehicleTools,
   type InMemoryVehicleService,
   type StrategyWorkflowPort,
+  type TaskAssetSnapshotReader,
 } from "@firefly/tools";
 
 import { createBaseAgent } from "./base-agent.ts";
@@ -42,6 +44,7 @@ export interface CreateAdvertisingAgentOptions {
   getWorkStatus: () => WorkStatus | Promise<WorkStatus>;
   vehicleService: InMemoryVehicleService;
   strategyService?: StrategyWorkflowPort;
+  taskAssetReader?: TaskAssetSnapshotReader;
   auditSink?: AgentAuditSink;
 }
 
@@ -74,6 +77,14 @@ function redactContent(
 }
 
 export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
+  if (
+    options.taskAssetReader !== undefined &&
+    (options.taskContext === undefined ||
+      options.taskContext.videoTask.id !== options.taskAssetReader.videoTaskId ||
+      options.taskContext.videoTask.assetSnapshotId !== options.taskAssetReader.assetSnapshotId)
+  ) {
+    throw new Error("Task asset reader scope does not match the server-resolved task context.");
+  }
   const vehicleTools = createVehicleTools(options.vehicleService, {
     actorId: options.scope.actorId,
     tenantId: options.scope.tenantId,
@@ -82,6 +93,7 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   });
   const tools = [
     ...vehicleTools,
+    ...(options.taskAssetReader === undefined ? [] : createTaskAssetTools(options.taskAssetReader)),
     ...(options.strategyService === undefined ? [] : createStrategyTools(options.strategyService)),
   ];
 
