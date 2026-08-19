@@ -184,6 +184,29 @@ test("task asset reader rejects cross-scope and stale snapshot data", async () =
   await assert.rejects(() => reader.read(), TaskAssetSnapshotAccessError);
 });
 
+test("task asset reader rejects cross-task, cross-project, and cross-tenant records", async () => {
+  for (const scopedContext of [
+    { ...taskContext, videoTask: { ...taskContext.videoTask, id: "task_other" } },
+    { ...taskContext, batchProject: { ...taskContext.batchProject, id: "project_other" } },
+  ] satisfies TaskContext[]) {
+    const reader = createScopedTaskAssetSnapshotReader({
+      taskContext: scopedContext,
+      store: { async load() { return productionRecord(); } },
+      provider: provider(() => []),
+      providerScope,
+    });
+    await assert.rejects(() => reader.read(), TaskAssetSnapshotAccessError);
+  }
+
+  const tenantReader = createScopedTaskAssetSnapshotReader({
+    taskContext,
+    store: { async load() { return productionRecord(); } },
+    provider: provider(() => []),
+    providerScope: { ...providerScope, tenantId: "tenant_other" },
+  });
+  await assert.rejects(() => tenantReader.read(), TaskAssetSnapshotAccessError);
+});
+
 test("task asset reader rejects unresolved or substituted company references", async () => {
   const reader = createScopedTaskAssetSnapshotReader({
     taskContext,
