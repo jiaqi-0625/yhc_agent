@@ -115,6 +115,11 @@ test("task-bound assembly adds the immutable asset snapshot reader only for the 
     "validate_vehicle_claims",
     "get_task_asset_snapshot",
   ]);
+  assert.match(agent.state.systemPrompt, /本地上传必须提示人工复核原始来源说明与使用权声明/u);
+  assert.match(
+    agent.state.tools.find((tool) => tool.name === "get_task_asset_snapshot")?.description ?? "",
+    /逐项来源风险/u,
+  );
   assert.throws(
     () => createAdvertisingAgent({
       model,

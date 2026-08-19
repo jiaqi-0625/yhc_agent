@@ -31,6 +31,13 @@ const localReference = {
   batchProjectId: "project_1",
   checksumSha256: "a".repeat(64),
 } as const;
+const globalSceneReference = {
+  assetId: "asset_scene_global",
+  version: 1,
+  source: "company_catalog",
+  sourceProvider: "catalog_test",
+  category: "scene",
+} as const satisfies CompanyAssetReference;
 
 const taskContext = {
   schemaVersion: 1,
@@ -158,8 +165,62 @@ test("task asset tool reads only the server-bound immutable snapshot", async () 
   assert.equal(result.details.snapshot.id, "asset_snapshot_1");
   assert.deepEqual(result.details.companyAssets.map((item: CompanyAssetCatalogItem) => item.reference), [companyReference]);
   assert.deepEqual(result.details.localAssets, [localReference]);
+  assert.deepEqual(result.details.sourceRiskSummary, {
+    requiresAttention: true,
+    warningCount: 1,
+  });
+  assert.deepEqual(result.details.sourceAssessments, [
+    {
+      assetId: "asset_vehicle_locked",
+      version: 2,
+      category: "vehicle",
+      source: "company_catalog",
+      status: "verified",
+      riskLevel: "none",
+      summary: "公司素材已在当前任务授权范围内按锁定版本精确解析。",
+    },
+    {
+      assetId: "temporary_scene_locked",
+      version: 1,
+      category: "scene",
+      source: "local_upload",
+      status: "requires_manual_review",
+      riskLevel: "warning",
+      summary: "任务快照仅保留项目范围引用和校验和；制作前需人工复核原始来源说明与使用权声明。",
+    },
+  ]);
+  assert.doesNotMatch(JSON.stringify(result.details.sourceAssessments), /rightsConfirmed|rightsDeclaration|sourceDescription/u);
   assert.equal("tenantId" in result.details.snapshot, false);
   assert.equal("createdBy" in result.details.snapshot, false);
+});
+
+test("task asset source assessments report no warning when every locked asset is an exact company reference", async () => {
+  const record = productionRecord();
+  record.taskAssetSnapshots[0]!.assets = [companyReference, globalSceneReference];
+  const reader = createScopedTaskAssetSnapshotReader({
+    taskContext,
+    store: { async load() { return record; } },
+    provider: provider((references) => references.map((reference) => ({
+      ...catalogItem(reference),
+      ...(reference.assetId === globalSceneReference.assetId ? { brandIds: [] } : {}),
+    }))),
+    providerScope,
+  });
+
+  const result = await reader.read();
+  assert.deepEqual(result.sourceRiskSummary, { requiresAttention: false, warningCount: 0 });
+  assert.deepEqual(result.sourceAssessments.map(({ assetId, status, riskLevel }) => ({ assetId, status, riskLevel })), [
+    {
+      assetId: companyReference.assetId,
+      status: "verified",
+      riskLevel: "none",
+    },
+    {
+      assetId: globalSceneReference.assetId,
+      status: "verified",
+      riskLevel: "none",
+    },
+  ]);
 });
 
 test("task asset reader rejects cross-scope and stale snapshot data", async () => {
@@ -222,4 +283,44 @@ test("task asset reader rejects unresolved or substituted company references", a
     providerScope,
   });
   await assert.rejects(() => reader.read(), TaskAssetSnapshotAccessError);
+});
+
+test("task asset reader rejects cross-vehicle, cross-brand, missing-vehicle, and cross-project sources", async () => {
+  const invalidRecords: VideoTaskProductionRecord[] = [];
+  const crossVehicle = productionRecord();
+  crossVehicle.taskAssetSnapshots[0]!.assets = [{
+    ...companyReference,
+    vehicleId: "vehicle_other",
+  }, localReference];
+  invalidRecords.push(crossVehicle);
+  const missingVehicle = productionRecord();
+  missingVehicle.taskAssetSnapshots[0]!.assets = [localReference];
+  invalidRecords.push(missingVehicle);
+  const crossProjectLocal = productionRecord();
+  crossProjectLocal.taskAssetSnapshots[0]!.assets = [companyReference, {
+    ...localReference,
+    batchProjectId: "project_other",
+  }];
+  invalidRecords.push(crossProjectLocal);
+
+  for (const record of invalidRecords) {
+    const reader = createScopedTaskAssetSnapshotReader({
+      taskContext,
+      store: { async load() { return record; } },
+      provider: provider((references) => references.map((reference) => catalogItem(reference))),
+      providerScope,
+    });
+    await assert.rejects(() => reader.read(), TaskAssetSnapshotAccessError);
+  }
+
+  const crossBrandReader = createScopedTaskAssetSnapshotReader({
+    taskContext,
+    store: { async load() { return productionRecord(); } },
+    provider: provider((references) => references.map((reference) => ({
+      ...catalogItem(reference),
+      brandIds: ["brand_other"],
+    }))),
+    providerScope,
+  });
+  await assert.rejects(() => crossBrandReader.read(), TaskAssetSnapshotAccessError);
 });

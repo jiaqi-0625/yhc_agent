@@ -25,6 +25,21 @@ export interface ReadonlyTaskAssetSnapshotView {
   };
   readonly companyAssets: readonly CompanyAssetCatalogItem[];
   readonly localAssets: readonly TemporaryAssetReference[];
+  readonly sourceRiskSummary: {
+    readonly requiresAttention: boolean;
+    readonly warningCount: number;
+  };
+  readonly sourceAssessments: readonly TaskAssetSourceAssessment[];
+}
+
+export interface TaskAssetSourceAssessment {
+  readonly assetId: string;
+  readonly version: number;
+  readonly category: CompanyAssetReference["category"] | TemporaryAssetReference["category"];
+  readonly source: CompanyAssetReference["source"] | TemporaryAssetReference["source"];
+  readonly status: "verified" | "requires_manual_review";
+  readonly riskLevel: "none" | "warning";
+  readonly summary: string;
 }
 
 export interface TaskAssetSnapshotReader {
@@ -104,7 +119,14 @@ export function createScopedTaskAssetSnapshotReader(
       const companyReferences = snapshot.assets.filter(
         (asset): asset is CompanyAssetReference => asset.source === "company_catalog",
       );
-      if (companyReferences.some((reference) => reference.sourceProvider !== options.provider.providerId)) {
+      if (
+        companyReferences.some((reference) =>
+          reference.sourceProvider !== options.provider.providerId ||
+          (reference.category === "vehicle" && reference.vehicleId !== options.taskContext.vehicle.id)
+        ) ||
+        !companyReferences.some((reference) =>
+          reference.category === "vehicle" && reference.vehicleId === options.taskContext.vehicle.id)
+      ) {
         throw new TaskAssetSnapshotAccessError();
       }
       const resolved = await options.provider.resolveAssets(
@@ -118,12 +140,43 @@ export function createScopedTaskAssetSnapshotReader(
       );
       const companyAssets = companyReferences.map((reference) => {
         const item = resolvedByReference.get(exactReferenceIdentity(reference));
-        if (item === undefined) throw new TaskAssetSnapshotAccessError();
+        if (
+          item === undefined ||
+          (item.brandIds.length > 0 && !item.brandIds.includes(options.taskContext.brand.id))
+        ) {
+          throw new TaskAssetSnapshotAccessError();
+        }
         return structuredClone(item);
       });
       const localAssets = snapshot.assets
         .filter((asset): asset is TemporaryAssetReference => asset.source === "local_upload")
-        .map((asset) => structuredClone(asset));
+        .map((asset) => {
+          if (asset.batchProjectId !== options.taskContext.batchProject.id) {
+            throw new TaskAssetSnapshotAccessError();
+          }
+          return structuredClone(asset);
+        });
+      const sourceAssessments: TaskAssetSourceAssessment[] = [
+        ...companyAssets.map((item) => ({
+          assetId: item.reference.assetId,
+          version: item.reference.version,
+          category: item.reference.category,
+          source: item.reference.source,
+          status: "verified" as const,
+          riskLevel: "none" as const,
+          summary: "公司素材已在当前任务授权范围内按锁定版本精确解析。",
+        })),
+        ...localAssets.map((reference) => ({
+          assetId: reference.assetId,
+          version: reference.version,
+          category: reference.category,
+          source: reference.source,
+          status: "requires_manual_review" as const,
+          riskLevel: "warning" as const,
+          summary: "任务快照仅保留项目范围引用和校验和；制作前需人工复核原始来源说明与使用权声明。",
+        })),
+      ];
+      const warningCount = sourceAssessments.filter((assessment) => assessment.riskLevel === "warning").length;
 
       return {
         schemaVersion: 1,
@@ -138,6 +191,11 @@ export function createScopedTaskAssetSnapshotReader(
         },
         companyAssets,
         localAssets,
+        sourceRiskSummary: {
+          requiresAttention: warningCount > 0,
+          warningCount,
+        },
+        sourceAssessments,
       };
     },
   };
@@ -147,7 +205,7 @@ export function createTaskAssetTools(reader: TaskAssetSnapshotReader): readonly 
   const getTaskAssetSnapshot: AgentTool<typeof GetTaskAssetSnapshotRequestSchema> = {
     name: "get_task_asset_snapshot",
     label: "读取任务素材快照",
-    description: "读取服务端绑定任务在策略开始时锁定的素材快照及其中允许使用的公司素材；不查询项目最新素材池。",
+    description: "读取服务端绑定任务在策略开始时锁定的素材快照、精确版本公司素材与逐项来源风险；本地上传必须提示人工复核来源和使用权，不查询项目最新素材池。",
     parameters: GetTaskAssetSnapshotRequestSchema,
     async execute(_toolCallId, _params, signal) {
       const details = await reader.read(signal);
