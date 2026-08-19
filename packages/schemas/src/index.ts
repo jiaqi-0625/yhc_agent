@@ -548,6 +548,30 @@ export type ReplaceVehicleAssetAssociationsRequest = Static<
   typeof ReplaceVehicleAssetAssociationsRequestSchema
 >;
 
+export const ProjectCreationAspectRatioSchema = Type.Union([
+  Type.Literal("9:16"),
+  Type.Literal("16:9"),
+  Type.Literal("1:1"),
+  Type.Literal("4:5"),
+]);
+export type ProjectCreationAspectRatio = Static<typeof ProjectCreationAspectRatioSchema>;
+
+export const CreateBatchProjectRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    vehicleId: Identifier,
+    expectedBrandRevision: Type.Integer({ minimum: 1 }),
+    expectedVehicleVersion: Type.Integer({ minimum: 1 }),
+    expectedAssetAssociationRevision: Type.Integer({ minimum: 1 }),
+    selectedAssets: Type.Array(CompanyAssetReferenceSchema, { minItems: 1, maxItems: 499 }),
+    aspectRatio: ProjectCreationAspectRatioSchema,
+    batchName: Type.String({ minLength: 1, maxLength: 120 }),
+    customStylePrompt: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })),
+  },
+  { additionalProperties: false },
+);
+export type CreateBatchProjectRequest = Static<typeof CreateBatchProjectRequestSchema>;
+
 export const TemporaryAssetReferenceSchema = Type.Object(
   {
     assetId: Identifier,

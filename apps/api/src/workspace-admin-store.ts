@@ -34,6 +34,10 @@ export interface WorkspaceAdminSeed {
 
 export interface WorkspaceAdminStore extends WorkspaceAccessGrantProvider {
   load(tenantId: string): Promise<WorkspaceAdminState>;
+  withSnapshot<Result>(
+    tenantId: string,
+    inspect: (current: WorkspaceAdminState) => Result | Promise<Result>,
+  ): Promise<Result>;
   transact(
     tenantId: string,
     update: (
@@ -231,12 +235,10 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
     this.#memory.set(state.tenantId, copy);
   }
 
-  async transact(
+  async #exclusive<Result>(
     tenantId: string,
-    update: (
-      current: WorkspaceAdminState,
-    ) => WorkspaceAdminState | Promise<WorkspaceAdminState>,
-  ): Promise<WorkspaceAdminState> {
+    operation: () => Result | Promise<Result>,
+  ): Promise<Result> {
     assertIdentifier(tenantId, "Tenant ID");
     const previous = this.#transactionTails.get(tenantId) ?? Promise.resolve();
     let release = (): void => undefined;
@@ -247,18 +249,36 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
     this.#transactionTails.set(tenantId, tail);
     await previous;
     try {
-      const current = await this.load(tenantId);
-      const next = await update(structuredClone(current));
-      validateState(next, tenantId);
-      validateTransition(current, next);
-      await this.#save(next);
-      return structuredClone(next);
+      return await operation();
     } finally {
       release();
       if (this.#transactionTails.get(tenantId) === tail) {
         this.#transactionTails.delete(tenantId);
       }
     }
+  }
+
+  async withSnapshot<Result>(
+    tenantId: string,
+    inspect: (current: WorkspaceAdminState) => Result | Promise<Result>,
+  ): Promise<Result> {
+    return this.#exclusive(tenantId, async () => inspect(await this.load(tenantId)));
+  }
+
+  async transact(
+    tenantId: string,
+    update: (
+      current: WorkspaceAdminState,
+    ) => WorkspaceAdminState | Promise<WorkspaceAdminState>,
+  ): Promise<WorkspaceAdminState> {
+    return this.#exclusive(tenantId, async () => {
+      const current = await this.load(tenantId);
+      const next = await update(structuredClone(current));
+      validateState(next, tenantId);
+      validateTransition(current, next);
+      await this.#save(next);
+      return structuredClone(next);
+    });
   }
 
   async listForAccount(

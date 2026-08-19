@@ -91,6 +91,35 @@ test("workspace administration persists a canonical seed and returns defensive c
   assert.equal((await restored.load("tenant_firefly")).brands[0]!.name, "萤火汽车新名");
 });
 
+test("workspace administration snapshots serialize authorization reads with updates", async () => {
+  const { store } = fixture();
+  const order: string[] = [];
+  let releaseSnapshot = (): void => undefined;
+  const snapshotGate = new Promise<void>((resolve) => {
+    releaseSnapshot = resolve;
+  });
+  let snapshotEntered = (): void => undefined;
+  const entered = new Promise<void>((resolve) => {
+    snapshotEntered = resolve;
+  });
+  const snapshot = store.withSnapshot("tenant_firefly", async (state) => {
+    order.push("snapshot-enter");
+    snapshotEntered();
+    await snapshotGate;
+    order.push("snapshot-exit");
+    return state.accessGrants.length;
+  });
+  await entered;
+  const update = store.transact("tenant_firefly", (state) => {
+    order.push("transaction");
+    return state;
+  });
+  releaseSnapshot();
+  assert.ok(await snapshot > 0);
+  await update;
+  assert.deepEqual(order, ["snapshot-enter", "snapshot-exit", "transaction"]);
+});
+
 test("admin creates brands and immutable vehicle fact versions with optimistic concurrency", async () => {
   const { store, runtime } = fixture();
   const administrator = await scope(store);

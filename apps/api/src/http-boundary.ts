@@ -6,6 +6,8 @@ import {
   AccountHighCostTaskRunningError,
   AccountRunLockDeniedError,
   AccountRunLockTokenMismatchError,
+  AssetPoolError,
+  BatchProjectCreationError,
   RevisionConflictError,
   WorkspaceAccessDeniedError,
 } from "@firefly/domain";
@@ -104,6 +106,8 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof AccountHighCostTaskRunningError ||
       normalized instanceof AccountRunLockDeniedError ||
       normalized instanceof AccountRunLockTokenMismatchError ||
+      normalized instanceof AssetPoolError ||
+      normalized instanceof BatchProjectCreationError ||
       normalized instanceof LocalAgentRunError ||
       normalized instanceof LocalAgentCredentialsError ||
       normalized instanceof CompanyAssetCatalogAccessError ||

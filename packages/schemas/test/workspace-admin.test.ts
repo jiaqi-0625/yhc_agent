@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  CreateBatchProjectRequestSchema,
   CreateBrandRequestSchema,
   CreateVehicleFactVersionRequestSchema,
   CreateWorkspaceAccessGrantRequestSchema,
@@ -67,4 +68,38 @@ test("vehicle fact versions and asset association replacements require optimisti
     expectedRevision: 1,
     limitAmountMinor: 0,
   }), true);
+});
+
+test("project creation accepts only wizard inputs and a supported aspect ratio", () => {
+  const request = {
+    requestId: "request_project_1",
+    vehicleId: "vehicle_e5",
+    expectedBrandRevision: 1,
+    expectedVehicleVersion: 2,
+    expectedAssetAssociationRevision: 3,
+    selectedAssets: [{
+      assetId: "asset_e5",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "vehicle",
+      vehicleId: "vehicle_e5",
+    }],
+    aspectRatio: "9:16",
+    batchName: "夏季上新",
+  };
+  assert.equal(Value.Check(CreateBatchProjectRequestSchema, request), true);
+  for (const injected of ["tenantId", "actorAccountId", "brandId", "name", "assetPoolId", "visualStylePresetId"]) {
+    assert.equal(Value.Check(CreateBatchProjectRequestSchema, { ...request, [injected]: "forged" }), false);
+  }
+  assert.equal(Value.Check(CreateBatchProjectRequestSchema, { ...request, aspectRatio: "999:1" }), false);
+  assert.equal(Value.Check(CreateBatchProjectRequestSchema, { ...request, requestId: "../escape" }), false);
+  assert.equal(Value.Check(CreateBatchProjectRequestSchema, {
+    ...request,
+    selectedAssets: Array.from({ length: 499 }, () => request.selectedAssets[0]),
+  }), true);
+  assert.equal(Value.Check(CreateBatchProjectRequestSchema, {
+    ...request,
+    selectedAssets: Array.from({ length: 500 }, () => request.selectedAssets[0]),
+  }), false);
 });

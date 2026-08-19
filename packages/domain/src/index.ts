@@ -1,5 +1,6 @@
 export * from "./account-run-lock.ts";
 export * from "./account-budget.ts";
+export * from "./batch-project.ts";
 export * from "./asset-pool.ts";
 export * from "./policy.ts";
 export * from "./stage-confirmation.ts";

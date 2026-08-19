@@ -7,10 +7,13 @@ import { MockCompanyAssetProvider } from "@firefly/tools";
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { LocalAccountBudgetStore } from "./account-budget-store.ts";
 import { handleAgentRoute, type AgentIdentityResolver } from "./agent-routes.ts";
+import { LocalBatchProjectStore } from "./batch-project-store.ts";
 import { createBusinessAgentRuntime } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
+import { handleProjectCreationRoute } from "./project-creation-routes.ts";
+import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
@@ -73,6 +76,7 @@ async function handleRequest(
   resolveAgentIdentity: AgentIdentityResolver,
   workspaceSessions: WorkspaceSessionRuntime,
   workspaceAdmin: WorkspaceAdminRuntime | undefined,
+  projectCreation: ProjectCreationRuntime | undefined,
   developmentAccountsEnabled: boolean,
   legacyLocalAccessEnabled: boolean,
 ): Promise<void> {
@@ -127,6 +131,29 @@ async function handleRequest(
     )
   ) return;
   if (
+    projectCreation === undefined &&
+    (
+      url.pathname.startsWith("/v1/workspace/project-creation/") ||
+      url.pathname === "/v1/workspace/batch-projects"
+    )
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-PROJECT-CREATION-RUNTIME_NOT_CONFIGURED",
+      "Project creation must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    projectCreation !== undefined &&
+    await handleProjectCreationRoute(
+      request,
+      response,
+      url,
+      projectCreation,
+      workspaceSessions,
+    )
+  ) return;
+  if (
     workspaceAdmin === undefined &&
     (url.pathname.startsWith("/v1/admin/") || url.pathname === "/v1/workspace/me/budget")
   ) {
@@ -175,6 +202,7 @@ export function createApiServer(
   developmentAccountsEnabled = false,
   legacyLocalAccessEnabled = false,
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
+  projectCreation: ProjectCreationRuntime | undefined = undefined,
 ): Server {
   if (workspaceSessions === undefined && workspaceAdmin !== undefined) {
     throw new Error("A custom workspace administration runtime requires its matching session runtime.");
@@ -196,6 +224,7 @@ export function createApiServer(
     ),
     adminStore!,
   );
+  const companyAssetProvider = new MockCompanyAssetProvider();
   const activeWorkspaceAdmin = workspaceAdmin ?? (adminStore === undefined ? undefined : new WorkspaceAdminRuntime(
     adminStore,
     new AccountBudgetRuntime(
@@ -208,8 +237,15 @@ export function createApiServer(
         },
       },
     ),
-    new MockCompanyAssetProvider(),
+    companyAssetProvider,
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
+  ));
+  const activeProjectCreation = projectCreation ?? (adminStore === undefined ? undefined : new ProjectCreationRuntime(
+    adminStore,
+    new LocalBatchProjectStore(
+      process.env.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
+    ),
+    companyAssetProvider,
   ));
   const activeRuntime = runtime ?? createBusinessAgentRuntime(business);
   const activeIdentityResolver = resolveAgentIdentity ??
@@ -223,6 +259,7 @@ export function createApiServer(
       activeIdentityResolver,
       activeWorkspaceSessions,
       activeWorkspaceAdmin,
+      activeProjectCreation,
       developmentAccountsEnabled,
       legacyLocalAccessEnabled,
     ).catch((error: unknown) => {
@@ -241,6 +278,7 @@ export async function startApiServer(
   developmentAccountsEnabled = developmentAccountsAllowed(host),
   legacyLocalAccessEnabled = developmentAccountsAllowed(host),
   workspaceAdmin: WorkspaceAdminRuntime | undefined = undefined,
+  projectCreation: ProjectCreationRuntime | undefined = undefined,
 ): Promise<Server> {
   const server = createApiServer(
     runtime,
@@ -250,6 +288,7 @@ export async function startApiServer(
     developmentAccountsEnabled,
     legacyLocalAccessEnabled,
     workspaceAdmin,
+    projectCreation,
   );
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
