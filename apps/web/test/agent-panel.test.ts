@@ -17,17 +17,16 @@ const generationCard = {
 };
 
 test("Agent panel width preserves the desktop workspace minimums", () => {
-  assert.equal(resolveAgentPanelWidth(1280, 380), 380);
-  assert.equal(resolveAgentPanelWidth(1280, 560), 474);
-  assert.equal(resolveAgentPanelWidth(1920, 560), 560);
-  assert.equal(resolveAgentPanelWidth(1180, 560), 474);
-  assert.equal(resolveAgentPanelWidth(1000, 380), 294);
-  assert.deepEqual(agentPanelWidthBounds(1280), { minimum: 320, maximum: 474 });
+  assert.equal(resolveAgentPanelWidth(1084, 380), 358);
+  assert.equal(resolveAgentPanelWidth(1224, 560), 498);
+  assert.equal(resolveAgentPanelWidth(1704, 560), 560);
+  assert.equal(resolveAgentPanelWidth(1000, 380), 274);
+  assert.deepEqual(agentPanelWidthBounds(1084), { minimum: 320, maximum: 358 });
 });
 
 test("Agent panel width clamps invalid saved widths", () => {
-  assert.equal(resolveAgentPanelWidth(1920, 200), 320);
-  assert.equal(resolveAgentPanelWidth(1920, 900), 560);
+  assert.equal(resolveAgentPanelWidth(1704, 200), 320);
+  assert.equal(resolveAgentPanelWidth(1704, 900), 560);
 });
 
 test("Agent quota presentation uses the authenticated account balance", () => {

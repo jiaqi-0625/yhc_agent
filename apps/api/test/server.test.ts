@@ -85,11 +85,14 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(pageResponse.headers.get("content-type") ?? "", /^text\/html/u);
   assert.match(pageResponse.headers.get("content-security-policy") ?? "", /default-src 'self'/u);
   const page = await pageResponse.text();
-  assert.match(page, /萤火虫广告 Agent/u);
-  assert.match(page, /作品列表/u);
+  assert.match(page, /萤火虫 · 汽车广告工作区/u);
+  assert.doesNotMatch(page, /platform-sidebar/u);
+  assert.match(page, /<select id="brand-navigation" aria-label="切换品牌"/u);
+  assert.match(page, /切换当前账号/u);
+  assert.match(page, /viewport-notice/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /workspace-agent-dialog-v7/u);
+  assert.match(page, /workspace-shell-ws401/u);
   assert.match(page, /type="module"/u);
 
   const [
@@ -138,7 +141,11 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(agentPanelScript, /createAgentPanelLayoutController/u);
   assert.match(agentPanelScript, /Alt\+Shift\+A/u);
   assert.match(workspaceApiScript, /generateStrategy/u);
-  assert.match(await workspaceShellResponse.text(), /bindWorkspaceShell/u);
+  assert.match(workspaceApiScript, /listAdminBrands/u);
+  assert.match(workspaceApiScript, /getProjectCreationOptions/u);
+  const workspaceShellScript = await workspaceShellResponse.text();
+  assert.match(workspaceShellScript, /bindWorkspaceShell/u);
+  assert.match(workspaceShellScript, /normalizeNavigationBrands/u);
   assert.match(script, /读取车型事实快照/u);
   assert.match(script, /function friendlyToolInput/u);
   assert.match(script, /function friendlyToolResult/u);

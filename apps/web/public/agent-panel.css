@@ -1,6 +1,6 @@
 .workspace-shell {
   --agent-panel-width: 380px;
-  grid-template-columns: 260px minmax(540px, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 806px));
+  grid-template-columns: 240px minmax(480px, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 726px));
 }
 .agent-resizer { position: relative; z-index: 2; width: 6px; padding: 0; border: 0; border-left: 1px solid var(--border); border-right: 1px solid transparent; background: var(--card); cursor: col-resize; touch-action: none; }
 .agent-resizer::after { position: absolute; top: 50%; left: 1px; width: 3px; height: 44px; border-radius: 999px; background: var(--border); content: ""; transform: translateY(-50%); }
@@ -14,10 +14,6 @@
 .agent-identity > div > span { gap: 6px; margin-top: 4px; color: var(--muted-foreground); font-size: 8px; }
 .online-dot { width: 5px; height: 5px; }
 .agent-context { display: grid; gap: 9px; padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); background: var(--muted); font-size: 9px; }
-.agent-account-row { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 7px; }
-.agent-account-row label { font-weight: 600; }
-.agent-account-row select { min-width: 0; height: 27px; padding: 0 24px 0 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--foreground); background: var(--input); font-size: 9px; }
-.agent-account-row > span { color: var(--foreground); }
 .agent-context-path { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 7px 12px; margin: 0; }
 .agent-context-path div { min-width: 0; }
 .agent-context-path dt { margin-bottom: 2px; }
@@ -122,7 +118,7 @@
 .cancel-button { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 10%, var(--card)); }
 .retry-button { color: var(--primary) !important; }
 
-.workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 260px minmax(540px, 1fr) 0 58px; }
+.workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 240px minmax(480px, 1fr) 0 58px; }
 .workspace-shell[data-agent-collapsed="true"] .agent-resizer { width: 0; visibility: hidden; pointer-events: none; }
 .workspace-shell[data-agent-collapsed="true"] .chat-panel > :not(.chat-header) { display: none; }
 .workspace-shell[data-agent-collapsed="true"] .chat-header { justify-content: center; padding: 0; }
@@ -131,9 +127,9 @@
 .workspace-shell[data-agent-collapsed="true"] .agent-session-picker { display: none; }
 .workspace-shell[data-agent-collapsed="true"] #collapse-agent svg { transform: rotate(180deg); }
 
-@media (max-width: 1180px) and (min-width: 981px) {
-  .workspace-shell { grid-template-columns: 220px minmax(480px, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 706px)); }
-  .workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 220px minmax(480px, 1fr) 0 58px; }
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .workspace-shell { grid-template-columns: 212px minmax(420px, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 638px)); }
+  .workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 212px minmax(420px, 1fr) 0 58px; }
 }
 
 @media (max-width: 980px) {

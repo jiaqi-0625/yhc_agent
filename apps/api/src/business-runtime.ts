@@ -43,6 +43,7 @@ export interface LocalWorkView {
 export interface LocalWorkSummary {
   work: Work;
   vehicle: {
+    brandId: string;
     brand: string;
     series: string;
     trim: string;
@@ -92,6 +93,7 @@ export class LocalBusinessRuntime {
         return {
           work: structuredClone(record.work),
           vehicle: {
+            brandId: record.vehicleSnapshot.brandId,
             brand: record.vehicleSnapshot.brand,
             series: record.vehicleSnapshot.series,
             trim: record.vehicleSnapshot.trim,

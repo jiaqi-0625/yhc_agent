@@ -139,6 +139,7 @@ test("strategy vertical slice preserves human locks and requires a human approva
   const listed = await json(listResponse);
   assert.equal(listed.works.length, 1);
   assert.equal(listed.works[0].work.id, created.work.id);
+  assert.equal(listed.works[0].vehicle.brandId, "brand_firefly_demo");
   assert.equal(listed.works[0].vehicle.series, "萤火 E5");
   assert.equal(listed.works[0].strategy.status, "approved");
   assert.equal("vehicleSnapshot" in listed.works[0], false);

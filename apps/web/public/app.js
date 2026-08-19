@@ -10,7 +10,13 @@ import {
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { workspaceApi } from "./workspace-api.js";
-import { bindWorkspaceShell } from "./workspace-shell.js";
+import {
+  bindWorkspaceShell,
+  navigationBrandStorageKey,
+  normalizeNavigationBrands,
+  resolveNavigationBrandId,
+  workSummaryMatchesNavigationBrand,
+} from "./workspace-shell.js";
 
 const state = {
   sessionId: null,
@@ -27,7 +33,14 @@ const state = {
   modelReady: true,
   account: null,
   accounts: [],
+  navigationBrands: [],
+  navigationBrandId: null,
+  navigationBrandsLoading: true,
+  navigationBrandsError: null,
+  workspaceHydrating: true,
 };
+let navigationBrandsRequest = 0;
+let workspaceScopeGeneration = 0;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -86,6 +99,10 @@ const elements = {
   studioStatus: document.querySelector("#studio-status"),
   agentAccountSelect: document.querySelector("#agent-account-select"),
   agentAccountRole: document.querySelector("#agent-account-role"),
+  accountAvatar: document.querySelector("#account-avatar"),
+  brandNavigation: document.querySelector("#brand-navigation"),
+  brandNavigationRetry: document.querySelector("#brand-navigation-retry"),
+  brandNavigationStatus: document.querySelector("#brand-navigation-status"),
   agentContextBrand: document.querySelector("#agent-context-brand"),
   agentContextVehicle: document.querySelector("#agent-context-vehicle"),
   agentContextProject: document.querySelector("#agent-context-project"),
@@ -115,6 +132,14 @@ const statusDescriptions = {
   strategy_approved: ["策略已通过", "该版本保持只读。继续创作时，请基于同一车型新建独立作品。"],
 };
 
+const vehicleParameterLabels = {
+  bodyStyle: "车身类型",
+  bodyType: "车型级别",
+  energyType: "能源类型",
+  rangeKm: "续航里程",
+  seats: "座位数",
+};
+
 function setStatus(kind, text) {
   elements.status.className = "status " + kind;
   elements.status.querySelector("span:last-child").textContent = text;
@@ -142,15 +167,15 @@ function clearWorkflowError() {
 
 function setBusy(busy) {
   state.busy = busy;
-  elements.prompt.disabled = busy || !state.modelReady;
-  elements.send.disabled = busy || !state.modelReady;
+  elements.prompt.disabled = busy || !state.modelReady || !state.sessionId;
+  elements.send.disabled = busy || !state.modelReady || !state.sessionId;
   elements.send.hidden = busy;
   elements.cancelGeneration.hidden = !busy;
-  elements.newSession.disabled = busy;
+  elements.newSession.disabled = busy || !state.work;
   elements.sessionSelect.disabled = busy || state.sessions.length === 0;
   elements.resetSession.disabled = busy;
   elements.retryMessage.disabled = busy;
-  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.workflowBusy || state.accounts.length < 2;
+  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.workflowBusy || state.workspaceHydrating || state.accounts.length < 2;
 }
 
 function setWorkflowBusy(busy) {
@@ -168,8 +193,40 @@ function setWorkflowBusy(busy) {
     elements.stateNewWork,
   ].forEach(function (button) { button.disabled = busy; });
   elements.workList.querySelectorAll("button").forEach(function (button) { button.disabled = busy; });
-  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.busy || state.accounts.length < 2;
+  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.busy || state.workspaceHydrating || state.accounts.length < 2;
   refreshActionProposalAvailability();
+}
+
+function captureWorkspaceScope() {
+  return {
+    accountId: state.account?.accountId || null,
+    generation: workspaceScopeGeneration,
+  };
+}
+
+function isCurrentWorkspaceScope(scope) {
+  return scope.generation === workspaceScopeGeneration
+    && scope.accountId === (state.account?.accountId || null);
+}
+
+function selectedNavigationBrand() {
+  return state.navigationBrands.find(function (brand) { return brand.id === state.navigationBrandId; }) || null;
+}
+
+function resetWorkspaceContext() {
+  state.sessionId = null;
+  state.sessionVideoTaskId = null;
+  state.sessions = [];
+  state.taskContext = null;
+  state.work = null;
+  state.workSummaries = [];
+  renderSessionOptions();
+  clearMessages();
+  renderWork(null);
+  renderTaskContext(null);
+  elements.sessionId.textContent = "—";
+  elements.sessionWork.textContent = "未绑定";
+  elements.agentTools.textContent = "未加载";
 }
 
 function shortWorkId(workId) {
@@ -178,8 +235,12 @@ function shortWorkId(workId) {
 
 function renderWorkList() {
   elements.workList.replaceChildren();
+  const navigationBrand = selectedNavigationBrand();
+  const brandWorks = state.workSummaries.filter(function (summary) {
+    return workSummaryMatchesNavigationBrand(summary, navigationBrand);
+  });
   const normalizedFilter = state.workFilter.trim().toLocaleLowerCase("zh-CN");
-  const visibleWorks = state.workSummaries.filter(function (summary) {
+  const visibleWorks = brandWorks.filter(function (summary) {
     if (!normalizedFilter) return true;
     const searchable = [summary.work.name, summary.work.id, summary.vehicle.brand, summary.vehicle.series, summary.vehicle.trim]
       .filter(Boolean).join(" ").toLocaleLowerCase("zh-CN");
@@ -188,8 +249,10 @@ function renderWorkList() {
   if (visibleWorks.length === 0) {
     const empty = document.createElement("p");
     empty.className = "work-list-empty";
-    empty.textContent = state.workSummaries.length === 0
-      ? "还没有项目，点击右上角＋开始。"
+    empty.textContent = brandWorks.length === 0
+      ? navigationBrand
+        ? "该品牌还没有项目，点击右上角＋开始。"
+        : "还没有项目，点击右上角＋开始。"
       : "没有匹配的项目，请换个关键词。";
     elements.workList.appendChild(empty);
     return;
@@ -199,15 +262,15 @@ function renderWorkList() {
     button.type = "button";
     button.className = "work-list-item" + (state.work && state.work.work.id === summary.work.id ? " active" : "");
     button.dataset.workId = summary.work.id;
-    button.title = summary.work.id;
-    button.setAttribute("aria-label", "打开作品 " + shortWorkId(summary.work.id));
+    button.title = summary.work.name || summary.vehicle.series + " · " + summary.vehicle.trim;
+    button.setAttribute("aria-label", "打开项目 " + (summary.work.name || summary.vehicle.series + " " + summary.vehicle.trim));
     const title = document.createElement("strong");
     title.textContent = summary.vehicle.series + " · " + summary.vehicle.trim;
     const meta = document.createElement("span");
     const status = document.createElement("b");
     status.textContent = statusLabels[summary.work.status] || summary.work.status;
     const revision = document.createElement("i");
-    revision.textContent = shortWorkId(summary.work.id) + " · r" + summary.work.revision;
+    revision.textContent = "版本 " + summary.work.revision;
     meta.append(status, revision);
     button.append(title, meta);
     button.addEventListener("click", function () {
@@ -295,7 +358,7 @@ function renderWork(view) {
     elements.workRevision.textContent = "—";
     elements.topbarWorkName.textContent = "未选择项目";
     elements.studioWorkTitle.textContent = "开始第一个汽车广告项目";
-    elements.studioWorkDescription.textContent = "从可信车型快照开始，逐步完成策略、脚本、分镜与成片。";
+    elements.studioWorkDescription.textContent = "请选择或新建项目。";
     elements.studioStatus.textContent = "未开始";
     elements.studioStatus.className = "badge neutral";
     renderTaskContext(null);
@@ -306,6 +369,12 @@ function renderWork(view) {
   }
   const work = view.work;
   const snapshot = view.vehicleSnapshot;
+  const workBrand = state.navigationBrands.find(function (brand) { return brand.id === snapshot.brandId; });
+  if (workBrand && state.navigationBrandId !== workBrand.id && state.account) {
+    state.navigationBrandId = workBrand.id;
+    localStorage.setItem(navigationBrandStorageKey(state.account.accountId), workBrand.id);
+    renderNavigationBrands();
+  }
   if (state.sessionVideoTaskId !== work.id) renderTaskContext(null);
   localStorage.setItem("firefly.workId", work.id);
   elements.createWorkCard.hidden = true;
@@ -334,7 +403,9 @@ function renderWork(view) {
   elements.snapshotId.textContent = snapshot.id;
   elements.vehicleFacts.replaceChildren();
   appendFact(snapshot.modelYear + " 年款");
-  Object.entries(snapshot.parameters).forEach(function (entry) { appendFact(entry[0] + "：" + entry[1]); });
+  Object.entries(snapshot.parameters).forEach(function (entry) {
+    appendFact((vehicleParameterLabels[entry[0]] || "车型参数") + "：" + entry[1]);
+  });
   appendFact(snapshot.fixedClaims.length + " 个固定卖点");
   appendFact(snapshot.prohibitedClaims.length + " 个禁用表达");
 
@@ -351,7 +422,7 @@ function renderWork(view) {
   elements.audience.value = strategy.audience;
   elements.theme.value = strategy.theme;
   elements.strategyEditor.hidden = false;
-  elements.strategyVersion.textContent = "v" + strategy.version + " · " + view.strategyVersionCount + " 个历史版本";
+  elements.strategyVersion.textContent = "版本 " + strategy.version + " · " + view.strategyVersionCount + " 个历史版本";
   elements.validationState.textContent = view.validation.valid ? "事实校验通过" : view.validation.issues.length + " 个校验问题";
   elements.validationState.className = "badge " + (view.validation.valid ? "success" : "invalid");
   renderStrategyItems(strategy, editable);
@@ -365,7 +436,7 @@ function renderWork(view) {
   elements.copyWork.hidden = work.status !== "strategy_approved";
   elements.approvalNote.textContent =
     work.status === "strategy_approved"
-      ? "已由人工审核通过；Agent 无法执行该批准动作。"
+      ? "已由人工审核通过；智能助手不能执行批准动作。"
       : awaiting
         ? "策略已冻结，等待审核人员决策。"
         : "锁定的卖点在模型重新生成时不会被覆盖。";
@@ -384,22 +455,30 @@ function collectStrategyItems() {
   });
 }
 
-async function refreshWorkList() {
+async function refreshWorkList(scope = captureWorkspaceScope()) {
   const result = await workspaceApi.listWorks();
+  if (!isCurrentWorkspaceScope(scope)) return false;
   state.workSummaries = result.works;
   renderWorkList();
+  return true;
 }
 
-async function loadWorks() {
-  await refreshWorkList();
-  if (state.workSummaries.length === 0) {
+async function loadWorks(scope = captureWorkspaceScope()) {
+  if (!await refreshWorkList(scope)) return false;
+  const navigationBrand = selectedNavigationBrand();
+  const scopedWorks = state.workSummaries.filter(function (summary) {
+    return workSummaryMatchesNavigationBrand(summary, navigationBrand);
+  });
+  if (scopedWorks.length === 0) {
     renderWork(null);
-    return;
+    return true;
   }
   const saved = localStorage.getItem("firefly.workId");
-  const selected = state.workSummaries.find(function (summary) { return summary.work.id === saved; }) || state.workSummaries[0];
+  const selected = scopedWorks.find(function (summary) { return summary.work.id === saved; }) || scopedWorks[0];
   const view = await workspaceApi.getWork(selected.work.id);
+  if (!isCurrentWorkspaceScope(scope)) return false;
   renderWork(view);
+  return true;
 }
 
 async function runWorkflow(action) {
@@ -666,9 +745,9 @@ function friendlyToolResult(toolName, event) {
   }
   const descriptions = {
     get_vehicle_snapshot: "车型信息已读取，后续内容将以这些官方事实为准。",
-    validate_vehicle_claims: "宣传内容检查已完成，请查看 Agent 接下来的说明。",
+    validate_vehicle_claims: "宣传内容检查已完成，请查看智能助手说明。",
     propose_strategy_generation: "策略建议已准备好，请在下方确认后再执行。",
-    validate_strategy: "策略检查已完成，请查看 Agent 接下来的说明。",
+    validate_strategy: "策略检查已完成，请查看智能助手说明。",
     propose_strategy_approval: "提交审核的建议已准备好，请在下方确认后再执行。",
   };
   return descriptions[toolName] || "这一步已经完成。";
@@ -808,7 +887,7 @@ async function executeActionProposal(card, proposal) {
   }
   if (state.work.work.revision !== proposal.expectedRevision) {
     status.textContent = "已失效";
-    result.textContent = "任务内容已经更新，请让 Agent 基于最新状态重新建议。";
+    result.textContent = "任务内容已经更新，请让智能助手基于最新状态重新建议。";
     button.disabled = true;
     card.classList.add("stale");
     return;
@@ -944,7 +1023,7 @@ function finishAgentTurn(turn, text) {
   const content = appendTimelineEvent(turn, "answer-event");
   const answer = document.createElement("div");
   answer.className = "timeline-answer";
-  renderMarkdown(answer, text || "Agent 未返回文本内容。");
+  renderMarkdown(answer, text || "智能助手未返回内容。");
   content.appendChild(answer);
   elements.messages.scrollTop = elements.messages.scrollHeight;
 }
@@ -968,7 +1047,7 @@ function completeStreamingAnswer(liveAnswer, text) {
   if (!liveAnswer) return false;
   liveAnswer.content.parentElement.classList.remove("active");
   liveAnswer.answer.classList.remove("streaming-answer");
-  renderMarkdown(liveAnswer.answer, text || "Agent 未返回文本内容。");
+  renderMarkdown(liveAnswer.answer, text || "智能助手未返回内容。");
   return true;
 }
 
@@ -1066,12 +1145,144 @@ function renderAccount() {
     const option = document.createElement("option");
     option.value = account.accountId;
     option.textContent = account.displayName;
-    option.title = account.displayName + " · " + (roleLabels[account.role] || account.role);
+    option.title = account.displayName + " · " + (roleLabels[account.role] || "未知角色");
     elements.agentAccountSelect.appendChild(option);
   });
+  if (state.accounts.length === 0) {
+    const option = document.createElement("option");
+    option.textContent = "账号不可用";
+    elements.agentAccountSelect.appendChild(option);
+  }
   if (state.account) elements.agentAccountSelect.value = state.account.accountId;
-  elements.agentAccountSelect.disabled = state.busy || state.workflowBusy || state.accounts.length < 2;
-  elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || state.account.role : "—";
+  elements.agentAccountSelect.disabled = state.busy || state.workflowBusy || state.workspaceHydrating || state.accounts.length < 2;
+  elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || "未知角色" : "—";
+  const displayName = state.account?.displayName || "";
+  elements.accountAvatar.textContent = Array.from(displayName.trim())[0] || "账";
+}
+
+function renderNavigationBrands() {
+  elements.brandNavigation.replaceChildren();
+  elements.brandNavigation.setAttribute("aria-busy", String(state.navigationBrandsLoading));
+  elements.brandNavigationRetry.hidden = !state.navigationBrandsError;
+  elements.brandNavigationStatus.hidden = true;
+  elements.brandNavigationStatus.textContent = "";
+
+  if (state.navigationBrandsLoading) {
+    const option = document.createElement("option");
+    option.textContent = "品牌加载中";
+    elements.brandNavigation.appendChild(option);
+    elements.brandNavigation.disabled = true;
+    return;
+  }
+
+  if (state.navigationBrandsError || state.navigationBrands.length === 0) {
+    const message = state.navigationBrandsError || "暂无可访问品牌";
+    const option = document.createElement("option");
+    option.textContent = message;
+    elements.brandNavigation.appendChild(option);
+    elements.brandNavigation.disabled = true;
+    elements.brandNavigationStatus.textContent = message;
+    elements.brandNavigationStatus.hidden = false;
+    return;
+  }
+
+  state.navigationBrands.forEach(function (brand) {
+    const option = document.createElement("option");
+    option.value = brand.id;
+    option.textContent = brand.name;
+    elements.brandNavigation.appendChild(option);
+  });
+  elements.brandNavigation.value = state.navigationBrandId || "";
+  elements.brandNavigation.disabled = state.busy || state.workflowBusy || state.workspaceHydrating;
+}
+
+function clearNavigationBrands() {
+  navigationBrandsRequest += 1;
+  state.navigationBrands = [];
+  state.navigationBrandId = null;
+  state.navigationBrandsLoading = true;
+  state.navigationBrandsError = null;
+  renderNavigationBrands();
+}
+
+function navigationBrandsFailureMessage(error) {
+  if (error && error.status === 401) return "账号会话已失效";
+  if (error && error.status === 403) return "当前账号无品牌访问权限";
+  return "品牌加载失败";
+}
+
+async function loadNavigationBrands() {
+  const account = state.account;
+  const request = ++navigationBrandsRequest;
+  state.navigationBrands = [];
+  state.navigationBrandId = null;
+  state.navigationBrandsLoading = true;
+  state.navigationBrandsError = null;
+  renderNavigationBrands();
+  if (!account) {
+    state.navigationBrandsLoading = false;
+    state.navigationBrandsError = "账号不可用";
+    renderNavigationBrands();
+    return;
+  }
+
+  try {
+    const response = account.role === "content_admin"
+      ? await workspaceApi.listAdminBrands()
+      : account.role === "creator"
+        ? await workspaceApi.getProjectCreationOptions()
+        : { brands: [] };
+    if (request !== navigationBrandsRequest || state.account?.accountId !== account.accountId) return;
+    state.navigationBrands = normalizeNavigationBrands(account.role, response);
+    const preferredBrandId = localStorage.getItem(navigationBrandStorageKey(account.accountId));
+    state.navigationBrandId = resolveNavigationBrandId(state.navigationBrands, preferredBrandId);
+    if (state.navigationBrandId) {
+      localStorage.setItem(navigationBrandStorageKey(account.accountId), state.navigationBrandId);
+    }
+  } catch (error) {
+    if (request !== navigationBrandsRequest || state.account?.accountId !== account.accountId) return;
+    state.navigationBrandsError = navigationBrandsFailureMessage(error);
+  } finally {
+    if (request !== navigationBrandsRequest || state.account?.accountId !== account.accountId) return;
+    state.navigationBrandsLoading = false;
+    renderNavigationBrands();
+  }
+}
+
+async function selectNavigationBrand(brandId) {
+  if (state.navigationBrandsLoading || !state.account || state.busy || state.workflowBusy || state.workspaceHydrating) return;
+  if (!state.navigationBrands.some(function (brand) { return brand.id === brandId; })) return;
+  if (state.navigationBrandId === brandId) return;
+  clearError();
+  clearWorkflowError();
+  state.workspaceHydrating = true;
+  workspaceScopeGeneration += 1;
+  state.navigationBrandId = brandId;
+  localStorage.setItem(navigationBrandStorageKey(state.account.accountId), brandId);
+  const scope = captureWorkspaceScope();
+  setBusy(true);
+  setWorkflowBusy(true);
+  resetWorkspaceContext();
+  renderNavigationBrands();
+  try {
+    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
+    await restoreSession(scope);
+  } catch (error) {
+    if (isCurrentWorkspaceScope(scope)) showError(error);
+  } finally {
+    if (isCurrentWorkspaceScope(scope)) {
+      state.workspaceHydrating = false;
+      setWorkflowBusy(false);
+      setBusy(false);
+      renderAccount();
+      renderNavigationBrands();
+    }
+  }
+}
+
+function retryNavigationBrands() {
+  if (state.busy || state.workflowBusy) return;
+  void loadNavigationBrands();
 }
 
 function renderAgentBudget(presentation) {
@@ -1145,28 +1356,35 @@ function updateSession(summary) {
   elements.agentTools.title = toolNames.join("、");
 }
 
-async function createSession(videoTaskId) {
+async function createSession(videoTaskId, scope = captureWorkspaceScope()) {
   const selectedVideoTaskId = videoTaskId === undefined ? state.work?.work.id : videoTaskId;
   const body = await agentApi.createSession(selectedVideoTaskId);
+  if (!isCurrentWorkspaceScope(scope) || (state.work?.work.id || null) !== (selectedVideoTaskId || null)) return false;
   updateSession(body.session);
   clearMessages();
+  return true;
 }
 
-async function loadTaskSessions(videoTaskId) {
+async function loadTaskSessions(videoTaskId, scope = captureWorkspaceScope()) {
   const body = await agentApi.listSessions(videoTaskId);
+  if (!isCurrentWorkspaceScope(scope) || state.work?.work.id !== videoTaskId) return false;
   state.sessions = Array.isArray(body.sessions) ? body.sessions.slice().sort(compareSessions) : [];
   renderSessionOptions();
+  return true;
 }
 
-async function activateSession(sessionId) {
+async function activateSession(sessionId, scope = captureWorkspaceScope()) {
   const selectedVideoTaskId = state.work?.work.id || null;
   const body = await agentApi.getSession(sessionId, selectedVideoTaskId);
+  if (!isCurrentWorkspaceScope(scope) || (state.work?.work.id || null) !== selectedVideoTaskId) return false;
   if ((body.session.videoTaskId || null) !== selectedVideoTaskId) {
-    throw new Error("该 Agent 会话不属于当前任务，已拒绝切换。");
+    throw new Error("该助手会话不属于当前任务，已拒绝切换。");
   }
   updateSession(body.session);
   const transcript = await agentApi.getTranscript(sessionId, selectedVideoTaskId);
+  if (!isCurrentWorkspaceScope(scope) || state.sessionId !== sessionId || (state.work?.work.id || null) !== selectedVideoTaskId) return false;
   restoreTranscriptTimeline(transcript.messages);
+  return true;
 }
 
 async function selectSession(sessionId) {
@@ -1186,21 +1404,24 @@ async function selectSession(sessionId) {
   }
 }
 
-async function restoreSessionForCurrentWork() {
+async function restoreSessionForCurrentWork(scope = captureWorkspaceScope()) {
   const videoTaskId = state.work?.work.id || null;
   if (!videoTaskId) {
+    if (!isCurrentWorkspaceScope(scope)) return false;
     state.sessions = [];
-    await createSession();
-    return;
+    renderSessionOptions();
+    clearMessages();
+    setBusy(state.busy);
+    return true;
   }
-  await loadTaskSessions(videoTaskId);
+  if (!await loadTaskSessions(videoTaskId, scope)) return false;
   const taskSaved = localStorage.getItem(sessionStorageKey(videoTaskId));
   const legacySaved = localStorage.getItem("firefly.sessionId");
   const selected = state.sessions.find(function (session) { return session.id === taskSaved; })
     || state.sessions.find(function (session) { return session.id === legacySaved; })
     || state.sessions[0];
-  if (selected) await activateSession(selected.id);
-  else await createSession(videoTaskId);
+  if (selected) return activateSession(selected.id, scope);
+  return createSession(videoTaskId, scope);
 }
 
 async function ensureSessionForCurrentWork() {
@@ -1209,14 +1430,15 @@ async function ensureSessionForCurrentWork() {
   await restoreSession();
 }
 
-async function restoreSession() {
+async function restoreSession(scope = captureWorkspaceScope()) {
   try {
-    await restoreSessionForCurrentWork();
+    return await restoreSessionForCurrentWork(scope);
   } catch {
+    if (!isCurrentWorkspaceScope(scope)) return false;
     const videoTaskId = state.work?.work.id || null;
     localStorage.removeItem(sessionStorageKey(videoTaskId));
     state.sessions = [];
-    await createSession(videoTaskId || undefined);
+    return createSession(videoTaskId || undefined, scope);
   }
 }
 
@@ -1226,12 +1448,21 @@ function applyWorkspaceSession(session) {
     sessionStorage.setItem("firefly.workspaceSession", session.token);
   }
   state.account = session.account;
+  workspaceScopeGeneration += 1;
   localStorage.setItem("firefly.accountId", session.account.accountId);
   renderAccount();
 }
 
 async function initializeWorkspaceAccount() {
-  const accountsBody = await authApi.listDevelopmentAccounts();
+  let accountsBody;
+  try {
+    accountsBody = await authApi.listDevelopmentAccounts();
+  } catch {
+    state.accounts = [];
+    state.account = null;
+    renderAccount();
+    throw new Error("开发账号切换暂不可用。");
+  }
   state.accounts = Array.isArray(accountsBody.accounts) ? accountsBody.accounts : [];
   if (state.accounts.length === 0) throw new Error("当前没有可用的工作区账号。");
   const storedToken = sessionStorage.getItem("firefly.workspaceSession");
@@ -1255,54 +1486,84 @@ async function initializeWorkspaceAccount() {
 }
 
 async function switchWorkspaceAccount(accountId) {
-  if (!accountId || accountId === state.account?.accountId || state.busy || state.workflowBusy) return;
+  if (!accountId || accountId === state.account?.accountId || state.busy || state.workflowBusy || state.workspaceHydrating) return;
+  const previousNavigation = {
+    brands: state.navigationBrands,
+    brandId: state.navigationBrandId,
+    loading: state.navigationBrandsLoading,
+    error: state.navigationBrandsError,
+  };
+  let sessionSwitched = false;
   clearError();
   clearWorkflowError();
+  state.workspaceHydrating = true;
+  workspaceScopeGeneration += 1;
   setBusy(true);
   setWorkflowBusy(true);
+  renderAccount();
+  clearNavigationBrands();
+  let scope = captureWorkspaceScope();
   try {
     applyWorkspaceSession((await authApi.createOrSwitchSession(accountId)).session);
-    state.sessionId = null;
-    state.sessionVideoTaskId = null;
-    state.sessions = [];
-    state.taskContext = null;
-    renderTaskContext(null);
-    await refreshAgentBudget();
-    await loadWorks();
-    await restoreSession();
+    scope = captureWorkspaceScope();
+    sessionSwitched = true;
+    resetWorkspaceContext();
+    await Promise.all([refreshAgentBudget(), loadNavigationBrands()]);
+    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
+    await restoreSession(scope);
   } catch (error) {
-    showError(error);
+    if (isCurrentWorkspaceScope(scope)) showError(error);
     renderAccount();
+    if (!sessionSwitched) {
+      state.navigationBrands = previousNavigation.brands;
+      state.navigationBrandId = previousNavigation.brandId;
+      state.navigationBrandsLoading = previousNavigation.loading;
+      state.navigationBrandsError = previousNavigation.error;
+      renderNavigationBrands();
+    }
   } finally {
-    setWorkflowBusy(false);
-    setBusy(false);
+    if (isCurrentWorkspaceScope(scope)) {
+      state.workspaceHydrating = false;
+      setWorkflowBusy(false);
+      setBusy(false);
+      renderAccount();
+      renderNavigationBrands();
+    }
   }
 }
 
 async function initialize() {
+  state.workspaceHydrating = true;
+  renderAccount();
   try {
     const meta = await api("/v1/meta");
     if (!Array.isArray(meta.capabilities) || !meta.capabilities.includes("task_context_v1")) {
-      throw new Error("当前后端进程版本过旧，请重启 npm run dev:api 后刷新页面。");
+      throw new Error("服务版本较旧，请重启服务后刷新页面。");
     }
     elements.provider.textContent = meta.model.provider;
     elements.model.textContent = meta.model.modelId;
     state.modelReady = Boolean(meta.model.credentialsConfigured);
     await initializeWorkspaceAccount();
-    await loadWorks();
-    await restoreSession();
+    await loadNavigationBrands();
+    const scope = captureWorkspaceScope();
+    if (!await loadWorks(scope) || !isCurrentWorkspaceScope(scope)) return;
+    await restoreSession(scope);
     if (state.modelReady) {
       setStatus("online", "服务正常");
       elements.prompt.focus();
     } else {
       setStatus("warning", "等待模型密钥");
-      elements.prompt.placeholder = "请先在服务端配置 DEEPSEEK_API_KEY";
+      elements.prompt.placeholder = "请先配置模型服务";
       setBusy(false);
-      showError(new Error("DeepSeek 已设为主 Agent；请在项目 .env 中配置 DEEPSEEK_API_KEY 后重启服务。"));
+      showError(new Error("模型服务尚未配置，请配置后重启服务。"));
     }
   } catch (error) {
     setStatus("error", "连接失败");
     showError(error);
+  } finally {
+    state.workspaceHydrating = false;
+    renderAccount();
+    renderNavigationBrands();
   }
 }
 
@@ -1357,7 +1618,7 @@ async function sendMessage(text) {
     updateSession(result.session);
   } catch (error) {
     const cancelled = error instanceof DOMException && error.name === "AbortError";
-    const messageText = cancelled ? "已取消当前生成。" : error instanceof Error ? error.message : "Agent 请求失败。";
+    const messageText = cancelled ? "已取消当前生成。" : error instanceof Error ? error.message : "智能助手请求失败。";
     failAgentTurn(turn, messageText);
     if (!cancelled) {
       showError(error);
@@ -1384,7 +1645,13 @@ bindAgentPanel({
   setBusy,
 });
 
-bindWorkspaceShell({ elements, state, renderWorkList });
+bindWorkspaceShell({
+  elements,
+  state,
+  renderWorkList,
+  selectNavigationBrand,
+  retryNavigationBrands,
+});
 
 elements.agentAccountSelect.addEventListener("change", function () {
   void switchWorkspaceAccount(elements.agentAccountSelect.value);

@@ -101,7 +101,7 @@ export function agentActionRequestBody(proposal) {
   if (proposal.action === "request_strategy_approval") {
     return { expectedRevision: proposal.expectedRevision };
   }
-  throw new Error("Unsupported Agent action card.");
+  throw new Error("不支持的智能助手操作卡片。");
 }
 
 export function agentActionAvailability(
@@ -132,7 +132,7 @@ export function agentActionFailurePresentation(error) {
   if (code === "AIC-WORKFLOW-REVISION_CONFLICT") {
     return {
       status: "已失效",
-      message: "任务内容已经更新，请刷新任务并让 Agent 基于最新状态重新建议。",
+      message: "任务内容已经更新，请刷新任务并让智能助手基于最新状态重新建议。",
       blocksCard: true,
       stale: true,
     };
@@ -188,8 +188,9 @@ export function agentActionFailurePresentation(error) {
 const panelMinimumWidth = 320;
 const panelMaximumWidth = 560;
 const panelResizerWidth = 6;
-const compactDesktopMaximum = 1180;
-const mobileMaximum = 980;
+const projectRailWidth = 240;
+const studioMinimumWidth = 480;
+const desktopMinimum = 1280;
 
 function validMinorAmount(value) {
   return Number.isSafeInteger(value) && value >= 0;
@@ -243,9 +244,7 @@ function clamp(value, minimum, maximum) {
 }
 
 export function agentPanelWidthBounds(shellWidth) {
-  const sidebarWidth = shellWidth <= compactDesktopMaximum ? 220 : 260;
-  const studioMinimumWidth = shellWidth <= compactDesktopMaximum ? 480 : 540;
-  const availableWidth = Math.max(0, shellWidth - sidebarWidth - studioMinimumWidth - panelResizerWidth);
+  const availableWidth = Math.max(0, shellWidth - projectRailWidth - studioMinimumWidth - panelResizerWidth);
   return {
     minimum: Math.min(panelMinimumWidth, availableWidth),
     maximum: Math.min(panelMaximumWidth, availableWidth),
@@ -261,7 +260,7 @@ export function createAgentPanelLayoutController(options) {
   const { shell, panel, resizer, collapseButton, prompt } = options;
   const widthKey = "firefly.agentPanelWidth";
   const collapsedKey = "firefly.agentPanelCollapsed";
-  const desktopMedia = window.matchMedia(`(min-width: ${mobileMaximum + 1}px)`);
+  const desktopMedia = window.matchMedia(`(min-width: ${desktopMinimum}px)`);
   const storedWidth = Number(localStorage.getItem(widthKey));
   let requestedWidth = Number.isFinite(storedWidth) && storedWidth > 0 ? storedWidth : 380;
   let collapsed = localStorage.getItem(collapsedKey) === "true";
@@ -286,8 +285,8 @@ export function createAgentPanelLayoutController(options) {
     resizer.setAttribute("aria-valuemax", String(bounds.maximum));
     resizer.setAttribute("aria-valuenow", String(Math.round(width)));
     collapseButton.setAttribute("aria-expanded", String(!effectivelyCollapsed));
-    collapseButton.setAttribute("aria-label", effectivelyCollapsed ? "展开 Agent 面板" : "折叠 Agent 面板");
-    collapseButton.title = effectivelyCollapsed ? "展开 Agent 面板（Alt+Shift+A）" : "折叠 Agent 面板（Alt+Shift+A）";
+    collapseButton.setAttribute("aria-label", effectivelyCollapsed ? "展开智能助手" : "折叠智能助手");
+    collapseButton.title = effectivelyCollapsed ? "展开智能助手（Alt+Shift+A）" : "折叠智能助手（Alt+Shift+A）";
   }
 
   function toggle() {
