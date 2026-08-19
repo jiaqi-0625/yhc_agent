@@ -78,6 +78,13 @@ export async function handleAgentRoute(
   runtime: LocalAgentRuntime,
   business: LocalBusinessRuntime,
 ): Promise<boolean> {
+  if (request.method === "GET" && url.pathname === "/v1/sessions") {
+    const videoTaskId = url.searchParams.get("videoTaskId");
+    if (!videoTaskId) throw new Error("Video task id is required when listing Agent sessions.");
+    await resolveLocalTaskContext(business, videoTaskId);
+    sendJson(response, 200, { sessions: await runtime.listSessions(videoTaskId) });
+    return true;
+  }
   if (request.method === "POST" && url.pathname === "/v1/sessions") {
     const body = await readJson(request);
     if (body.id !== undefined && typeof body.id !== "string") throw new Error("Session id must be a string.");

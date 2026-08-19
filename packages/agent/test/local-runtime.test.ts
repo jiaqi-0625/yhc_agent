@@ -123,6 +123,29 @@ test("mock runtime persists and restores a multi-turn Pi transcript", async (con
   assert.equal(reset.messageCount, 0);
 });
 
+test("task session listing restores persisted sessions in a stable task-scoped order", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-session-list-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+  const config: LocalAgentConfig = {
+    provider: "mock",
+    modelId: "mock-local",
+    baseUrl: "local://mock",
+    thinkingLevel: "off",
+    persistSessions: true,
+    dataDirectory: directory,
+  };
+  const firstRuntime = new LocalAgentRuntime(config);
+  await firstRuntime.createSession("session_task_list_b", { taskContext: MOCK_TASK_CONTEXT });
+  await firstRuntime.createSession("session_task_list_a", { taskContext: MOCK_TASK_CONTEXT });
+  await firstRuntime.createSession("session_unbound_list");
+
+  const restoredRuntime = new LocalAgentRuntime(config);
+  const sessions = await restoredRuntime.listSessions(MOCK_TASK_CONTEXT.videoTask.id);
+  assert.deepEqual(sessions.map((session) => session.id), ["session_task_list_a", "session_task_list_b"]);
+  assert.ok(sessions.every((session) => session.videoTaskId === MOCK_TASK_CONTEXT.videoTask.id));
+  assert.equal((await restoredRuntime.listSessions()).length, 3);
+});
+
 test("prompt runs are idempotent by client request ID and retain replayable events", async () => {
   const config: LocalAgentConfig = {
     provider: "mock",

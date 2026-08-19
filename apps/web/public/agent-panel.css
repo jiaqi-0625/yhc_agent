@@ -103,6 +103,9 @@
 .chat-footer button { padding: 0; border: 0; color: inherit; background: transparent; font-size: inherit; cursor: pointer; }
 .chat-footer button:hover { color: var(--destructive); }
 .chat-header-actions { display: flex; align-items: center; gap: 4px; }
+.agent-session-picker { min-width: 0; }
+.agent-session-picker select { width: 104px; height: 30px; padding: 0 24px 0 8px; overflow: hidden; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); color: var(--foreground); background: var(--input); font-size: 9px; text-overflow: ellipsis; }
+.agent-session-picker select:focus-visible { border-color: var(--ring); outline: 2px solid color-mix(in oklch, var(--ring) 18%, transparent); outline-offset: 1px; }
 .chat-header-actions #collapse-agent svg { transition: transform .16s ease; }
 .agent-context { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; }
 .agent-context-copy { min-width: 0; }
@@ -119,7 +122,8 @@
 .workspace-shell[data-agent-collapsed="true"] .chat-panel > :not(.chat-header) { display: none; }
 .workspace-shell[data-agent-collapsed="true"] .chat-header { justify-content: center; padding: 0; }
 .workspace-shell[data-agent-collapsed="true"] .agent-identity,
-.workspace-shell[data-agent-collapsed="true"] #new-session { display: none; }
+.workspace-shell[data-agent-collapsed="true"] #new-session,
+.workspace-shell[data-agent-collapsed="true"] .agent-session-picker { display: none; }
 .workspace-shell[data-agent-collapsed="true"] #collapse-agent svg { transform: rotate(180deg); }
 
 @media (max-width: 1180px) and (min-width: 981px) {

@@ -116,7 +116,7 @@ export function createAgentPanelLayoutController(options) {
 }
 
 export function bindAgentPanel(options) {
-  const { elements, state, sendMessage, createSession, updateSession, clearMessages, clearError, showError, setBusy } = options;
+  const { elements, state, sendMessage, createSession, selectSession, updateSession, clearMessages, clearError, showError, setBusy } = options;
 
   elements.composer.addEventListener("submit", function (event) {
     event.preventDefault();
@@ -172,6 +172,11 @@ export function bindAgentPanel(options) {
       showError(error);
       elements.cancelGeneration.disabled = false;
     }
+  });
+
+  elements.sessionSelect.addEventListener("change", function () {
+    if (state.busy || !elements.sessionSelect.value || elements.sessionSelect.value === state.sessionId) return;
+    void selectSession(elements.sessionSelect.value);
   });
 
   elements.retryMessage.addEventListener("click", function () {

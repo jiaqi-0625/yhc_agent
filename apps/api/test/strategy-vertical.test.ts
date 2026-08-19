@@ -240,3 +240,32 @@ test("work-bound Agent sessions load only the advertising domain tools", async (
   const meta = await json(await fetch(`${baseUrl}/v1/meta`));
   assert.equal(meta.agentDomainToolsLoaded, true);
 });
+
+test("Agent session listing stays scoped to the selected video task", async (context) => {
+  const { server, baseUrl } = await startBusinessApi();
+  context.after(() => server.close());
+  const firstWork = await createWork(baseUrl);
+  const secondWork = await createWork(baseUrl);
+
+  for (const [id, videoTaskId] of [
+    ["session_task_choice_1", firstWork.work.id],
+    ["session_task_choice_2", firstWork.work.id],
+    ["session_other_task", secondWork.work.id],
+  ]) {
+    const response = await fetch(`${baseUrl}/v1/sessions`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, videoTaskId }),
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const response = await fetch(`${baseUrl}/v1/sessions?videoTaskId=${encodeURIComponent(firstWork.work.id)}`);
+  assert.equal(response.status, 200);
+  const body = await json(response);
+  assert.deepEqual(body.sessions.map((session: { id: string }) => session.id), [
+    "session_task_choice_2",
+    "session_task_choice_1",
+  ]);
+  assert.ok(body.sessions.every((session: { videoTaskId: string }) => session.videoTaskId === firstWork.work.id));
+});

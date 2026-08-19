@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
@@ -102,6 +102,25 @@ export class LocalSessionStore {
       mode: 0o600,
     });
     await rename(temporary, target);
+  }
+
+  async list(): Promise<LoadedLocalSession[]> {
+    if (!this.enabled) return [];
+    let entries;
+    try {
+      entries = await readdir(this.#directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+      throw error;
+    }
+    const sessions: LoadedLocalSession[] = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+      const sessionId = entry.name.slice(0, -5);
+      const session = await this.load(sessionId);
+      if (session) sessions.push(session);
+    }
+    return sessions;
   }
 
   async delete(sessionId: string): Promise<void> {

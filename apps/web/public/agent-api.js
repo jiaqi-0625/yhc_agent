@@ -162,6 +162,9 @@ async function streamAgentMessage(sessionId, message, options = {}) {
 }
 
 export const agentApi = {
+  listSessions: function (videoTaskId) {
+    return api("/v1/sessions?videoTaskId=" + encodeURIComponent(videoTaskId));
+  },
   createSession: function (videoTaskId) {
     return api("/v1/sessions", {
       method: "POST",

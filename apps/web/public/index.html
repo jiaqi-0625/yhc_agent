@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>萤火虫广告 Agent · 汽车广告工作台</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-agent-dialog-v4" />
-    <link rel="stylesheet" href="/agent-panel.css?build=workspace-agent-dialog-v4" />
+    <link rel="stylesheet" href="/app.css?build=workspace-agent-dialog-v5" />
+    <link rel="stylesheet" href="/agent-panel.css?build=workspace-agent-dialog-v5" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -240,6 +240,10 @@
           <header class="chat-header">
             <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫 Agent</strong><span><i class="online-dot"></i>任务上下文已隔离</span></div></div>
             <div class="chat-header-actions">
+              <label class="agent-session-picker">
+                <span class="sr-only">选择 Agent 会话</span>
+                <select id="agent-session-select" aria-label="选择 Agent 会话"></select>
+              </label>
               <button id="new-session" class="icon-button subtle" type="button" aria-label="新建 Agent 会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
               <button id="collapse-agent" class="icon-button subtle" type="button" aria-label="折叠 Agent 面板" aria-expanded="true" aria-controls="chat-view" title="折叠 Agent 面板（Alt+Shift+A）"><svg class="icon"><use href="#i-chevron" /></svg></button>
             </div>
@@ -274,6 +278,6 @@
         </aside>
       </div>
     </div>
-    <script type="module" src="/app.js?build=workspace-agent-dialog-v4"></script>
+    <script type="module" src="/app.js?build=workspace-agent-dialog-v5"></script>
   </body>
 </html>

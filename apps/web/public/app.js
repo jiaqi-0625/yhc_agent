@@ -7,6 +7,7 @@ import { bindWorkspaceShell } from "./workspace-shell.js";
 const state = {
   sessionId: null,
   sessionVideoTaskId: null,
+  sessions: [],
   taskContext: null,
   activeAbortController: null,
   activeRunId: null,
@@ -32,6 +33,7 @@ const elements = {
   status: document.querySelector("#service-status"),
   error: document.querySelector("#error-banner"),
   newSession: document.querySelector("#new-session"),
+  sessionSelect: document.querySelector("#agent-session-select"),
   resetSession: document.querySelector("#reset-session"),
   retryMessage: document.querySelector("#retry-message"),
   cancelGeneration: document.querySelector("#cancel-generation"),
@@ -124,6 +126,7 @@ function setBusy(busy) {
   elements.send.hidden = busy;
   elements.cancelGeneration.hidden = !busy;
   elements.newSession.disabled = busy;
+  elements.sessionSelect.disabled = busy || state.sessions.length === 0;
   elements.resetSession.disabled = busy;
   elements.retryMessage.disabled = busy;
 }
@@ -1035,11 +1038,41 @@ function restoreTranscriptTimeline(messages) {
   });
 }
 
+function sessionStorageKey(videoTaskId) {
+  return "firefly.sessionId." + (videoTaskId || "unbound");
+}
+
+function compareSessions(left, right) {
+  return String(right.updatedAt).localeCompare(String(left.updatedAt))
+    || String(right.createdAt).localeCompare(String(left.createdAt))
+    || String(left.id).localeCompare(String(right.id));
+}
+
+function renderSessionOptions() {
+  elements.sessionSelect.replaceChildren();
+  state.sessions.slice().sort(compareSessions).forEach(function (session, index) {
+    const option = document.createElement("option");
+    option.value = session.id;
+    option.textContent = (index === 0 ? "最近会话" : "历史会话 " + (index + 1)) + " · " + session.messageCount + " 条消息";
+    option.title = session.id;
+    elements.sessionSelect.appendChild(option);
+  });
+  if (state.sessionId && state.sessions.some(function (session) { return session.id === state.sessionId; })) {
+    elements.sessionSelect.value = state.sessionId;
+  }
+  elements.sessionSelect.disabled = state.busy || state.sessions.length === 0;
+}
+
 function updateSession(summary) {
   state.sessionId = summary.id;
   state.sessionVideoTaskId = summary.videoTaskId || null;
   state.taskContext = summary.taskContext || null;
   localStorage.setItem("firefly.sessionId", summary.id);
+  localStorage.setItem(sessionStorageKey(summary.videoTaskId || null), summary.id);
+  state.sessions = [summary].concat(state.sessions.filter(function (session) {
+    return session.id !== summary.id && (session.videoTaskId || null) === (summary.videoTaskId || null);
+  })).sort(compareSessions);
+  renderSessionOptions();
   elements.sessionId.textContent = summary.id;
   elements.sessionWork.textContent = summary.videoTaskId ? shortWorkId(summary.videoTaskId) : "未绑定";
   elements.sessionWork.title = summary.videoTaskId || "";
@@ -1067,31 +1100,77 @@ async function createSession(videoTaskId) {
   clearMessages();
 }
 
-async function ensureSessionForCurrentWork() {
-  const videoTaskId = state.work?.work.id || null;
-  if (state.sessionId && state.sessionVideoTaskId === videoTaskId) return;
-  await createSession(videoTaskId || undefined);
+async function loadTaskSessions(videoTaskId) {
+  const body = await agentApi.listSessions(videoTaskId);
+  state.sessions = Array.isArray(body.sessions) ? body.sessions.slice().sort(compareSessions) : [];
+  renderSessionOptions();
 }
 
-async function restoreSession() {
-  const saved = localStorage.getItem("firefly.sessionId");
-  if (!saved) {
+async function activateSession(sessionId) {
+  const body = await agentApi.getSession(sessionId);
+  const selectedVideoTaskId = state.work?.work.id || null;
+  if ((body.session.videoTaskId || null) !== selectedVideoTaskId) {
+    throw new Error("该 Agent 会话不属于当前任务，已拒绝切换。");
+  }
+  updateSession(body.session);
+  const transcript = await agentApi.getTranscript(sessionId);
+  restoreTranscriptTimeline(transcript.messages);
+}
+
+async function selectSession(sessionId) {
+  if (state.busy || !sessionId || sessionId === state.sessionId) return;
+  clearError();
+  setBusy(true);
+  try {
+    await activateSession(sessionId);
+    state.lastPrompt = "";
+    elements.retryMessage.hidden = true;
+  } catch (error) {
+    showError(error);
+    renderSessionOptions();
+  } finally {
+    setBusy(false);
+    elements.prompt.focus();
+  }
+}
+
+async function restoreSessionForCurrentWork() {
+  const videoTaskId = state.work?.work.id || null;
+  if (!videoTaskId) {
+    state.sessions = [];
     await createSession();
     return;
   }
+  await loadTaskSessions(videoTaskId);
+  const taskSaved = localStorage.getItem(sessionStorageKey(videoTaskId));
+  const legacySaved = localStorage.getItem("firefly.sessionId");
+  const selected = state.sessions.find(function (session) { return session.id === taskSaved; })
+    || state.sessions.find(function (session) { return session.id === legacySaved; })
+    || state.sessions[0];
+  if (selected) await activateSession(selected.id);
+  else await createSession(videoTaskId);
+}
+
+async function ensureSessionForCurrentWork() {
+  const videoTaskId = state.work?.work.id || null;
+  if (state.sessionId && state.sessionVideoTaskId === videoTaskId) {
+    await loadTaskSessions(videoTaskId);
+    const current = state.sessions.find(function (session) { return session.id === state.sessionId; });
+    if (current) updateSession(current);
+    else await restoreSessionForCurrentWork();
+    return;
+  }
+  await restoreSessionForCurrentWork();
+}
+
+async function restoreSession() {
   try {
-    const session = await agentApi.getSession(saved);
-    const selectedVideoTaskId = state.work?.work.id || null;
-    if ((session.session.videoTaskId || null) !== selectedVideoTaskId) {
-      await createSession(selectedVideoTaskId || undefined);
-      return;
-    }
-    updateSession(session.session);
-    const transcript = await agentApi.getTranscript(saved);
-    restoreTranscriptTimeline(transcript.messages);
+    await restoreSessionForCurrentWork();
   } catch {
-    localStorage.removeItem("firefly.sessionId");
-    await createSession();
+    const videoTaskId = state.work?.work.id || null;
+    localStorage.removeItem(sessionStorageKey(videoTaskId));
+    state.sessions = [];
+    await createSession(videoTaskId || undefined);
   }
 }
 
@@ -1194,6 +1273,7 @@ bindAgentPanel({
   state,
   sendMessage,
   createSession,
+  selectSession,
   updateSession,
   clearMessages,
   clearError,

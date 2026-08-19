@@ -410,6 +410,27 @@ export class LocalAgentRuntime {
     return active ? toPublicTranscript(active.agent.state.messages) : undefined;
   }
 
+  async listSessions(videoTaskId?: string): Promise<LocalSessionSummary[]> {
+    const sessionIds = new Set(this.#sessions.keys());
+    for (const persisted of await this.#store.list()) {
+      const persistedVideoTaskId = persisted.schemaVersion === 2
+        ? persisted.taskContext?.videoTask.id
+        : persisted.workId;
+      if (videoTaskId !== undefined && persistedVideoTaskId !== videoTaskId) continue;
+      sessionIds.add(persisted.id);
+    }
+    const sessions: LocalSessionSummary[] = [];
+    for (const sessionId of sessionIds) {
+      const active = await this.#getActive(sessionId);
+      if (!active) continue;
+      const summary = this.#summary(sessionId, active);
+      if (videoTaskId !== undefined && summary.videoTaskId !== videoTaskId) continue;
+      sessions.push(summary);
+    }
+    return sessions.sort((left, right) =>
+      right.updatedAt.localeCompare(left.updatedAt) || right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id));
+  }
+
   async startPromptRun(sessionId: string, input: string, requestId: string): Promise<LocalPromptRunSummary> {
     assertLocalSessionId(sessionId);
     this.#assertRequestId(requestId);
