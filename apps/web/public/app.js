@@ -8,8 +8,9 @@ import {
   agentBudgetPresentation,
   bindAgentPanel,
   createAgentActionRequestId,
+  createStableAgentActionRequestId,
   extractAgentActionCard,
-} from "./agent-panel.js";
+} from "./agent-panel.js?build=ws502-v1";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -70,6 +71,7 @@ let navigationBrandsRequest = 0;
 let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
 let agentSelectionRequest = 0;
+let activeAgentActionExecution = null;
 let workspaceFrame = null;
 let assetMatchingPanel = null;
 let workspaceStagesPanel = null;
@@ -1072,6 +1074,18 @@ function currentAgentActionContext() {
   };
 }
 
+function isCurrentAgentActionContext(expectedContext) {
+  const context = currentAgentActionContext();
+  return Boolean(
+    context
+    && context.sessionId === expectedContext.sessionId
+    && context.accountId === expectedContext.accountId
+    && context.scopeGeneration === expectedContext.scopeGeneration
+    && context.projectId === expectedContext.projectId
+    && context.videoTaskId === expectedContext.videoTaskId
+  );
+}
+
 function applyAgentCommandRevision(response, expectedContext) {
   const context = currentAgentActionContext();
   if (
@@ -1143,6 +1157,8 @@ async function executeActionProposal(card, proposal) {
     card.classList.add("stale");
     return;
   }
+  const execution = { context };
+  activeAgentActionExecution = execution;
   clearWorkflowError();
   setWorkflowBusy(true);
   button.disabled = true;
@@ -1151,13 +1167,23 @@ async function executeActionProposal(card, proposal) {
   delete card.dataset.executionBlocked;
   card.classList.remove("failed");
   try {
-    const requestId = card.dataset.commandRequestId || createAgentActionRequestId();
+    const requestId = card.dataset.commandRequestId || (
+      card.dataset.commandSourceId
+        ? await createStableAgentActionRequestId(
+          context.sessionId,
+          card.dataset.commandSourceId,
+          proposal,
+        )
+        : createAgentActionRequestId()
+    );
+    if (!isCurrentAgentActionContext(context)) return;
     card.dataset.commandRequestId = requestId;
     const response = await agentApi.executeCommand(
       context.projectId,
       context.videoTaskId,
       agentActionRequestBody(proposal, requestId),
     );
+    if (!isCurrentAgentActionContext(context)) return;
     const presentation = agentActionSuccessPresentation(
       proposal,
       requestId,
@@ -1180,6 +1206,7 @@ async function executeActionProposal(card, proposal) {
     );
     elements.messages.scrollTop = elements.messages.scrollHeight;
   } catch (error) {
+    if (!isCurrentAgentActionContext(context)) return;
     const failure = agentActionFailurePresentation(error);
     status.textContent = failure.status;
     result.textContent = failure.message;
@@ -1190,17 +1217,23 @@ async function executeActionProposal(card, proposal) {
     showWorkflowError(new Error(failure.message));
     button.disabled = failure.blocksCard;
   } finally {
-    setWorkflowBusy(false);
+    if (activeAgentActionExecution === execution) {
+      activeAgentActionExecution = null;
+      setWorkflowBusy(false);
+    }
   }
 }
 
-function appendActionProposal(turn, proposal) {
+function appendActionProposal(turn, proposal, sourceId) {
   const content = appendTimelineEvent(turn, "action-event");
   const card = document.createElement("section");
   card.className = "agent-action-card";
   card.dataset.action = proposal.action;
   card.dataset.expectedRevision = String(proposal.expectedRevision);
   card.dataset.videoTaskId = proposal.videoTaskId || "";
+  if (/^[A-Za-z0-9_-]{1,128}$/u.test(sourceId || "")) {
+    card.dataset.commandSourceId = sourceId;
+  }
   const header = document.createElement("div");
   header.className = "agent-action-header";
   const copy = document.createElement("div");
@@ -1281,7 +1314,7 @@ function finishToolEvent(turn, event, resumeThinking) {
   const proposalMatchesTool = proposal
     && ((tool.toolName === "propose_strategy_generation" && proposal.action === "generate_strategy")
       || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval"));
-  if (proposalMatchesTool) appendActionProposal(turn, proposal);
+  if (proposalMatchesTool) appendActionProposal(turn, proposal, event.toolCallId);
   if (resumeThinking !== false) appendThinkingEvent(turn);
 }
 
@@ -1996,7 +2029,7 @@ async function sendMessage(text) {
               isError: event.status !== "succeeded",
             });
           }
-          if (event.type === "action_card") appendActionProposal(turn, event.card);
+          if (event.type === "action_card") appendActionProposal(turn, event.card, event.eventId);
         },
       },
     );

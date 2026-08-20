@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -109,6 +109,47 @@ test("Agent action execution sends only a request ID and the validated frozen ca
     /无法安全执行/u,
   );
   assert.throws(() => agentActionRequestBody(generationCard, "../request"), /无法安全执行/u);
+});
+
+test("Agent action request IDs remain stable when a task transcript is rebuilt", async () => {
+  const first = await createStableAgentActionRequestId(
+    "session_task_1",
+    "tool_call_strategy_1",
+    generationCard,
+  );
+  const rebuilt = await createStableAgentActionRequestId(
+    "session_task_1",
+    "tool_call_strategy_1",
+    {
+      payload: { theme: "周末出行", audience: "家庭用户", schemaVersion: 1 },
+      cost: { kind: "free" },
+      expectedRevision: 3,
+      summary: "生成家庭出行策略。",
+      label: "生成卖点策略草稿",
+      action: "generate_strategy",
+      videoTaskId: "task_1",
+      kind: "agent_action_card",
+      schemaVersion: 1,
+    },
+  );
+  assert.equal(first, rebuilt);
+  assert.match(first, /^agent_action_[a-f0-9]{64}$/u);
+  assert.notEqual(
+    first,
+    await createStableAgentActionRequestId("session_task_2", "tool_call_strategy_1", generationCard),
+  );
+  assert.notEqual(
+    first,
+    await createStableAgentActionRequestId("session_task_1", "tool_call_strategy_2", generationCard),
+  );
+  assert.notEqual(
+    first,
+    await createStableAgentActionRequestId(
+      "session_task_1",
+      "tool_call_strategy_1",
+      { ...generationCard, expectedRevision: 4 },
+    ),
+  );
 });
 
 test("Agent action command responses preserve replay and human-confirmation boundaries", () => {
@@ -264,10 +305,16 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(commandWiring, /currentSelectedVideoTaskId\(\) !== context\.videoTask\.id/u);
   assert.match(commandWiring, /if \(state\.busy \|\| state\.workflowBusy\) return;/u);
   assert.match(commandWiring, /context\.scopeGeneration !== expectedContext\.scopeGeneration/u);
+  assert.match(commandWiring, /function isCurrentAgentActionContext\(expectedContext\)/u);
+  assert.match(commandWiring, /if \(!isCurrentAgentActionContext\(context\)\) return;/u);
+  assert.match(commandWiring, /createStableAgentActionRequestId/u);
+  assert.match(commandWiring, /if \(activeAgentActionExecution === execution\)/u);
   assert.match(commandWiring, /response\.videoTask\.revision < context\.revision/u);
   assert.match(commandWiring, /agentApi\.executeCommand/u);
   assert.doesNotMatch(commandWiring, /\/v1\/works\//u);
   assert.match(source, /state\.busy \|\| state\.workflowBusy, card\.dataset\.executionBlocked/u);
+  assert.match(source, /appendActionProposal\(turn, proposal, event\.toolCallId\)/u);
+  assert.match(source, /appendActionProposal\(turn, event\.card, event\.eventId\)/u);
 
   const controlsStart = source.indexOf("function refreshAgentInteractionControls()");
   const controlsEnd = source.indexOf("function captureWorkspaceScope()", controlsStart);

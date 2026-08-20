@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { LocalAgentRuntime, type LocalAgentConfig } from "@firefly/agent";
+import { AccountBudgetExceededError } from "@firefly/domain";
 import type { AgentActionCard, BatchProject, ProjectAssetPool } from "@firefly/schemas";
 
 import { AgentActionCommandRuntime } from "../src/agent-action-command-runtime.ts";
@@ -92,7 +93,7 @@ function vehicleFacts() {
   }));
 }
 
-async function fixture() {
+async function fixture(rejectForBudget = false) {
   const administration = new LocalWorkspaceAdminStore(".data/test-agent-command-http-admin", {
     brands: DEFAULT_ADMIN_BRANDS,
     vehicleVersions: vehicleFacts(),
@@ -145,6 +146,17 @@ async function fixture() {
     () => "2026-08-19T15:20:00.000Z",
     (kind) => `${kind}_${++sequence}`,
   );
+  if (rejectForBudget) {
+    commands.execute = async () => {
+      throw new AccountBudgetExceededError({
+        limitAmountMinor: 10_000,
+        spentAmountMinor: 9_000,
+        reservedAmountMinor: 1_000,
+        availableAmountMinor: 0,
+        currency: "CNY",
+      }, 1_000);
+    };
+  }
   const server = await startApiServer(
     0,
     "127.0.0.1",
@@ -169,11 +181,11 @@ async function fixture() {
   };
 }
 
-async function bearer(baseUrl: string): Promise<string> {
+async function bearer(baseUrl: string, accountId = "account_creator_a"): Promise<string> {
   const response = await fetch(`${baseUrl}/v1/auth/session`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ accountId: "account_creator_a" }),
+    body: JSON.stringify({ accountId }),
   });
   assert.equal(response.status, 201);
   return ((await response.json()) as { session: { token: string } }).session.token;
@@ -250,6 +262,37 @@ test("command HTTP route authenticates, validates strict scope, and returns serv
   assert.deepEqual(result.receipt.cost, { kind: "free", amountMinor: 0, charged: false });
   assert.equal(result.videoTask.revision, 2);
 
+  const stale = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ ...input, requestId: "command_http_stale_revision" }),
+  });
+  assert.equal(stale.status, 409);
+  assert.deepEqual(await stale.json(), {
+    code: "AIC-WORKFLOW-REVISION_CONFLICT",
+    message: "Revision conflict: expected 1, actual 2.",
+    retryable: false,
+    charged: false,
+  });
+
+  const otherOwnerToken = await bearer(baseUrl, "account_creator_b");
+  const unauthorized = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${otherOwnerToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      requestId: "command_http_other_owner",
+      card: { ...card(taskId), expectedRevision: 2 },
+    }),
+  });
+  assert.equal(unauthorized.status, 403);
+  assert.equal(
+    ((await unauthorized.json()) as { code: string }).code,
+    "AIC-AUTH-TASK_OWNER_REQUIRED",
+  );
+
   const replayed = await fetch(url, {
     method: "POST",
     headers,
@@ -260,6 +303,35 @@ test("command HTTP route authenticates, validates strict scope, and returns serv
   });
   assert.equal(replayed.status, 200);
   assert.equal(((await replayed.json()) as { replayed: boolean }).replayed, true);
+});
+
+test("command HTTP route returns a stable uncharged budget rejection", async (context) => {
+  const { baseUrl, server, taskId } = await fixture(true);
+  context.after(() => server.close());
+  const token = await bearer(baseUrl);
+  const response = await fetch(
+    `${baseUrl}/v1/workspace/batch-projects/${project.id}/video-tasks/${taskId}/commands`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        requestId: "command_http_budget_exceeded",
+        card: card(taskId),
+      }),
+    },
+  );
+  assert.equal(response.status, 409);
+  const body = (await response.json()) as {
+    code: string;
+    retryable: boolean;
+    charged: boolean;
+  };
+  assert.equal(body.code, "AIC-COST-BUDGET_EXCEEDED");
+  assert.equal(body.retryable, false);
+  assert.equal(body.charged, false);
 });
 
 test("custom sessions without a paired command runtime fail closed", async (context) => {
