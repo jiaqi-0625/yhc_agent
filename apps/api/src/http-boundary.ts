@@ -26,6 +26,11 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import {
+  PostgresDatabaseClosedError,
+  PostgresPersistenceError,
+  PostgresTransactionContextClosedError,
+} from "./postgres-database.ts";
 
 const maximumBodyBytes = 64 * 1024;
 
@@ -83,6 +88,19 @@ export function validateBody<T>(schema: TSchema, body: Record<string, unknown>):
 }
 
 export function errorStatus(error: Error): number {
+  if (error instanceof PostgresPersistenceError) {
+    return error.sqlState?.startsWith("23") === true ||
+      error.sqlState === "40001" ||
+      error.sqlState === "40P01"
+      ? 409
+      : 503;
+  }
+  if (
+    error instanceof PostgresDatabaseClosedError ||
+    error instanceof PostgresTransactionContextClosedError
+  ) {
+    return 503;
+  }
   if (error instanceof BusinessRuntimeError) return error.statusCode;
   if (error instanceof LocalAgentRunError) return error.statusCode;
   if (error instanceof WorkspaceAccessDeniedError) return 403;
@@ -113,34 +131,69 @@ export function errorStatus(error: Error): number {
   return 400;
 }
 
-export function sendRequestError(response: ServerResponse, error: unknown): void {
-  const normalized = error instanceof Error ? error : new Error("Unknown request error.");
-  sendJson(response, errorStatus(normalized), {
+export interface RequestErrorBody {
+  readonly code: string;
+  readonly message: string;
+  readonly retryable: boolean;
+  readonly charged: false;
+}
+
+export function requestErrorBody(error: Error): RequestErrorBody {
+  if (error instanceof PostgresPersistenceError) {
+    const conflict = error.sqlState?.startsWith("23") === true ||
+      error.sqlState === "40001" ||
+      error.sqlState === "40P01";
+    return {
+      code: conflict ? "AIC-PERSISTENCE-CONFLICT" : "AIC-PERSISTENCE-UNAVAILABLE",
+      message: conflict
+        ? "The persistence operation conflicted with current database state."
+        : "The persistence service is temporarily unavailable.",
+      retryable: !conflict || error.sqlState === "40001" || error.sqlState === "40P01",
+      charged: false,
+    };
+  }
+  if (
+    error instanceof PostgresDatabaseClosedError ||
+    error instanceof PostgresTransactionContextClosedError
+  ) {
+    return {
+      code: "AIC-PERSISTENCE-UNAVAILABLE",
+      message: "The persistence service is temporarily unavailable.",
+      retryable: true,
+      charged: false,
+    };
+  }
+  return {
     code:
-      normalized instanceof BusinessRuntimeError ||
-      normalized instanceof RevisionConflictError ||
-      normalized instanceof AccountBudgetError ||
-      normalized instanceof AccountHighCostTaskRunningError ||
-      normalized instanceof AccountRunLockDeniedError ||
-      normalized instanceof AccountRunLockTokenMismatchError ||
-      normalized instanceof AssetPoolError ||
-      normalized instanceof AgentActionCommandError ||
-      normalized instanceof BatchProjectCreationError ||
-      normalized instanceof StageConfirmationDeniedError ||
-      normalized instanceof StageRollbackDeniedError ||
-      normalized instanceof VideoTaskCreationError ||
-      normalized instanceof VideoTaskAssignmentDeniedError ||
-      normalized instanceof TaskTakeoverDeniedError ||
-      normalized instanceof LocalAgentRunError ||
-      normalized instanceof LocalAgentCredentialsError ||
-      normalized instanceof CompanyAssetCatalogAccessError ||
-      normalized instanceof CompanyAssetCatalogQueryError ||
-      normalized instanceof CompanyAssetProviderAbortedError ||
-      normalized instanceof WorkspaceAccessDeniedError
-        ? normalized.code
+      error instanceof BusinessRuntimeError ||
+      error instanceof RevisionConflictError ||
+      error instanceof AccountBudgetError ||
+      error instanceof AccountHighCostTaskRunningError ||
+      error instanceof AccountRunLockDeniedError ||
+      error instanceof AccountRunLockTokenMismatchError ||
+      error instanceof AssetPoolError ||
+      error instanceof AgentActionCommandError ||
+      error instanceof BatchProjectCreationError ||
+      error instanceof StageConfirmationDeniedError ||
+      error instanceof StageRollbackDeniedError ||
+      error instanceof VideoTaskCreationError ||
+      error instanceof VideoTaskAssignmentDeniedError ||
+      error instanceof TaskTakeoverDeniedError ||
+      error instanceof LocalAgentRunError ||
+      error instanceof LocalAgentCredentialsError ||
+      error instanceof CompanyAssetCatalogAccessError ||
+      error instanceof CompanyAssetCatalogQueryError ||
+      error instanceof CompanyAssetProviderAbortedError ||
+      error instanceof WorkspaceAccessDeniedError
+        ? error.code
         : "AIC-API-INVALID_REQUEST",
-    message: normalized.message,
+    message: error.message,
     retryable: false,
     charged: false,
-  });
+  };
+}
+
+export function sendRequestError(response: ServerResponse, error: unknown): void {
+  const normalized = error instanceof Error ? error : new Error("Unknown request error.");
+  sendJson(response, errorStatus(normalized), requestErrorBody(normalized));
 }

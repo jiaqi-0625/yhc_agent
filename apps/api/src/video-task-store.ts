@@ -189,21 +189,21 @@ function upgradeLegacyStageArtifactVersions(
   });
 }
 
-function assertIdentifier(value: string, label: string): void {
+export function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
   }
 }
 
-function assertVideoTaskId(videoTaskId: string): void {
+export function assertVideoTaskId(videoTaskId: string): void {
   assertIdentifier(videoTaskId, "Video task ID");
 }
 
-function normalizedName(value: string): string {
+export function normalizedName(value: string): string {
   return value.normalize("NFKC").trim().replace(/\s+/gu, " ");
 }
 
-function validateCreationMetadata(metadata: Readonly<VideoTaskCreationMetadata>): void {
+export function validateCreationMetadata(metadata: Readonly<VideoTaskCreationMetadata>): void {
   assertIdentifier(metadata.requestId, "Request ID");
   assertIdentifier(metadata.actorAccountId, "Actor account ID");
   if (metadata.payloadHash.length < 1 || metadata.payloadHash.length > 128) {
@@ -211,7 +211,7 @@ function validateCreationMetadata(metadata: Readonly<VideoTaskCreationMetadata>)
   }
 }
 
-function validateRecord(
+export function validateRecord(
   record: Readonly<VideoTaskProductionRecord>,
   expectedVideoTaskId = record.videoTask?.id,
 ): void {
@@ -987,7 +987,7 @@ export interface VideoTaskCreationStore extends VideoTaskProductionStore {
   list(tenantId: string, batchProjectId?: string): Promise<VideoTaskProductionRecord[]>;
 }
 
-function upgradeRecord(
+export function upgradeRecord(
   parsed:
     | VideoTaskProductionRecord
     | LegacyVideoTaskProductionRecordV5

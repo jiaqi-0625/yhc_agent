@@ -3,6 +3,8 @@ import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
 import { agentApi } from "../public/agent-api.js";
+// @ts-expect-error The browser module is intentionally plain JavaScript.
+import { setWorkspaceSessionToken } from "../public/api-client.js";
 
 function sseAgent(event: { eventId: string; sequence: number; sessionId: string; runId: string; type: string }): string {
   return `id: ${event.eventId}\nevent: agent\ndata: ${JSON.stringify(event)}\n\n`;
@@ -12,9 +14,13 @@ function sseComplete(runId: string): string {
   return `event: complete\ndata: ${JSON.stringify({ runId, assistantText: "完成", session: { id: "session_web_replay" } })}\n\n`;
 }
 
-test("browser Agent API reconnects with the last event ID and suppresses replay duplicates", async (context) => {
+test("browser Agent API authenticates run start, SSE reconnects, and cancellation without replaying events", async (context) => {
   const originalFetch = globalThis.fetch;
-  context.after(() => { globalThis.fetch = originalFetch; });
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    setWorkspaceSessionToken(null);
+  });
+  setWorkspaceSessionToken("workspace_session_web_replay");
   const runId = "run_web_replay";
   const first = {
     schemaVersion: 1,
@@ -45,6 +51,9 @@ test("browser Agent API reconnects with the last event ID and suppresses replay 
     if (new URL(url, "http://local").pathname.endsWith("/runs") && init?.method === "POST") {
       return Response.json({ run: { runId, requestId: "request_web_replay", sessionId: "session_web_replay" } }, { status: 202 });
     }
+    if (new URL(url, "http://local").pathname.endsWith("/abort") && init?.method === "POST") {
+      return Response.json({ run: { runId, state: "cancelled" } });
+    }
     eventConnections += 1;
     if (eventConnections === 1) {
       return new Response(sseAgent(first), { status: 200, headers: { "content-type": "text/event-stream" } });
@@ -67,6 +76,10 @@ test("browser Agent API reconnects with the last event ID and suppresses replay 
   assert.deepEqual(sequences, [1, 2]);
   assert.equal(eventConnections, 2);
   assert.equal(requests[2]?.headers["last-event-id"], first.eventId);
+  await agentApi.abortRun("session_web_replay", runId, "video_task_web_replay");
+  assert.equal(requests[3]?.method, "POST");
+  assert.ok(requests[3]?.url.endsWith("/abort?videoTaskId=video_task_web_replay"));
+  assert.ok(requests.every((request) => request.headers.authorization === "Bearer workspace_session_web_replay"));
   assert.ok(requests.every((request) => request.url.includes("videoTaskId=video_task_web_replay")));
   const startBody = JSON.parse(requests[0]?.body ?? "{}") as { requestId?: string };
   assert.equal(startBody.requestId, "request_web_replay");

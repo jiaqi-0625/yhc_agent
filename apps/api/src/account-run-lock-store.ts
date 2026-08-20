@@ -2,11 +2,29 @@ import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 
-import type { AccountHighCostTaskRunLock } from "@firefly/schemas";
+import {
+  AccountHighCostTaskRunLockSchema,
+  type AccountHighCostTaskRunLock,
+} from "@firefly/schemas";
+import { Value } from "typebox/value";
 
-function assertIdentifier(value: string, label: string): void {
+export function assertAccountRunLockIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
+  }
+}
+
+export function validateAccountRunLock(
+  lock: Readonly<AccountHighCostTaskRunLock>,
+  tenantId: string,
+  accountId: string,
+): void {
+  if (
+    lock.tenantId !== tenantId ||
+    lock.accountId !== accountId ||
+    !Value.Check(AccountHighCostTaskRunLockSchema, lock)
+  ) {
+    throw new Error("Persisted account run lock has an invalid format or scope.");
   }
 }
 
@@ -31,8 +49,8 @@ export class LocalAccountRunLockStore implements AccountRunLockStore {
   }
 
   #key(tenantId: string, accountId: string): string {
-    assertIdentifier(tenantId, "Tenant ID");
-    assertIdentifier(accountId, "Account ID");
+    assertAccountRunLockIdentifier(tenantId, "Tenant ID");
+    assertAccountRunLockIdentifier(accountId, "Account ID");
     return `${tenantId}:${accountId}`;
   }
 
@@ -57,9 +75,7 @@ export class LocalAccountRunLockStore implements AccountRunLockStore {
       const parsed = JSON.parse(
         await readFile(this.#path(tenantId, accountId), "utf8"),
       ) as AccountHighCostTaskRunLock;
-      if (parsed.tenantId !== tenantId || parsed.accountId !== accountId) {
-        throw new Error("Persisted account run lock has an invalid scope.");
-      }
+      validateAccountRunLock(parsed, tenantId, accountId);
       this.#memory.set(key, structuredClone(parsed));
       return structuredClone(parsed);
     } catch (error: unknown) {
@@ -69,6 +85,7 @@ export class LocalAccountRunLockStore implements AccountRunLockStore {
   }
 
   async #save(lock: Readonly<AccountHighCostTaskRunLock>): Promise<void> {
+    validateAccountRunLock(lock, lock.tenantId, lock.accountId);
     const key = this.#key(lock.tenantId, lock.accountId);
     const copy = structuredClone(lock);
     if (this.persist) {
@@ -117,9 +134,7 @@ export class LocalAccountRunLockStore implements AccountRunLockStore {
     await previous;
     try {
       const next = await update(await this.load(tenantId, accountId));
-      if (next && (next.tenantId !== tenantId || next.accountId !== accountId)) {
-        throw new Error("An account run lock transaction cannot change its scope.");
-      }
+      if (next) validateAccountRunLock(next, tenantId, accountId);
       if (next) await this.#save(next);
       else await this.#delete(tenantId, accountId);
       return next ? structuredClone(next) : undefined;

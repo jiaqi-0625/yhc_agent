@@ -22,16 +22,46 @@ const TemporaryAssetProjectRecordSchema = Type.Object(
   { additionalProperties: false },
 );
 
-interface TemporaryAssetProjectRecord {
+export interface TemporaryAssetProjectRecord {
   schemaVersion: 1;
   batchProjectId: string;
   assets: TemporaryAsset[];
 }
 
-function assertBatchProjectId(batchProjectId: string): void {
+export function assertTemporaryAssetProjectId(batchProjectId: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(batchProjectId)) {
     throw new Error("Batch project ID contains invalid characters.");
   }
+}
+
+export function validateTemporaryAssets(
+  assets: readonly TemporaryAsset[],
+  batchProjectId: string,
+): void {
+  const ids = new Set<string>();
+  for (const asset of assets) {
+    if (
+      asset.batchProjectId !== batchProjectId ||
+      !Value.Check(TemporaryAssetSchema, asset) ||
+      ids.has(asset.id)
+    ) {
+      throw new Error("Temporary assets have an invalid format, scope, or duplicate ID.");
+    }
+    ids.add(asset.id);
+  }
+}
+
+export function validateTemporaryAssetProjectRecord(
+  record: TemporaryAssetProjectRecord,
+  batchProjectId: string,
+): void {
+  if (
+    record.batchProjectId !== batchProjectId ||
+    !Value.Check(TemporaryAssetProjectRecordSchema, record)
+  ) {
+    throw new Error("Persisted temporary assets have an invalid format or scope.");
+  }
+  validateTemporaryAssets(record.assets, batchProjectId);
 }
 
 export interface TemporaryAssetStore {
@@ -54,7 +84,7 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
   }
 
   #path(batchProjectId: string): string {
-    assertBatchProjectId(batchProjectId);
+    assertTemporaryAssetProjectId(batchProjectId);
     const path = resolve(join(this.#directory, `${batchProjectId}.json`));
     if (!path.startsWith(`${this.#directory}${sep}`)) {
       throw new Error("Temporary asset path escaped the configured data directory.");
@@ -62,38 +92,8 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
     return path;
   }
 
-  #validateAssets(
-    assets: readonly TemporaryAsset[],
-    batchProjectId: string,
-  ): void {
-    const ids = new Set<string>();
-    for (const asset of assets) {
-      if (
-        asset.batchProjectId !== batchProjectId ||
-        !Value.Check(TemporaryAssetSchema, asset) ||
-        ids.has(asset.id)
-      ) {
-        throw new Error("Temporary assets have an invalid format, scope, or duplicate ID.");
-      }
-      ids.add(asset.id);
-    }
-  }
-
-  #validateRecord(
-    record: TemporaryAssetProjectRecord,
-    batchProjectId: string,
-  ): void {
-    if (
-      record.batchProjectId !== batchProjectId ||
-      !Value.Check(TemporaryAssetProjectRecordSchema, record)
-    ) {
-      throw new Error("Persisted temporary assets have an invalid format or scope.");
-    }
-    this.#validateAssets(record.assets, batchProjectId);
-  }
-
   async loadProject(batchProjectId: string): Promise<TemporaryAsset[]> {
-    assertBatchProjectId(batchProjectId);
+    assertTemporaryAssetProjectId(batchProjectId);
     const memory = this.#memory.get(batchProjectId);
     if (memory) return structuredClone(memory);
     if (!this.persist) return [];
@@ -101,7 +101,7 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
       const parsed = JSON.parse(
         await readFile(this.#path(batchProjectId), "utf8"),
       ) as TemporaryAssetProjectRecord;
-      this.#validateRecord(parsed, batchProjectId);
+      validateTemporaryAssetProjectRecord(parsed, batchProjectId);
       const assets = structuredClone(parsed.assets);
       this.#memory.set(batchProjectId, assets);
       return structuredClone(assets);
@@ -115,7 +115,7 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
     batchProjectId: string,
     assets: readonly TemporaryAsset[],
   ): Promise<void> {
-    this.#validateAssets(assets, batchProjectId);
+    validateTemporaryAssets(assets, batchProjectId);
     const copy: TemporaryAsset[] = structuredClone([...assets]);
     if (this.persist) {
       const path = this.#path(batchProjectId);
@@ -146,7 +146,7 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
       current: TemporaryAsset[],
     ) => TemporaryAsset[] | Promise<TemporaryAsset[]>,
   ): Promise<TemporaryAsset[]> {
-    assertBatchProjectId(batchProjectId);
+    assertTemporaryAssetProjectId(batchProjectId);
     const previous =
       this.#transactionTails.get(batchProjectId) ?? Promise.resolve();
     let release = (): void => undefined;
@@ -158,7 +158,7 @@ export class LocalTemporaryAssetStore implements TemporaryAssetStore {
     await previous;
     try {
       const next = await update(await this.loadProject(batchProjectId));
-      this.#validateAssets(next, batchProjectId);
+      validateTemporaryAssets(next, batchProjectId);
       await this.#saveProject(batchProjectId, next);
       return structuredClone(next);
     } finally {

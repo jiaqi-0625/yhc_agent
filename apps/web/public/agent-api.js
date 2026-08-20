@@ -1,4 +1,4 @@
-import { api } from "./api-client.js";
+import { api, workspaceFetch } from "./api-client.js";
 
 class AgentStreamProtocolError extends Error {}
 class AgentStreamTransportError extends Error {}
@@ -55,7 +55,7 @@ async function startAgentRun(sessionId, message, requestId, options = {}) {
   let attempt = 0;
   while (true) {
     try {
-      const response = await fetch(scopedSessionUrl(
+      const response = await workspaceFetch(scopedSessionUrl(
         "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs",
         options.videoTaskId,
       ), {
@@ -144,7 +144,7 @@ async function streamRunEvents(sessionId, runId, options = {}) {
       options.onConnectionState?.(reconnects === 0 ? "connecting" : "reconnecting");
       const headers = { accept: "text/event-stream" };
       if (state.lastEventId) headers["last-event-id"] = state.lastEventId;
-      const response = await fetch(
+      const response = await workspaceFetch(
         scopedSessionUrl(
           "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/events",
           options.videoTaskId,

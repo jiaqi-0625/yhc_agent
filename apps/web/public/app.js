@@ -1699,6 +1699,7 @@ async function switchWorkspaceAccount(accountId) {
 
 async function initialize() {
   state.workspaceHydrating = true;
+  setBusy(state.busy);
   clearProjectLibrary(false);
   renderAccount();
   try {
@@ -1734,6 +1735,7 @@ async function initialize() {
     showError(error);
   } finally {
     state.workspaceHydrating = false;
+    setBusy(state.busy);
     renderAccount();
     renderNavigationBrands();
   }

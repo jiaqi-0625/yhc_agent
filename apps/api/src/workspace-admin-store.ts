@@ -46,13 +46,16 @@ export interface WorkspaceAdminStore extends WorkspaceAccessGrantProvider {
   ): Promise<WorkspaceAdminState>;
 }
 
-function assertIdentifier(value: string, label: string): void {
+export function assertWorkspaceAdminIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
   }
 }
 
-function emptyState(tenantId: string, seed: Readonly<WorkspaceAdminSeed>): WorkspaceAdminState {
+export function emptyWorkspaceAdminState(
+  tenantId: string,
+  seed: Readonly<WorkspaceAdminSeed>,
+): WorkspaceAdminState {
   return {
     schemaVersion: 1,
     tenantId,
@@ -69,7 +72,10 @@ function emptyState(tenantId: string, seed: Readonly<WorkspaceAdminSeed>): Works
   };
 }
 
-function validateState(state: Readonly<WorkspaceAdminState>, tenantId: string): void {
+export function validateWorkspaceAdminState(
+  state: Readonly<WorkspaceAdminState>,
+  tenantId: string,
+): void {
   if (state.schemaVersion !== 1 || state.tenantId !== tenantId) {
     throw new Error("Persisted workspace administration state has an invalid tenant scope.");
   }
@@ -158,7 +164,7 @@ function validateState(state: Readonly<WorkspaceAdminState>, tenantId: string): 
   }
 }
 
-function validateTransition(
+export function validateWorkspaceAdminTransition(
   current: Readonly<WorkspaceAdminState>,
   next: Readonly<WorkspaceAdminState>,
 ): void {
@@ -186,7 +192,7 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
   }
 
   #path(tenantId: string): string {
-    assertIdentifier(tenantId, "Tenant ID");
+    assertWorkspaceAdminIdentifier(tenantId, "Tenant ID");
     const path = resolve(join(this.#directory, `${tenantId}.json`));
     if (!path.startsWith(`${this.#directory}${sep}`)) {
       throw new Error("Workspace administration path escaped the configured data directory.");
@@ -195,27 +201,27 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
   }
 
   async load(tenantId: string): Promise<WorkspaceAdminState> {
-    assertIdentifier(tenantId, "Tenant ID");
+    assertWorkspaceAdminIdentifier(tenantId, "Tenant ID");
     const memory = this.#memory.get(tenantId);
     if (memory) return structuredClone(memory);
     let state: WorkspaceAdminState;
     if (!this.persist) {
-      state = emptyState(tenantId, this.seed);
+      state = emptyWorkspaceAdminState(tenantId, this.seed);
     } else {
       try {
         state = JSON.parse(await readFile(this.#path(tenantId), "utf8")) as WorkspaceAdminState;
       } catch (error: unknown) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-        state = emptyState(tenantId, this.seed);
+        state = emptyWorkspaceAdminState(tenantId, this.seed);
       }
     }
-    validateState(state, tenantId);
+    validateWorkspaceAdminState(state, tenantId);
     this.#memory.set(tenantId, structuredClone(state));
     return structuredClone(state);
   }
 
   async #save(state: Readonly<WorkspaceAdminState>): Promise<void> {
-    validateState(state, state.tenantId);
+    validateWorkspaceAdminState(state, state.tenantId);
     const copy = structuredClone(state);
     if (this.persist) {
       const path = this.#path(state.tenantId);
@@ -239,7 +245,7 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
     tenantId: string,
     operation: () => Result | Promise<Result>,
   ): Promise<Result> {
-    assertIdentifier(tenantId, "Tenant ID");
+    assertWorkspaceAdminIdentifier(tenantId, "Tenant ID");
     const previous = this.#transactionTails.get(tenantId) ?? Promise.resolve();
     let release = (): void => undefined;
     const gate = new Promise<void>((resolveGate) => {
@@ -274,8 +280,8 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
     return this.#exclusive(tenantId, async () => {
       const current = await this.load(tenantId);
       const next = await update(structuredClone(current));
-      validateState(next, tenantId);
-      validateTransition(current, next);
+      validateWorkspaceAdminState(next, tenantId);
+      validateWorkspaceAdminTransition(current, next);
       await this.#save(next);
       return structuredClone(next);
     });
@@ -285,7 +291,7 @@ export class LocalWorkspaceAdminStore implements WorkspaceAdminStore {
     tenantId: string,
     accountId: string,
   ): Promise<readonly WorkspaceAccessGrant[]> {
-    assertIdentifier(accountId, "Account ID");
+    assertWorkspaceAdminIdentifier(accountId, "Account ID");
     const state = await this.load(tenantId);
     return structuredClone(
       state.accessGrants.filter((grant) => grant.accountId === accountId),
