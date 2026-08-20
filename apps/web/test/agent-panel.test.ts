@@ -290,6 +290,12 @@ test("application wiring keeps action commands task-scoped and disabled during A
     source.slice(sendStart, sendEnd),
     /if \(!message \|\| state\.busy \|\| state\.workflowBusy \|\| !state\.sessionId\) return;/u,
   );
+  const messageWiring = source.slice(sendStart, sendEnd);
+  assert.match(messageWiring, /const scope = captureWorkspaceScope\(\)/u);
+  assert.match(messageWiring, /const sessionId = state\.sessionId/u);
+  assert.match(messageWiring, /const videoTaskId = state\.sessionVideoTaskId/u);
+  assert.match(messageWiring, /if \(!isCurrentTurn\(\)\) return;/u);
+  assert.match(messageWiring, /assertWorkspaceAgentSession\(result\.session, videoTaskId, state\.projectLibrary\)/u);
 
   const syncStart = source.indexOf("async function synchronizeAgentWorkspaceSelection(");
   const syncEnd = source.indexOf("function applyWorkspaceSession(", syncStart);

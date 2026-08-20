@@ -16,6 +16,7 @@ const webAssets = new Map<string, { path: string; type: string }>([
   ["/workspace-api.js", { path: fileURLToPath(new URL("../../web/public/workspace-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-shell.js", { path: fileURLToPath(new URL("../../web/public/workspace-shell.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-frame.js", { path: fileURLToPath(new URL("../../web/public/workspace-frame.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/workspace-agent-context.js", { path: fileURLToPath(new URL("../../web/public/workspace-agent-context.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/asset-matching.js", { path: fileURLToPath(new URL("../../web/public/asset-matching.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-stages.js", { path: fileURLToPath(new URL("../../web/public/workspace-stages.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/project-library.js", { path: fileURLToPath(new URL("../../web/public/project-library.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],

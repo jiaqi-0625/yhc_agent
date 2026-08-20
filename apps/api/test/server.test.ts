@@ -112,6 +112,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     workspaceApiResponse,
     workspaceShellResponse,
     workspaceFrameResponse,
+    workspaceAgentContextResponse,
     workspaceStagesResponse,
     projectLibraryResponse,
     projectWizardResponse,
@@ -127,6 +128,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     fetch(`${baseUrl}/workspace-api.js`),
     fetch(`${baseUrl}/workspace-shell.js`),
     fetch(`${baseUrl}/workspace-frame.js`),
+    fetch(`${baseUrl}/workspace-agent-context.js`),
     fetch(`${baseUrl}/workspace-stages.js`),
     fetch(`${baseUrl}/project-library.js`),
     fetch(`${baseUrl}/project-creation-wizard.js`),
@@ -147,6 +149,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(workspaceApiResponse.status, 200);
   assert.equal(workspaceShellResponse.status, 200);
   assert.equal(workspaceFrameResponse.status, 200);
+  assert.equal(workspaceAgentContextResponse.status, 200);
   assert.equal(workspaceStagesResponse.status, 200);
   assert.equal(projectLibraryResponse.status, 200);
   assert.equal(projectWizardResponse.status, 200);
@@ -156,11 +159,12 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   const workspaceApiScript = await workspaceApiResponse.text();
   assert.match(script, /selectedVideoTaskStorageKey/u);
   assert.doesNotMatch(script, /firefly\.workId/u);
-  assert.match(script, /\.\/agent-api\.js/u);
+  assert.match(script, /\.\/agent-api\.js\?build=ws501-v1/u);
   assert.match(script, /\.\/workspace-api\.js\?build=workspace-cost-ws408-v2/u);
   assert.match(script, /\.\/project-library\.js/u);
   assert.match(script, /\.\/project-creation-wizard\.js/u);
-  assert.match(script, /\.\/workspace-frame\.js\?build=workspace-cost-ws408-v2/u);
+  assert.match(script, /\.\/workspace-frame\.js\?build=workspace-cost-ws408-v2-ws501-v1/u);
+  assert.match(script, /\.\/workspace-agent-context\.js\?build=ws501-v1/u);
   assert.match(script, /\.\/workspace-stages\.js\?build=workspace-cost-ws408-v2/u);
   assert.match(script, /workspaceStagesPanel\?\.isBusy\(\)/u);
   assert.match(agentApiScript, /\/runs/u);

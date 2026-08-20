@@ -63,6 +63,11 @@ export function resolveWorkspaceSelection(
   taskId?: string,
 ): { project: WorkspaceFrameProject; task: WorkspaceFrameTask | null } | null;
 
+export function workspaceRouteChangesSelection(
+  route: WorkspaceUrlState | null,
+  selection: { project: WorkspaceFrameProject; task: WorkspaceFrameTask | null } | null,
+): boolean;
+
 export function createWorkspaceFrame(options: Record<string, unknown>): {
   open(projectId: string, taskId?: string): boolean;
   close(): void;

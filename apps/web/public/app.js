@@ -1,4 +1,4 @@
-import { agentApi } from "./agent-api.js";
+import { agentApi } from "./agent-api.js?build=ws501-v1";
 import { createAssetMatchingPanel } from "./asset-matching.js";
 import {
   agentActionAvailability,
@@ -22,8 +22,9 @@ import {
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
+import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
 import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
-import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1";
 import {
   bindWorkspaceShell,
   migrateSelectedVideoTaskStorage,
@@ -1599,6 +1600,7 @@ function renderTaskContext(context) {
 }
 
 function updateSession(summary) {
+  assertWorkspaceAgentSession(summary, currentSelectedVideoTaskId(), state.projectLibrary);
   state.sessionId = summary.id;
   state.sessionVideoTaskId = summary.videoTaskId || null;
   state.taskContext = summary.taskContext || null;
@@ -1633,7 +1635,9 @@ async function createSession(videoTaskId, scope = captureWorkspaceScope()) {
 async function loadTaskSessions(videoTaskId, scope = captureWorkspaceScope()) {
   const body = await agentApi.listSessions(videoTaskId);
   if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== videoTaskId) return false;
-  state.sessions = Array.isArray(body.sessions) ? body.sessions.slice().sort(compareSessions) : [];
+  state.sessions = Array.isArray(body.sessions) ? body.sessions.map(function (session) {
+    return assertWorkspaceAgentSession(session, videoTaskId, state.projectLibrary);
+  }).sort(compareSessions) : [];
   renderSessionOptions();
   return true;
 }
@@ -1944,6 +1948,15 @@ async function initialize() {
 async function sendMessage(text) {
   const message = text.trim();
   if (!message || state.busy || state.workflowBusy || !state.sessionId) return;
+  const scope = captureWorkspaceScope();
+  const sessionId = state.sessionId;
+  const videoTaskId = state.sessionVideoTaskId;
+  const isCurrentTurn = function () {
+    return isCurrentWorkspaceScope(scope)
+      && state.sessionId === sessionId
+      && state.sessionVideoTaskId === videoTaskId
+      && currentSelectedVideoTaskId() === videoTaskId;
+  };
   state.lastPrompt = message;
   elements.retryMessage.hidden = true;
   clearError();
@@ -1956,18 +1969,21 @@ async function sendMessage(text) {
   let liveAnswer = null;
   try {
     const result = await agentApi.streamMessage(
-      state.sessionId,
+      sessionId,
       message,
       {
-        videoTaskId: state.sessionVideoTaskId,
+        videoTaskId,
         onRunStarted: function (run) {
+          if (!isCurrentTurn()) return;
           state.activeRunId = run.runId;
         },
         onConnectionState: function (connectionState) {
+          if (!isCurrentTurn()) return;
           if (connectionState === "reconnecting") setStatus("warning", "正在恢复连接");
           if (connectionState === "connected") setStatus("online", "服务正常");
         },
         onEvent: function (event) {
+          if (!isCurrentTurn()) return;
           if (event.type === "thinking_status" && event.status === "completed") finishThinkingEvent(turn);
           if (event.type === "text_delta") {
             streamedText += event.delta;
@@ -1984,6 +2000,8 @@ async function sendMessage(text) {
         },
       },
     );
+    if (!isCurrentTurn()) return;
+    assertWorkspaceAgentSession(result.session, videoTaskId, state.projectLibrary);
     if (result.stopReason === "aborted") {
       failAgentTurn(turn, "已取消当前生成。");
     } else if (!completeStreamingAnswer(liveAnswer, result.assistantText)) {
@@ -1991,6 +2009,7 @@ async function sendMessage(text) {
     }
     updateSession(result.session);
   } catch (error) {
+    if (!isCurrentTurn()) return;
     const cancelled = error instanceof DOMException && error.name === "AbortError";
     const messageText = cancelled ? "已取消当前生成。" : error instanceof Error ? error.message : "智能助手请求失败。";
     failAgentTurn(turn, messageText);
@@ -1999,6 +2018,7 @@ async function sendMessage(text) {
       elements.retryMessage.hidden = false;
     }
   } finally {
+    if (!isCurrentTurn()) return;
     state.activeRunId = null;
     elements.cancelGeneration.disabled = false;
     setBusy(false);

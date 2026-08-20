@@ -6,12 +6,16 @@ import { agentApi } from "../public/agent-api.js";
 // @ts-expect-error The browser module is intentionally plain JavaScript.
 import { setWorkspaceSessionToken } from "../public/api-client.js";
 
-function sseAgent(event: { eventId: string; sequence: number; sessionId: string; runId: string; type: string }): string {
+function sseAgent(event: { eventId: string; sequence: number; sessionId: string; runId: string; type: string; videoTaskId?: string }): string {
   return `id: ${event.eventId}\nevent: agent\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function sseComplete(runId: string, sessionId = "session_web_replay"): string {
-  return `event: complete\ndata: ${JSON.stringify({ runId, assistantText: "完成", session: { id: sessionId } })}\n\n`;
+function sseComplete(runId: string, sessionId = "session_web_replay", videoTaskId?: string): string {
+  return `event: complete\ndata: ${JSON.stringify({
+    runId,
+    assistantText: "完成",
+    session: { id: sessionId, ...(videoTaskId ? { videoTaskId } : {}) },
+  })}\n\n`;
 }
 
 test("browser Agent API authenticates run start, SSE reconnects, and cancellation without replaying events", async (context) => {
@@ -28,6 +32,7 @@ test("browser Agent API authenticates run start, SSE reconnects, and cancellatio
     sequence: 1,
     sessionId: "session_web_replay",
     runId,
+    videoTaskId: "video_task_web_replay",
     type: "run_started",
     occurredAt: "2026-08-19T00:00:00.000Z",
   };
@@ -58,7 +63,11 @@ test("browser Agent API authenticates run start, SSE reconnects, and cancellatio
     if (eventConnections === 1) {
       return new Response(sseAgent(first), { status: 200, headers: { "content-type": "text/event-stream" } });
     }
-    return new Response(sseAgent(first) + sseAgent(second) + sseComplete(runId), {
+    return new Response(sseAgent(first) + sseAgent(second) + sseComplete(
+      runId,
+      "session_web_replay",
+      "video_task_web_replay",
+    ), {
       status: 200,
       headers: { "content-type": "text/event-stream" },
     });
@@ -101,6 +110,7 @@ test("browser Agent API rejects a replay sequence gap", async (context) => {
       sequence: 2,
       sessionId: "session_web_gap",
       runId,
+      videoTaskId: "video_task_web_gap",
       type: "run_completed",
     }), { status: 200, headers: { "content-type": "text/event-stream" } });
   }) as typeof fetch;
@@ -169,6 +179,41 @@ test("browser Agent API rejects mismatched run start and completion scopes", asy
       { maximumReconnects: 0 },
     ),
     /不属于当前运行的完成结果/u,
+  );
+});
+
+test("browser Agent API rejects cross-task stream events and completion sessions", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const runId = "run_task_scope";
+  const sessionId = "session_task_scope";
+  let responseBody = sseAgent({
+    eventId: "event_task_scope_1",
+    sequence: 1,
+    sessionId,
+    runId,
+    videoTaskId: "task_other",
+    type: "run_started",
+  });
+  globalThis.fetch = (async () => new Response(responseBody, {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  })) as typeof fetch;
+  await assert.rejects(
+    () => agentApi.streamRunEvents(sessionId, runId, {
+      videoTaskId: "task_current",
+      maximumReconnects: 0,
+    }),
+    /不属于当前任务/u,
+  );
+
+  responseBody = sseComplete(runId, sessionId, "task_other");
+  await assert.rejects(
+    () => agentApi.streamRunEvents(sessionId, runId, {
+      videoTaskId: "task_current",
+      maximumReconnects: 0,
+    }),
+    /不属于当前运行/u,
   );
 });
 

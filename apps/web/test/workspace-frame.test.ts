@@ -8,6 +8,7 @@ import {
   summarizeWorkspaceProject,
   workspaceModuleForStage,
   workspaceOwnerLabel,
+  workspaceRouteChangesSelection,
   workspaceUrlForState,
 } from "../public/workspace-frame.js";
 
@@ -108,6 +109,21 @@ test("workspace context event detail switches task state without carrying accoun
   assert.equal(createWorkspaceContextDetail(project, null)?.videoTask, null);
 });
 
+test("workspace history navigation detects cross-task selection changes", () => {
+  const selection = { project, task: project.tasks[1]! };
+  assert.equal(workspaceRouteChangesSelection({
+    projectId: "project_e5",
+    videoTaskId: "task_active",
+    module: "assets",
+  }, selection), false);
+  assert.equal(workspaceRouteChangesSelection({
+    projectId: "project_e5",
+    videoTaskId: "task_done",
+    module: "planning",
+  }, selection), true);
+  assert.equal(workspaceRouteChangesSelection(null, selection), true);
+});
+
 test("workspace frame blocks task and overview switches while Agent interaction is busy", async () => {
   const source = await readFile(new URL("../public/workspace-frame.js", import.meta.url), "utf8");
   assert.match(source, /function selectionLocked\(\)/u);
@@ -116,5 +132,7 @@ test("workspace frame blocks task and overview switches while Agent interaction 
   assert.match(source, /if \(selectionLocked\(\) && selection\.task !== null\) return;/u);
   assert.match(source, /elements\.projectAssets\.disabled = locked/u);
   assert.match(source, /if \(!selection \|\| selectionLocked\(\)\) return;/u);
+  assert.match(source, /selectionLocked\(\) && workspaceRouteChangesSelection\(route, selection\)/u);
+  assert.match(source, /writeRoute\("replace"\)/u);
   assert.match(source, /refreshSelectionControls/u);
 });
