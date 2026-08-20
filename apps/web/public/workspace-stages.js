@@ -307,6 +307,8 @@ export function createWorkspaceStagesPanel(options) {
   let budgetState = null;
   let runLockState = null;
   let adjustments = {};
+  let contextAccountId = null;
+  let contextGeneration = 0;
   let busy = false;
   let sequence = 0;
 
@@ -317,6 +319,41 @@ export function createWorkspaceStagesPanel(options) {
 
   function currentStage() {
     return visibleModule === "planning" ? planningStage : stageModules[visibleModule]?.[0];
+  }
+
+  function clearCachedState() {
+    view = null;
+    assetView = null;
+    stageViews = {};
+    budgetState = null;
+    runLockState = null;
+    adjustments = {};
+  }
+
+  function clearRoots() {
+    Object.values(roots).forEach(function (root) {
+      if (root) root.innerHTML = "";
+    });
+  }
+
+  function setPanelBusy(nextBusy) {
+    if (busy === nextBusy) return;
+    busy = nextBusy;
+    options.onBusyChange?.(busy);
+  }
+
+  function reset() {
+    contextGeneration += 1;
+    sequence += 1;
+    projectId = null;
+    project = null;
+    task = null;
+    visibleModule = null;
+    contextAccountId = null;
+    setPanelBusy(false);
+    clearCachedState();
+    clearRoots();
+    if (dialog.open) dialog.close();
   }
 
   function renderLoading(root) {
@@ -374,6 +411,7 @@ export function createWorkspaceStagesPanel(options) {
     const root = roots[visibleModule];
     const stage = currentStage();
     const loadSequence = ++sequence;
+    const loadContextGeneration = contextGeneration;
     if (!root || !stage || !projectId || !task) return;
     renderLoading(root);
     try {
@@ -382,14 +420,14 @@ export function createWorkspaceStagesPanel(options) {
         : null;
       if (stage === "delivery") {
         const results = await Promise.all(stageOrder.map(function (item) { return options.api.getStageVersions(projectId, task.id, item); }));
-        if (loadSequence !== sequence) return;
+        if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;
         stageViews = Object.fromEntries(stageOrder.map(function (item, index) { return [item, results[index]]; }));
         view = stageViews.delivery;
       } else {
         const requests = [options.api.getStageVersions(projectId, task.id, stage)];
         if (stage === "storyboard") requests.push(options.api.getAssetMatching(projectId, task.id));
         const results = await Promise.all(requests);
-        if (loadSequence !== sequence) return;
+        if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;
         view = results[0];
         if (stage === "storyboard") assetView = results[1];
       }
@@ -410,7 +448,7 @@ export function createWorkspaceStagesPanel(options) {
       task = { ...task, ...view.videoTask };
       render();
     } catch (error) {
-      if (loadSequence !== sequence) return;
+      if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;
       root.innerHTML = `<div class="production-error" role="alert"><span>${escapeHtml(errorText(error))}</span><button type="button" class="text-button">重试</button></div>`;
       root.querySelector("button")?.addEventListener("click", loadStage);
     }
@@ -420,22 +458,41 @@ export function createWorkspaceStagesPanel(options) {
     const stage = currentStage();
     const availability = confirmationAvailability(task, stage, view);
     if (!availability.enabled || busy) return;
-    busy = true;
+    const mutationContextGeneration = contextGeneration;
+    const mutationProjectId = projectId;
+    const mutationTaskId = task.id;
+    const expectedTaskRevision = task.revision;
+    setPanelBusy(true);
     render();
     try {
-      const result = await options.api.confirmStage(projectId, task.id, stage, {
+      const result = await options.api.confirmStage(mutationProjectId, mutationTaskId, stage, {
         requestId: requestId("confirm_stage"),
-        expectedTaskRevision: task.revision,
+        expectedTaskRevision,
         ...(availability.artifact ? { artifact: availability.artifact } : {}),
       });
+      if (
+        mutationContextGeneration !== contextGeneration
+        || mutationProjectId !== projectId
+        || mutationTaskId !== task?.id
+      ) return;
       task = { ...task, ...result.videoTask };
       options.onTaskUpdated?.(result.videoTask);
       await loadStage();
     } catch (error) {
-      showMessage(errorText(error));
+      if (
+        mutationContextGeneration === contextGeneration
+        && mutationProjectId === projectId
+        && mutationTaskId === task?.id
+      ) showMessage(errorText(error));
     } finally {
-      busy = false;
-      render();
+      if (
+        mutationContextGeneration === contextGeneration
+        && mutationProjectId === projectId
+        && mutationTaskId === task?.id
+      ) {
+        setPanelBusy(false);
+        render();
+      }
     }
   }
 
@@ -472,20 +529,41 @@ export function createWorkspaceStagesPanel(options) {
       event.preventDefault();
       const reason = event.currentTarget.querySelector("textarea").value.trim();
       if (!reason || busy) return;
-      busy = true;
+      const mutationContextGeneration = contextGeneration;
+      const mutationProjectId = projectId;
+      const mutationTaskId = task.id;
+      const expectedTaskRevision = task.revision;
+      setPanelBusy(true);
       try {
-        const result = await options.api.rollbackStage(projectId, task.id, stage, {
-          requestId: requestId("rollback_stage"), expectedTaskRevision: task.revision,
+        const result = await options.api.rollbackStage(mutationProjectId, mutationTaskId, stage, {
+          requestId: requestId("rollback_stage"), expectedTaskRevision,
           targetArtifactVersionId: versionId, reason,
         });
+        if (
+          mutationContextGeneration !== contextGeneration
+          || mutationProjectId !== projectId
+          || mutationTaskId !== task?.id
+        ) return;
         task = { ...task, ...result.videoTask };
         options.onTaskUpdated?.(result.videoTask);
         dialog.close();
         await loadStage();
       } catch (error) {
-        dialog.close();
-        showMessage(errorText(error));
-      } finally { busy = false; }
+        if (
+          mutationContextGeneration === contextGeneration
+          && mutationProjectId === projectId
+          && mutationTaskId === task?.id
+        ) {
+          dialog.close();
+          showMessage(errorText(error));
+        }
+      } finally {
+        if (
+          mutationContextGeneration === contextGeneration
+          && mutationProjectId === projectId
+          && mutationTaskId === task?.id
+        ) setPanelBusy(false);
+      }
     });
   }
 
@@ -508,22 +586,37 @@ export function createWorkspaceStagesPanel(options) {
   return {
     setContext(nextProjectId, nextProject, nextTask, activeModule) {
       const isVisible = Boolean(stageModules[activeModule]);
-      const nextKey = [nextProjectId || "", nextTask?.id || "", activeModule || ""].join(":");
-      const currentKey = [projectId || "", task?.id || "", visibleModule || ""].join(":");
+      const nextAccountId = options.getCurrentAccountId?.() || null;
+      const nextVisibleModule = isVisible ? activeModule : null;
+      const accountChanged = nextAccountId !== contextAccountId;
+      const resourceChanged = accountChanged
+        || (nextProjectId || null) !== projectId
+        || (nextTask?.id || null) !== (task?.id || null);
+      const contextChanged = resourceChanged || nextVisibleModule !== visibleModule;
+      if (contextChanged) {
+        sequence += 1;
+        clearCachedState();
+        if (dialog.open) dialog.close();
+        dialog.innerHTML = "";
+      }
+      if (resourceChanged) {
+        contextGeneration += 1;
+        setPanelBusy(false);
+      }
+      if (accountChanged) {
+        clearRoots();
+      }
+      contextAccountId = nextAccountId;
       projectId = nextProjectId || null;
       project = nextProject || null;
       task = nextTask || null;
-      visibleModule = isVisible ? activeModule : null;
-      if (!visibleModule || !task || nextKey === currentKey) return;
+      visibleModule = nextVisibleModule;
+      if (!visibleModule || !task || !contextAccountId || !contextChanged) return;
       if (visibleModule === "planning") planningStage = ["strategy", "script"].includes(task.currentStage) ? task.currentStage : planningStage;
-      view = null;
-      assetView = null;
-      stageViews = {};
-      budgetState = null;
-      runLockState = null;
-      adjustments = {};
       void loadStage();
     },
     refresh: loadStage,
+    reset,
+    isBusy() { return busy; },
   };
 }

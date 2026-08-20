@@ -157,10 +157,12 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /selectedVideoTaskStorageKey/u);
   assert.doesNotMatch(script, /firefly\.workId/u);
   assert.match(script, /\.\/agent-api\.js/u);
-  assert.match(script, /\.\/workspace-api\.js/u);
+  assert.match(script, /\.\/workspace-api\.js\?build=workspace-cost-ws408-v2/u);
   assert.match(script, /\.\/project-library\.js/u);
   assert.match(script, /\.\/project-creation-wizard\.js/u);
-  assert.match(script, /\.\/workspace-frame\.js/u);
+  assert.match(script, /\.\/workspace-frame\.js\?build=workspace-cost-ws408-v2/u);
+  assert.match(script, /\.\/workspace-stages\.js\?build=workspace-cost-ws408-v2/u);
+  assert.match(script, /workspaceStagesPanel\?\.isBusy\(\)/u);
   assert.match(agentApiScript, /\/runs/u);
   assert.match(agentApiScript, /listSessions/u);
   assert.match(agentApiScript, /last-event-id/u);

@@ -19,9 +19,9 @@ import {
   renderProjectLibrary,
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
-import { workspaceApi } from "./workspace-api.js";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js";
-import { createWorkspaceFrame } from "./workspace-frame.js";
+import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2";
 import {
   bindWorkspaceShell,
   migrateSelectedVideoTaskStorage,
@@ -266,7 +266,7 @@ function clearWorkflowError() {
 }
 
 function refreshAgentInteractionControls() {
-  const interactionBusy = state.busy || state.workflowBusy;
+  const interactionBusy = state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy();
   elements.prompt.disabled = interactionBusy || !state.modelReady || !state.sessionId;
   elements.send.disabled = interactionBusy || !state.modelReady || !state.sessionId;
   elements.send.hidden = state.busy;
@@ -1417,7 +1417,8 @@ function renderAccount() {
     elements.agentAccountSelect.appendChild(option);
   }
   if (state.account) elements.agentAccountSelect.value = state.account.accountId;
-  elements.agentAccountSelect.disabled = state.busy || state.workflowBusy || state.workspaceHydrating || state.accounts.length < 2;
+  elements.agentAccountSelect.disabled = state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy()
+    || state.workspaceHydrating || state.accounts.length < 2;
   elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || "未知角色" : "—";
   const displayName = state.account?.displayName || "";
   elements.accountAvatar.textContent = Array.from(displayName.trim())[0] || "账";
@@ -1779,6 +1780,7 @@ function applyWorkspaceSession(session) {
     sessionStorage.setItem("firefly.workspaceSession", session.token);
   }
   state.account = session.account;
+  workspaceStagesPanel?.reset();
   workspaceFrame?.close();
   workspaceScopeGeneration += 1;
   localStorage.setItem("firefly.accountId", session.account.accountId);
@@ -1819,7 +1821,11 @@ async function initializeWorkspaceAccount() {
 }
 
 async function switchWorkspaceAccount(accountId) {
-  if (!accountId || accountId === state.account?.accountId || state.busy || state.workflowBusy || state.workspaceHydrating) return;
+  if (!accountId || accountId === state.account?.accountId) return;
+  if (state.busy || state.workflowBusy || state.workspaceHydrating || workspaceStagesPanel?.isBusy()) {
+    renderAccount();
+    return;
+  }
   const previousNavigation = {
     brands: state.navigationBrands,
     brandId: state.navigationBrandId,
@@ -2061,6 +2067,10 @@ workspaceStagesPanel = createWorkspaceStagesPanel({
   },
   api: workspaceApi,
   getCurrentAccountId: function () { return state.account?.accountId || null; },
+  onBusyChange: function () {
+    refreshAgentInteractionControls();
+    renderAccount();
+  },
   onTaskUpdated: function (updatedTask) {
     let updatedProjectId = null;
     for (const summary of state.projectLibrary) {
@@ -2103,7 +2113,7 @@ workspaceFrame = createWorkspaceFrame({
     modulePanels: [...document.querySelectorAll("[data-workspace-frame-panel]")],
   },
   getProjects: function () { return state.projectLibrary; },
-  isSelectionLocked: function () { return state.busy || state.workflowBusy; },
+  isSelectionLocked: function () { return state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy(); },
   onBack: function () { renderProjectLibraryPage(); },
   onSelectionChange: function (selection) {
     void synchronizeAgentWorkspaceSelection(selection);
