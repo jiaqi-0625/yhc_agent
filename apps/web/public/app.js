@@ -2052,6 +2052,7 @@ workspaceStagesPanel = createWorkspaceStagesPanel({
     delivery: document.querySelector("#workspace-delivery-panel"),
   },
   api: workspaceApi,
+  getCurrentAccountId: function () { return state.account?.accountId || null; },
   onTaskUpdated: function (updatedTask) {
     let updatedProjectId = null;
     for (const summary of state.projectLibrary) {

@@ -10,6 +10,8 @@ import {
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { LocalAccountBudgetStore } from "./account-budget-store.ts";
+import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
+import { LocalAccountRunLockStore } from "./account-run-lock-store.ts";
 import {
   createAgentAssetMatchingCandidateReader,
   createCurrentProjectAssetPoolReader,
@@ -81,6 +83,10 @@ import {
 import { LocalWorkspaceSessionStore } from "./workspace-session-store.ts";
 import { WorkspaceMigrationStateStore } from "./workspace-migration-state.ts";
 import {
+  handleWorkspaceProductionStatusRoute,
+  WorkspaceProductionStatusPath,
+} from "./workspace-production-status-routes.ts";
+import {
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -145,6 +151,7 @@ async function handleRequest(
   legacyWritesDisabled: boolean,
   readiness: ApiReadinessProbe,
   assetMatching: AssetMatchingRuntime | undefined,
+  accountRunLocks: AccountRunLockRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -329,6 +336,26 @@ async function handleRequest(
     )
   ) return;
   if (
+    accountRunLocks === undefined &&
+    url.pathname === WorkspaceProductionStatusPath
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-PRODUCTION-STATUS-RUNTIME-NOT-CONFIGURED",
+      "Production status must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    accountRunLocks !== undefined &&
+    await handleWorkspaceProductionStatusRoute(
+      request,
+      response,
+      url,
+      accountRunLocks,
+      workspaceSessions,
+    )
+  ) return;
+  if (
     assetMatching === undefined &&
     matchesAssetRoute(url.pathname)
   ) {
@@ -390,6 +417,7 @@ export function createApiServer(
   resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
   readiness: ApiReadinessProbe = alwaysReady,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
+  accountRunLocks: AccountRunLockRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -410,7 +438,8 @@ export function createApiServer(
       videoTasks !== undefined ||
       agentActionCommands !== undefined ||
       videoTaskStages !== undefined ||
-      projectLibrary !== undefined
+      projectLibrary !== undefined ||
+      accountRunLocks !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -433,6 +462,15 @@ export function createApiServer(
     adminStore!,
   );
   const companyAssetProvider = new MockCompanyAssetProvider();
+  const activeAccountRunLocks = accountRunLocks ?? (
+    workspaceSessions === undefined
+      ? new AccountRunLockRuntime(
+          new LocalAccountRunLockStore(
+            process.env.ACCOUNT_RUN_LOCK_DATA_DIRECTORY ?? ".data/account-run-locks",
+          ),
+        )
+      : undefined
+  );
   const activeWorkspaceAdmin = workspaceAdmin ?? (adminStore === undefined ? undefined : new WorkspaceAdminRuntime(
     adminStore,
     new AccountBudgetRuntime(
@@ -672,6 +710,7 @@ export function createApiServer(
       legacyWritesDisabled,
       readiness,
       activeAssetMatching,
+      activeAccountRunLocks,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -698,6 +737,7 @@ export async function startApiServer(
   readiness: ApiReadinessProbe = alwaysReady,
   forceLegacyWritesDisabled = false,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
+  accountRunLocks: AccountRunLockRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -721,6 +761,7 @@ export async function startApiServer(
       resolveAgentTaskContext,
       readiness,
       assetMatching,
+      accountRunLocks,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -890,6 +931,7 @@ export async function startConfiguredApiServer(
       postgres.readiness,
       true,
       postgres.assetMatching,
+      postgres.accountRunLocks,
     );
     attachPostgresLifecycle(
       server,

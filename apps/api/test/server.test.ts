@@ -72,6 +72,10 @@ test("health and metadata endpoints expose the current bounded vertical slice", 
     modelCanApprove: false,
     genericToolsEnabled: false,
   });
+  assert.equal(
+    (await fetch(`${baseUrl}/v1/workspace/me/production-status`)).status,
+    401,
+  );
 });
 
 test("root serves the local acceptance web UI with locked-down browser assets", async (context) => {
@@ -169,6 +173,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(workspaceApiScript, /listAdminBrands/u);
   assert.match(workspaceApiScript, /getProjectCreationOptions/u);
   assert.match(workspaceApiScript, /createBatchProject/u);
+  assert.match(workspaceApiScript, /getOwnBudget/u);
+  assert.match(workspaceApiScript, /getProductionStatus/u);
   assert.match(await projectWizardResponse.text(), /createProjectRequest/u);
   const workspaceShellScript = await workspaceShellResponse.text();
   assert.match(workspaceShellScript, /bindWorkspaceShell/u);

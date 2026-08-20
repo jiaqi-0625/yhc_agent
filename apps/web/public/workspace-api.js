@@ -9,6 +9,8 @@ function jsonOptions(method, body) {
 }
 
 export const workspaceApi = {
+  getOwnBudget: function () { return api("/v1/workspace/me/budget"); },
+  getProductionStatus: function () { return api("/v1/workspace/me/production-status"); },
   listAdminBrands: function () { return api("/v1/admin/brands"); },
   getProjectCreationOptions: function () { return api("/v1/workspace/project-creation/options"); },
   getProjectAssetPackage: function (vehicleId) {

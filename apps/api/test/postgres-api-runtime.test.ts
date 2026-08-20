@@ -296,6 +296,10 @@ test("configured postgres is V2-only, readiness is fail-closed, and close drains
     "AIC-AUTH-SESSION_INVALID",
   );
   assert.equal((await fetch(`${baseUrl}/v1/works`)).status, 404);
+  assert.equal(
+    (await fetch(`${baseUrl}/v1/workspace/me/production-status`)).status,
+    401,
+  );
   assert.equal(business.getWorkCount, 0);
 
   await new Promise<void>((resolve, reject) => {
