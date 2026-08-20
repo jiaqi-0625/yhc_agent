@@ -10,7 +10,8 @@ import {
   createAgentActionRequestId,
   createStableAgentActionRequestId,
   extractAgentActionCard,
-} from "./agent-panel.js?build=ws502-v1";
+  unavailableAgentTaskMessage,
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -25,7 +26,7 @@ import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
 import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
-import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1";
+import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,
   migrateSelectedVideoTaskStorage,
@@ -1781,7 +1782,31 @@ async function synchronizeAgentWorkspaceSelection(selection) {
   try {
     await restoreSessionForCurrentWork(scope);
   } catch (error) {
-    if (request === agentSelectionRequest && isCurrentWorkspaceScope(scope)) showError(error);
+    if (request === agentSelectionRequest && isCurrentWorkspaceScope(scope)) {
+      const unavailableMessage = unavailableAgentTaskMessage(error);
+      if (unavailableMessage) {
+        const scopedSessionKey = sessionStorageKey(videoTaskId);
+        const unavailableSessionId = localStorage.getItem(scopedSessionKey);
+        localStorage.removeItem(scopedSessionKey);
+        if (
+          unavailableSessionId &&
+          localStorage.getItem("firefly.sessionId") === unavailableSessionId
+        ) localStorage.removeItem("firefly.sessionId");
+        setBusy(false);
+        const projectId = selection.project?.project?.id;
+        if (projectId) {
+          workspaceFrame?.open(projectId, undefined, {
+            historyMode: "replace",
+            focus: false,
+          });
+        } else {
+          workspaceFrame?.close({ historyMode: "replace" });
+        }
+        showError(new Error(unavailableMessage));
+      } else {
+        showError(error);
+      }
+    }
   } finally {
     if (
       request === agentSelectionRequest &&
@@ -1818,14 +1843,16 @@ async function refreshAgentContextForWorkspaceTask(task) {
   }
 }
 
-function applyWorkspaceSession(session) {
+function applyWorkspaceSession(session, options = {}) {
   if (session.token) {
     setWorkspaceSessionToken(session.token);
     sessionStorage.setItem("firefly.workspaceSession", session.token);
   }
   state.account = session.account;
   workspaceStagesPanel?.reset();
-  workspaceFrame?.close();
+  workspaceFrame?.close(options.preserveWorkspaceLocation
+    ? { synchronize: false }
+    : undefined);
   workspaceScopeGeneration += 1;
   localStorage.setItem("firefly.accountId", session.account.accountId);
   projectCreationWizard.resetForAccount();
@@ -1848,7 +1875,9 @@ async function initializeWorkspaceAccount() {
   if (storedToken) {
     setWorkspaceSessionToken(storedToken);
     try {
-      applyWorkspaceSession((await authApi.getSession()).session);
+      applyWorkspaceSession((await authApi.getSession()).session, {
+        preserveWorkspaceLocation: true,
+      });
       await refreshAgentBudget();
       return;
     } catch {
@@ -1860,7 +1889,9 @@ async function initializeWorkspaceAccount() {
   const selected = state.accounts.find(function (account) { return account.accountId === savedAccountId; })
     || state.accounts.find(function (account) { return account.role === "creator"; })
     || state.accounts[0];
-  applyWorkspaceSession((await authApi.createOrSwitchSession(selected.accountId)).session);
+  applyWorkspaceSession((await authApi.createOrSwitchSession(selected.accountId)).session, {
+    preserveWorkspaceLocation: true,
+  });
   await refreshAgentBudget();
 }
 
@@ -2173,6 +2204,7 @@ workspaceFrame = createWorkspaceFrame({
     modulePanels: [...document.querySelectorAll("[data-workspace-frame-panel]")],
   },
   getProjects: function () { return state.projectLibrary; },
+  isProjectLibraryLoading: function () { return state.projectLibraryLoading; },
   isSelectionLocked: function () { return state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy(); },
   onBack: function () { renderProjectLibraryPage(); },
   onSelectionChange: function (selection) {

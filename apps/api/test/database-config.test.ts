@@ -69,6 +69,30 @@ test("database configuration rejects connection URL TLS overrides", () => {
   }
 });
 
+test("database configuration rejects every connection URL query override", () => {
+  for (const parameter of [
+    "options",
+    "OPTIONS",
+    "statement_timeout",
+    "Statement_Timeout",
+    "application_name",
+    "Application_Name",
+    "connect_timeout",
+    "client_encoding",
+    "unknown_driver_setting",
+  ]) {
+    assert.throws(
+      () => parsePostgresDatabaseConfig({
+        DATABASE_URL: `postgres://localhost/firefly?${parameter}=untrusted`,
+      }),
+      (error: unknown) => error instanceof DatabaseConfigError
+        && error.message ===
+          "DATABASE_URL query parameters are not allowed; use the separately validated database settings."
+        && !error.message.includes("untrusted"),
+    );
+  }
+});
+
 test("database configuration fails closed without a valid URL and never echoes credentials", () => {
   assert.throws(
     () => parsePostgresDatabaseConfig({}),

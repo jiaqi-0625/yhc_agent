@@ -8,6 +8,7 @@ import {
   upgradeRecord as upgradeVideoTaskProductionRecord,
   validateCreationMetadata as validateVideoTaskCreationMetadata,
   validateRecord as validateVideoTaskProductionRecord,
+  validateVideoTaskTransition,
   type VideoTaskCreateResult,
   type VideoTaskCreationMetadata,
   type VideoTaskCreationStore,
@@ -180,6 +181,7 @@ export class PostgresVideoTaskProductionStore implements VideoTaskCreationStore 
       }
       if (current !== undefined) {
         this.assertScopeUnchanged(current.record, next, "transaction");
+        validateVideoTaskTransition(current.record, next);
         await this.updateLocked(transaction, next, current.revision);
       } else {
         await this.insertWithoutCreation(transaction, next);

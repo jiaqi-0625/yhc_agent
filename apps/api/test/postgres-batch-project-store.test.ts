@@ -69,13 +69,35 @@ test("PostgreSQL batch create locks its tenant scope and persists idempotency me
   assert.equal(database.transactions, 1);
   database.done();
 });
-test("PostgreSQL batch create replays the same payload and rejects a changed payload", async () => {
-  const replayRow = { aggregate: aggregate(), revision: 4, creation_payload_hash: "hash_v1" };
+test("PostgreSQL batch create replays the same payload across different candidate IDs and rejects a changed payload", async () => {
+  const replayRow = {
+    project_id: "project_launch",
+    aggregate: aggregate(),
+    revision: 4,
+    creation_payload_hash: "hash_v1",
+  };
+  const retryProject = {
+    ...project(),
+    id: "project_retry",
+    assetPoolId: "pool_retry",
+  };
+  const retryPool = {
+    ...pool(),
+    id: "pool_retry",
+    batchProjectId: "project_retry",
+  };
   const replayDb = new ScriptedDatabase([
     () => empty,
-    () => ({ rows: [replayRow], rowCount: 1 }),
+    (sql) => {
+      assert.match(sql, /^SELECT project_id, aggregate, revision, creation_payload_hash/u);
+      return { rows: [replayRow], rowCount: 1 };
+    },
   ]);
-  const replayed = await new PostgresBatchProjectStore(replayDb).create(project(), pool(), creation);
+  const replayed = await new PostgresBatchProjectStore(replayDb).create(
+    retryProject,
+    retryPool,
+    creation,
+  );
   assert.equal(replayed.project.id, "project_launch");
   replayDb.done();
 
@@ -84,7 +106,11 @@ test("PostgreSQL batch create replays the same payload and rejects a changed pay
     () => ({ rows: [replayRow], rowCount: 1 }),
   ]);
   await assert.rejects(
-    new PostgresBatchProjectStore(conflictDb).create(project(), pool(), { ...creation, payloadHash: "hash_v2" }),
+    new PostgresBatchProjectStore(conflictDb).create(
+      retryProject,
+      retryPool,
+      { ...creation, payloadHash: "hash_v2" },
+    ),
     /conflicts with a different payload/u,
   );
   conflictDb.done();
@@ -96,7 +122,12 @@ test("PostgreSQL batch replay rejects JSON outside the relational tenant and pro
   const database = new ScriptedDatabase([
     () => empty,
     () => ({
-      rows: [{ aggregate: tampered, revision: 4, creation_payload_hash: "hash_v1" }],
+      rows: [{
+        project_id: "project_launch",
+        aggregate: tampered,
+        revision: 4,
+        creation_payload_hash: "hash_v1",
+      }],
       rowCount: 1,
     }),
   ]);

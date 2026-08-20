@@ -35,6 +35,29 @@ function record(id = "task_launch", name = "首发 主片"): VideoTaskProduction
     stageMutationReceipts: [],
   } as unknown as VideoTaskProductionRecord;
 }
+
+function recordWithOwnershipTransfer(): VideoTaskProductionRecord {
+  const value = record();
+  value.videoTask = {
+    ...value.videoTask,
+    ownerAccountId: "account_successor",
+    revision: 2,
+  };
+  value.ownershipTransfers = [{
+    id: "ownership_transfer_launch",
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    fromOwnerAccountId: "account_creator",
+    toOwnerAccountId: "account_successor",
+    expectedTaskRevision: 1,
+    reason: "正常工作交接",
+    source: "human_action",
+    actorAccountId: "account_admin",
+    occurredAt: "2026-08-19T08:01:00.000Z",
+  }];
+  return value;
+}
 const creation = { requestId: "request_launch", actorAccountId: "account_creator", payloadHash: "hash_v1" };
 const row = (value = record()) => ({ task_id: value.videoTask.id, tenant_id: value.videoTask.tenantId, project_id: value.videoTask.batchProjectId, aggregate: value, revision: "3", creation_actor_account_id: creation.actorAccountId, creation_request_id: creation.requestId, creation_payload_hash: creation.payloadHash });
 const empty = { rows: [], rowCount: 0 };
@@ -90,6 +113,41 @@ test("PostgreSQL video transaction holds an advisory and row lock then updates w
   }));
   updated.videoTask.revision = 99;
   assert.equal((JSON.parse(database.calls[2]!.parameters[3] as string) as VideoTaskProductionRecord).videoTask.revision, 2);
+  database.done();
+});
+
+test("PostgreSQL video transaction rejects a business revision jump", async () => {
+  const database = new ScriptedDatabase([
+    () => empty,
+    () => ({ rows: [row()], rowCount: 1 }),
+  ]);
+
+  await assert.rejects(
+    new PostgresVideoTaskProductionStore(database).transact("task_launch", (current) => ({
+      ...current!,
+      videoTask: { ...current!.videoTask, revision: current!.videoTask.revision + 2 },
+    })),
+    /must increment its revision exactly once/u,
+  );
+  database.done();
+});
+
+test("PostgreSQL video transaction rejects rewriting immutable history", async () => {
+  const current = recordWithOwnershipTransfer();
+  const database = new ScriptedDatabase([
+    () => empty,
+    () => ({ rows: [row(current)], rowCount: 1 }),
+  ]);
+
+  await assert.rejects(
+    new PostgresVideoTaskProductionStore(database).transact("task_launch", (stored) => {
+      const next = structuredClone(stored!);
+      next.videoTask.revision += 1;
+      next.ownershipTransfers[0]!.reason = "篡改后的交接原因";
+      return next;
+    }),
+    /cannot rewrite immutable ownership transfer history/u,
+  );
   database.done();
 });
 

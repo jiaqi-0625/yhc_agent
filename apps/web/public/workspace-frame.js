@@ -189,6 +189,9 @@ export function createWorkspaceFrame(options) {
   const browserHistory = options.history || browserWindow?.history;
   const browserLocation = options.location || browserWindow?.location;
   const storage = options.storage || browserWindow?.localStorage;
+  const isProjectLibraryLoading = typeof options.isProjectLibraryLoading === "function"
+    ? options.isProjectLibraryLoading
+    : function () { return elements.library.getAttribute("aria-busy") === "true"; };
   let selection = null;
   let activeModule = "planning";
   let activeView = "overview";
@@ -457,11 +460,16 @@ export function createWorkspaceFrame(options) {
       close({ synchronize: false });
       return true;
     }
-    return open(route.projectId, route.videoTaskId || undefined, {
+    const restored = open(route.projectId, route.videoTaskId || undefined, {
       module: route.module || undefined,
-      synchronize: false,
+      historyMode: "replace",
       focus: false,
     });
+    if (!restored) {
+      if (isProjectLibraryLoading()) return false;
+      close({ historyMode: "replace" });
+    }
+    return true;
   }
 
   function restoreInitialRoute() {

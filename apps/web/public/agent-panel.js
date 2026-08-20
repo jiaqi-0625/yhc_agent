@@ -262,6 +262,18 @@ export function agentActionAvailability(
   return { enabled: !busy, stale: false };
 }
 
+export function unavailableAgentTaskMessage(error) {
+  const code = error && typeof error.code === "string" ? error.code : "";
+  if (
+    error?.status !== 404 ||
+    ![
+      "AIC-DATA-WORK_NOT_FOUND",
+      "AIC-AGENT-VIDEO-TASK_NOT_FOUND",
+    ].includes(code)
+  ) return undefined;
+  return "当前视频任务暂时无法由智能助手读取，已返回项目概览。请刷新项目库后重试；若任务仍存在，请检查工作区与助手是否使用同一数据源。";
+}
+
 export function agentActionFailurePresentation(error) {
   const code = error && typeof error.code === "string" ? error.code : "";
   const charged = Boolean(error && error.charged);

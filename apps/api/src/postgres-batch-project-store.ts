@@ -18,6 +18,9 @@ interface BatchProjectRow {
   revision: string | number;
   creation_payload_hash?: string;
 }
+interface BatchProjectReplayRow extends BatchProjectRow {
+  project_id: string;
+}
 function decodeAggregate(
   row: BatchProjectRow,
   expectedTenantId?: string,
@@ -119,8 +122,8 @@ export class PostgresBatchProjectStore implements BatchProjectStore {
 
     return this.database.transaction(async (transaction) => {
       await lockCreationScope(transaction, project.tenantId);
-      const replayResult = await transaction.query<BatchProjectRow>(
-        `SELECT aggregate, revision, creation_payload_hash
+      const replayResult = await transaction.query<BatchProjectReplayRow>(
+        `SELECT project_id, aggregate, revision, creation_payload_hash
            FROM batch_project_aggregates
           WHERE tenant_id = $1
             AND creation_actor_account_id = $2
@@ -132,7 +135,7 @@ export class PostgresBatchProjectStore implements BatchProjectStore {
         if (replay.creation_payload_hash !== metadata.payloadHash) {
           throw new Error("Batch project creation request conflicts with a different payload.");
         }
-        return decodeAggregate(replay, project.tenantId, project.id);
+        return decodeAggregate(replay, project.tenantId, replay.project_id);
       }
       const conflicts = await transaction.query<{ project_id: string; normalized_name: string }>(
         `SELECT project_id, normalized_name

@@ -9,7 +9,6 @@ import {
   emptyWorkspaceAdminState,
   validateWorkspaceAdminState,
   validateWorkspaceAdminTransition,
-  type WorkspaceAdminSeed,
   type WorkspaceAdminState,
   type WorkspaceAdminStore,
 } from "./workspace-admin-store.ts";
@@ -49,16 +48,13 @@ async function selectState(
 }
 
 export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
-  constructor(
-    private readonly postgres: PostgresTransactionProvider,
-    private readonly seed: Readonly<WorkspaceAdminSeed> = {},
-  ) {}
+  constructor(private readonly postgres: PostgresTransactionProvider) {}
 
   async load(tenantId: string): Promise<WorkspaceAdminState> {
     assertWorkspaceAdminIdentifier(tenantId, "Tenant ID");
     const row = await selectState(this.postgres, tenantId);
     const state = row === undefined
-      ? emptyWorkspaceAdminState(tenantId, this.seed)
+      ? emptyWorkspaceAdminState(tenantId, {})
       : decodeState(row.state);
     if (row !== undefined && row.tenant_id !== tenantId) {
       throw new Error("Persisted workspace administration state has an invalid tenant scope.");
@@ -76,7 +72,7 @@ export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
       await lockTenant(transaction, tenantId);
       const row = await selectState(transaction, tenantId, true);
       const current = row === undefined
-        ? emptyWorkspaceAdminState(tenantId, this.seed)
+        ? emptyWorkspaceAdminState(tenantId, {})
         : decodeState(row.state);
       validateWorkspaceAdminState(current, tenantId);
       return inspect(structuredClone(current));
@@ -94,7 +90,7 @@ export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
       await lockTenant(transaction, tenantId);
       const row = await selectState(transaction, tenantId, true);
       const current = row === undefined
-        ? emptyWorkspaceAdminState(tenantId, this.seed)
+        ? emptyWorkspaceAdminState(tenantId, {})
         : decodeState(row.state);
       validateWorkspaceAdminState(current, tenantId);
       const next = await update(structuredClone(current));

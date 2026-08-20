@@ -33,8 +33,11 @@ class MigrationDatabase implements PostgresTransactionProvider {
   readonly executedMigrationSql: string[] = [];
   ledgerExists = true;
   missingWorkspaceTable: string | undefined;
+  invalidWorkspaceColumn: string | undefined;
   missingWorkspaceConstraint: string | undefined;
   invalidWorkspaceConstraint: string | undefined;
+  missingWorkspaceCheck: string | undefined;
+  invalidWorkspaceCheck: string | undefined;
   invalidWorkspaceIndex: string | undefined;
   catalogFailureMessage: string | undefined;
   transactionCount = 0;
@@ -65,6 +68,15 @@ class MigrationDatabase implements PostgresTransactionProvider {
         present: tableName !== this.missingWorkspaceTable,
       })));
     }
+    if (sql.includes("workspace_v2_required_columns")) {
+      const tableNames = (parameters?.[0] ?? []) as readonly string[];
+      const columnNames = (parameters?.[1] ?? []) as readonly string[];
+      return this.result<Row>(tableNames.map((tableName, index) => ({
+        table_name: tableName,
+        column_name: columnNames[index],
+        present: `${tableName}.${columnNames[index]}` !== this.invalidWorkspaceColumn,
+      })));
+    }
     if (sql.includes("workspace_v2_required_constraints")) {
       const tableNames = (parameters?.[0] ?? []) as readonly string[];
       const constraintNames = (parameters?.[1] ?? []) as readonly string[];
@@ -73,6 +85,16 @@ class MigrationDatabase implements PostgresTransactionProvider {
         constraint_name: constraintNames[index],
         present: constraintNames[index] !== this.missingWorkspaceConstraint
           && constraintNames[index] !== this.invalidWorkspaceConstraint,
+      })));
+    }
+    if (sql.includes("workspace_v2_required_checks")) {
+      const tableNames = (parameters?.[0] ?? []) as readonly string[];
+      const constraintNames = (parameters?.[1] ?? []) as readonly string[];
+      return this.result<Row>(tableNames.map((tableName, index) => ({
+        table_name: tableName,
+        constraint_name: constraintNames[index],
+        present: constraintNames[index] !== this.missingWorkspaceCheck
+          && constraintNames[index] !== this.invalidWorkspaceCheck,
       })));
     }
     if (sql.includes("workspace_v2_required_indexes")) {
@@ -111,6 +133,69 @@ const migrations = [
 ] as const;
 
 const workspaceV2Migration = defineDatabaseMigration(1, "workspace_v2", "SELECT 1;");
+const varchar128 = "character varying(128)";
+const timestamptz = "timestamp with time zone";
+const workspaceV2ColumnExpectations = [
+  ["workspace_admin_states", "tenant_id", varchar128, true],
+  ["workspace_admin_states", "revision", "bigint", true],
+  ["workspace_admin_states", "state", "jsonb", true],
+  ["workspace_admin_states", "updated_at", timestamptz, true],
+
+  ["workspace_sessions", "session_id_hash", "character(64)", true],
+  ["workspace_sessions", "account_id", varchar128, true],
+  ["workspace_sessions", "created_at", timestamptz, true],
+  ["workspace_sessions", "expires_at", timestamptz, true],
+  ["workspace_sessions", "signed_out_at", timestamptz, false],
+  ["workspace_sessions", "state", "jsonb", true],
+  ["workspace_sessions", "revision", "bigint", true],
+  ["workspace_sessions", "updated_at", timestamptz, true],
+
+  ["account_budget_states", "tenant_id", varchar128, true],
+  ["account_budget_states", "account_id", varchar128, true],
+  ["account_budget_states", "revision", "bigint", true],
+  ["account_budget_states", "state", "jsonb", true],
+  ["account_budget_states", "updated_at", timestamptz, true],
+
+  ["batch_project_aggregates", "tenant_id", varchar128, true],
+  ["batch_project_aggregates", "project_id", varchar128, true],
+  ["batch_project_aggregates", "revision", "bigint", true],
+  ["batch_project_aggregates", "normalized_name", "character varying(240)", true],
+  ["batch_project_aggregates", "creation_actor_account_id", varchar128, true],
+  ["batch_project_aggregates", "creation_request_id", varchar128, true],
+  ["batch_project_aggregates", "creation_payload_hash", varchar128, true],
+  ["batch_project_aggregates", "aggregate", "jsonb", true],
+  ["batch_project_aggregates", "created_at", timestamptz, true],
+  ["batch_project_aggregates", "updated_at", timestamptz, true],
+
+  ["video_task_aggregates", "task_id", varchar128, true],
+  ["video_task_aggregates", "tenant_id", varchar128, true],
+  ["video_task_aggregates", "project_id", varchar128, true],
+  ["video_task_aggregates", "revision", "bigint", true],
+  ["video_task_aggregates", "normalized_name", "character varying(160)", true],
+  ["video_task_aggregates", "creation_actor_account_id", varchar128, false],
+  ["video_task_aggregates", "creation_request_id", varchar128, false],
+  ["video_task_aggregates", "creation_payload_hash", varchar128, false],
+  ["video_task_aggregates", "aggregate", "jsonb", true],
+  ["video_task_aggregates", "created_at", timestamptz, true],
+  ["video_task_aggregates", "updated_at", timestamptz, true],
+
+  ["temporary_asset_project_states", "tenant_id", varchar128, true],
+  ["temporary_asset_project_states", "batch_project_id", varchar128, true],
+  ["temporary_asset_project_states", "revision", "bigint", true],
+  ["temporary_asset_project_states", "envelope", "jsonb", true],
+  ["temporary_asset_project_states", "updated_at", timestamptz, true],
+
+  ["account_run_lock_states", "tenant_id", varchar128, true],
+  ["account_run_lock_states", "account_id", varchar128, true],
+  ["account_run_lock_states", "lock_id", varchar128, true],
+  ["account_run_lock_states", "batch_project_id", varchar128, true],
+  ["account_run_lock_states", "video_task_id", varchar128, true],
+  ["account_run_lock_states", "operation", "character varying(32)", true],
+  ["account_run_lock_states", "acquired_at", timestamptz, true],
+  ["account_run_lock_states", "revision", "bigint", true],
+  ["account_run_lock_states", "envelope", "jsonb", true],
+  ["account_run_lock_states", "updated_at", timestamptz, true],
+] as const;
 const workspaceV2ConstraintExpectations = [
   ["workspace_admin_states_pkey", "p", "tenant_id", null, null],
   ["workspace_sessions_pkey", "p", "session_id_hash", null, null],
@@ -231,7 +316,7 @@ test("empty migration verification does not require Workspace V2 schema objects"
   );
 });
 
-test("Workspace V2 schema verification accepts all required tables and constraints", async () => {
+test("Workspace V2 schema verification accepts all required tables, columns, constraints, and checks", async () => {
   const database = new MigrationDatabase();
   recordAppliedMigrations(database, [workspaceV2Migration]);
 
@@ -248,6 +333,28 @@ test("Workspace V2 schema verification accepts all required tables and constrain
     "temporary_asset_project_states",
     "account_run_lock_states",
   ]);
+  const columnCall = database.calls.find(
+    (call) => call.sql.includes("workspace_v2_required_columns"),
+  );
+  assert.deepEqual(
+    columnCall?.parameters?.[0],
+    workspaceV2ColumnExpectations.map(([tableName]) => tableName),
+  );
+  assert.deepEqual(
+    columnCall?.parameters?.[1],
+    workspaceV2ColumnExpectations.map(([, columnName]) => columnName),
+  );
+  assert.deepEqual(
+    columnCall?.parameters?.[2],
+    workspaceV2ColumnExpectations.map(([, , formattedType]) => formattedType),
+  );
+  assert.deepEqual(
+    columnCall?.parameters?.[3],
+    workspaceV2ColumnExpectations.map(([, , , notNull]) => notNull),
+  );
+  assert.match(columnCall?.sql ?? "", /pg_catalog\.format_type/u);
+  assert.match(columnCall?.sql ?? "", /attribute\.attnotnull/u);
+  assert.match(columnCall?.sql ?? "", /NOT attribute\.attisdropped/u);
   const constraintCall = database.calls.find(
     (call) => call.sql.includes("workspace_v2_required_constraints"),
   );
@@ -275,6 +382,37 @@ test("Workspace V2 schema verification accepts all required tables and constrain
   assert.match(constraintCall?.sql ?? "", /constraint_record\.confkey/u);
   assert.match(constraintCall?.sql ?? "", /constraint_record\.convalidated/u);
 
+  const checkCall = database.calls.find(
+    (call) => call.sql.includes("workspace_v2_required_checks"),
+  );
+  const requiredCheckNames = checkCall?.parameters?.[1] as readonly string[] | undefined;
+  assert.ok(requiredCheckNames?.includes("workspace_admin_states_check"));
+  assert.ok(requiredCheckNames?.includes("workspace_sessions_check2"));
+  assert.ok(requiredCheckNames?.includes("account_budget_states_check"));
+  assert.ok(requiredCheckNames?.includes("batch_project_aggregates_check"));
+  assert.ok(requiredCheckNames?.includes("video_task_aggregates_check"));
+  assert.ok(requiredCheckNames?.includes("temporary_asset_project_states_check"));
+  assert.ok(requiredCheckNames?.includes("account_run_lock_states_check"));
+  assert.ok(requiredCheckNames?.includes("account_run_lock_states_operation_check"));
+  assert.ok(requiredCheckNames?.includes("account_run_lock_states_revision_check"));
+  const checkDefinitions = checkCall?.parameters?.[2] as readonly string[] | undefined;
+  const adminStateCheckIndex = requiredCheckNames?.indexOf("workspace_admin_states_check") ?? -1;
+  assert.equal(
+    checkDefinitions?.[adminStateCheckIndex],
+    "CHECK ((jsonb_typeof(state) = 'object'::text) IS TRUE AND ((state ->> 'tenantId'::text) = tenant_id::text) IS TRUE)",
+  );
+  const operationCheckIndex = requiredCheckNames?.indexOf(
+    "account_run_lock_states_operation_check",
+  ) ?? -1;
+  assert.equal(
+    checkDefinitions?.[operationCheckIndex],
+    "CHECK (operation::text = ANY (ARRAY['video_generation'::character varying, 'automatic_editing'::character varying]::text[]))",
+  );
+  assert.match(checkCall?.sql ?? "", /constraint_record\.convalidated/u);
+  assert.match(checkCall?.sql ?? "", /pg_catalog\.pg_get_constraintdef/u);
+  assert.match(checkCall?.sql ?? "", /= required\.definition/u);
+  assert.doesNotMatch(checkCall?.sql ?? "", /regexp_replace|strpos/u);
+
   const indexCall = database.calls.find(
     (call) => call.sql.includes("workspace_v2_required_indexes"),
   );
@@ -300,6 +438,18 @@ test("Workspace V2 schema verification fails closed when a required table is mis
   );
 });
 
+test("Workspace V2 schema verification rejects a missing or incompatible required column", async () => {
+  const database = new MigrationDatabase();
+  recordAppliedMigrations(database, [workspaceV2Migration]);
+  database.invalidWorkspaceColumn = "video_task_aggregates.aggregate";
+
+  await assert.rejects(
+    verifyDatabaseSchema(database, [workspaceV2Migration]),
+    (error: unknown) => error instanceof DatabaseMigrationError
+      && error.message === "Workspace V2 schema has a missing or invalid required column aggregate on table video_task_aggregates.",
+  );
+});
+
 test("Workspace V2 schema verification fails closed when a required constraint is missing", async () => {
   const database = new MigrationDatabase();
   recordAppliedMigrations(database, [workspaceV2Migration]);
@@ -321,6 +471,30 @@ test("Workspace V2 schema verification rejects a named constraint with mismatche
     verifyDatabaseSchema(database, [workspaceV2Migration]),
     (error: unknown) => error instanceof DatabaseMigrationError
       && error.message === "Workspace V2 schema has a missing or invalid required constraint video_task_aggregates_task_id_key on table video_task_aggregates.",
+  );
+});
+
+test("Workspace V2 schema verification fails closed when a required check is missing", async () => {
+  const database = new MigrationDatabase();
+  recordAppliedMigrations(database, [workspaceV2Migration]);
+  database.missingWorkspaceCheck = "account_run_lock_states_operation_check";
+
+  await assert.rejects(
+    verifyDatabaseSchema(database, [workspaceV2Migration]),
+    (error: unknown) => error instanceof DatabaseMigrationError
+      && error.message === "Workspace V2 schema has a missing or invalid required check account_run_lock_states_operation_check on table account_run_lock_states.",
+  );
+});
+
+test("Workspace V2 schema verification rejects a check with a mismatched definition", async () => {
+  const database = new MigrationDatabase();
+  recordAppliedMigrations(database, [workspaceV2Migration]);
+  database.invalidWorkspaceCheck = "workspace_admin_states_check";
+
+  await assert.rejects(
+    verifyDatabaseSchema(database, [workspaceV2Migration]),
+    (error: unknown) => error instanceof DatabaseMigrationError
+      && error.message === "Workspace V2 schema has a missing or invalid required check workspace_admin_states_check on table workspace_admin_states.",
   );
 });
 

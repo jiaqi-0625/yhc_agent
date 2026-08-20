@@ -4,7 +4,7 @@
 
 当前仓库已实现任务级 Agent 对话纵切：认证账号与一条 `VideoTask` 绑定会话，服务端装配只读任务上下文和领域白名单工具，通过可恢复 SSE 传输运行事件，并把模型建议转换为需要人工点击的操作卡片。业务状态机、权限、预算、负责人、revision、幂等和人工确认仍由服务端负责；聊天记录不是业务状态来源。
 
-已覆盖车型事实、策略、脚本、资产匹配、分镜和交付阶段的只读建议上下文；任务素材快照只在资产匹配经人工确认后可读。WS-305 已提供认证工作区统一命令 API，传统 Agent 面板的操作卡片已经接入该入口；三栏 Workspace 框架中的右侧区域仍是禁用占位，真实 Agent 面板挂载和端到端交付链路依赖 WS-501、WS-502、WS-503。依赖完成前不宣称 Agent 操作闭环或最终联调完成。
+已覆盖车型事实、策略、脚本、资产匹配、分镜和交付阶段的只读建议上下文；任务素材快照只在资产匹配经人工确认后可读。WS-305 已提供认证工作区统一命令 API，真实 Agent 面板已挂入三栏 Workspace，并与当前 V2 任务、会话和 revision 同步。真实视频生成、自动剪辑、定价和最终交付 Provider 尚未接入，因此不宣称高消耗生产链路已经可用。
 
 ## 分层与依赖
 
@@ -19,17 +19,19 @@ packages/schemas     TaskContext、事件、卡片及业务共享契约
 
 依赖方向是 `web -> api -> agent/tools/domain -> schemas`。PostgreSQL 驱动和 SQL 只存在于 API 基础设施适配器；API 可以把业务服务端口注入 Agent，但 Agent 不得直接访问数据库、文件系统、任意网络或审批接口。
 
-## PostgreSQL 持久化
+## 当前持久化与 PostgreSQL 保留适配器
 
-Workspace V2 在线权威状态使用 PostgreSQL，决定记录见 [ADR-001](./decisions/adr-001-postgresql-persistence.md)。API 进程共享一个连接池，Store 通过同一连接执行显式 `BEGIN`/`COMMIT`/`ROLLBACK`，并始终释放连接。生产启动只执行连接与 schema 版本检查；DDL 由部署阶段的显式迁移命令执行。
+当前开发与验收运行时按[产品规格第 12.3 节](./workspace-v2-product-spec.md#123-当前持久化边界)使用本地 Workspace V2 文件 Store；项目、任务、审批、素材、额度和 Agent `TaskContext` 不以数据库可用为前置条件。旧 `.data/works` 只保留只读兼容和 WS-307 显式迁移来源，不得作为 V2 Agent 的任务上下文回退。
+
+PostgreSQL 技术方案记录于 [ADR-001](./decisions/adr-001-postgresql-persistence.md)，当前作为未启用适配器保留。显式选择 PostgreSQL 时，API 进程共享一个连接池，Store 通过同一连接执行 `BEGIN`/`COMMIT`/`ROLLBACK`；控制语句失败会淘汰状态未知的连接。启动只检查连接、迁移 checksum、必需表列和约束，不自动执行 DDL。
 
 首期表使用关系型信封列保存 `tenant_id`、实体 ID、revision、规范化名称、幂等元数据与时间戳，版本化业务聚合存入 JSONB 并继续通过共享 schema 校验。数据库唯一约束、行锁和 revision 条件用于抵御跨实例竞争，但认证身份、权限、状态机、人工确认和预算规则仍由服务端领域层重新校验。
 
-七个在线 Store 使用 PostgreSQL：Workspace 管理状态、Workspace Session、账号额度、账号高消耗运行锁、批次项目/项目资产池、项目临时资产和视频任务。项目资产的跨 Store 服务操作由根事务和 PostgreSQL advisory lock 跨实例串行，同一异步调用链的嵌套 Store 复用该连接并整体提交或回滚；需要新的跨聚合原子写入命令时仍须由显式协调器建立根事务。旧 `.data/works` 只可由 WS-307 显式迁移读取，不能用来恢复或推断 Workspace V2 业务状态；Agent transcript 继续是隔离的本地对话存储。
+保留适配器覆盖七类 Store：Workspace 管理状态、Workspace Session、账号额度、账号高消耗运行锁、批次项目/项目资产池、项目临时资产和视频任务。项目资产的跨 Store 服务操作由根事务和 PostgreSQL advisory lock 跨实例串行，同一异步调用链的嵌套 Store 复用该连接并整体提交或回滚；需要新的跨聚合原子写入命令时仍须由显式协调器建立根事务。PostgreSQL 缺少租户管理行时返回空状态，不从进程常量注入品牌、车型或授权；重新启用前必须有显式、版本化 bootstrap。
 
 `GET /health` 仅报告进程存活；`GET /ready` 执行无敏感信息的数据库与 schema readiness 检查。关闭 API 时先停止接收请求，再关闭连接池。开发 Docker 数据库只绑定 loopback；生产账号签发仍等待正式 identity provider，开发账号入口在 `NODE_ENV=production` 下保持关闭。
 
-WS-307 的 V2 `TaskContext` resolver 与 Web 项目/任务选择正在与 PostgreSQL 装配进行集成验收。该工作不得以 legacy `.data/works` 回退来规避失败；验收未完成前不把 Agent 会话端到端可用性等同于数据库 readiness。
+本地与 PostgreSQL 装配都必须从当前 V2 Store 解析认证 Agent 的 `TaskContext`，不得以 legacy `.data/works` 回退来规避失败。WS-307 仍缺 PostgreSQL target adapter；重新启用 PostgreSQL 前，还必须完成正式数据迁移、身份、运行恢复和发布验收，不能把数据库 readiness 等同于完整业务可用性。
 
 ## 权威状态与上下文
 
