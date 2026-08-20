@@ -146,5 +146,5 @@ test("duration and creative type become the initial Agent task brief", () => {
     creativeTypeId: "unknown",
     durationSeconds: 20,
   }), null);
-  assert.equal(projectBatchName("scenario", new Date("2026-08-20T10:30:40+08:00")), "情景演绎 0820-103040");
+  assert.equal(projectBatchName("scenario", new Date(2026, 7, 20, 10, 30, 40)), "情景演绎 0820-103040");
 });
