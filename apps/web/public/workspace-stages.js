@@ -69,10 +69,77 @@ function dateText(value) {
 }
 
 function errorText(error) {
+  const messages = {
+    "AIC-COST-BUDGET_EXCEEDED": "当前账号可用额度不足",
+    "AIC-COST-BUDGET_NOT_CONFIGURED": "当前账号未配置制作额度",
+    "AIC-CONCURRENCY-ACCOUNT_HIGH_COST_TASK_RUNNING": "当前账号已有高消耗任务在运行",
+    "AIC-CONCURRENCY-RUN_LOCK_DENIED": "当前账号已有高消耗任务在运行",
+    "AIC-WORKFLOW-REVISION_CONFLICT": "任务已更新，请刷新后重试",
+  };
+  if (messages[error?.code]) return messages[error.code];
   if (error?.status === 401) return "账号会话已失效";
   if (error?.status === 403) return "当前账号无操作权限";
   if (error?.status === 409) return "任务已更新，请刷新后重试";
   return error instanceof Error && error.message ? error.message : "操作失败，请重试";
+}
+
+function validMinorAmount(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
+function formatMinorAmount(value, currency) {
+  return new Intl.NumberFormat("zh-CN", {
+    style: "currency",
+    currency: currency,
+    minimumFractionDigits: 2,
+  }).format(value / 100);
+}
+
+export function workspaceBudgetPresentation(view, expectedAccountId) {
+  if (view === null || view === undefined) {
+    return { tone: "warning", value: "未配置", detail: "联系管理员配置制作额度" };
+  }
+  const balance = view.balance;
+  if (
+    typeof expectedAccountId !== "string" || !expectedAccountId
+    || view.accountId !== expectedAccountId
+    || typeof view.currency !== "string" || !/^[A-Z]{3}$/u.test(view.currency)
+    || !balance || balance.currency !== view.currency
+    || !validMinorAmount(balance.limitAmountMinor)
+    || !validMinorAmount(balance.spentAmountMinor)
+    || !validMinorAmount(balance.reservedAmountMinor)
+    || !validMinorAmount(balance.availableAmountMinor)
+    || balance.spentAmountMinor + balance.reservedAmountMinor + balance.availableAmountMinor !== balance.limitAmountMinor
+  ) {
+    throw new Error("额度数据与当前账号不一致。");
+  }
+  return {
+    tone: balance.availableAmountMinor === 0 ? "danger" : "success",
+    value: formatMinorAmount(balance.availableAmountMinor, view.currency),
+    detail: balance.reservedAmountMinor > 0
+      ? `已预留 ${formatMinorAmount(balance.reservedAmountMinor, view.currency)}`
+      : `总额 ${formatMinorAmount(balance.limitAmountMinor, view.currency)}`,
+  };
+}
+
+export function workspaceRunLockPresentation(status, videoTaskId) {
+  if (!status || !("runLock" in status)) throw new Error("运行状态数据无效。");
+  const lock = status.runLock;
+  if (lock === null) return { tone: "success", value: "运行槽可用", detail: "可开始高消耗任务" };
+  if (
+    !lock || typeof lock.videoTaskId !== "string" || !lock.videoTaskId
+    || typeof lock.batchProjectId !== "string" || !lock.batchProjectId
+    || !Number.isSafeInteger(lock.taskRevision) || lock.taskRevision < 1
+    || !["video_generation", "automatic_editing"].includes(lock.operation)
+    || typeof lock.acquiredAt !== "string" || Number.isNaN(Date.parse(lock.acquiredAt))
+  ) throw new Error("运行状态数据无效。");
+  return lock.videoTaskId === videoTaskId
+    ? { tone: "pending", value: "本任务运行中", detail: lock.operation === "video_generation" ? "正在生成视频" : "正在生成剪映草稿" }
+    : { tone: "danger", value: "其他任务运行中", detail: "当前账号已有高消耗任务" };
+}
+
+export function workspaceProductionErrorText(error) {
+  return errorText(error);
 }
 
 function requestId(prefix) {
@@ -203,6 +270,30 @@ function deliveryBody(task, views) {
     }).join("")}</div>`;
 }
 
+function productionStatusCard(label, presentation) {
+  return `<article class="production-status-card ${presentation.tone || "neutral"}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(presentation.value)}</strong><small>${escapeHtml(presentation.detail)}</small></article>`;
+}
+
+function productionStatusStrip(budgetState, runLockState) {
+  const estimate = { tone: "neutral", value: "生成前获取", detail: "服务接入后显示" };
+  const budget = budgetState?.presentation || {
+    tone: budgetState?.error ? "danger" : "neutral",
+    value: budgetState?.error ? "读取失败" : "读取中",
+    detail: budgetState?.error ? errorText(budgetState.error) : "正在读取账号额度",
+  };
+  const runLock = runLockState?.presentation || {
+    tone: runLockState?.error ? "danger" : "neutral",
+    value: runLockState?.error ? "读取失败" : "读取中",
+    detail: runLockState?.error ? errorText(runLockState.error) : "正在读取运行状态",
+  };
+  return `<section class="production-status-strip" aria-label="制作资源状态">
+    ${productionStatusCard("预估费用", estimate)}
+    ${productionStatusCard("可用额度", budget)}
+    ${productionStatusCard("运行状态", runLock)}
+    <p>执行前由服务端重新估价、校验额度并获取运行锁。</p>
+  </section>`;
+}
+
 export function createWorkspaceStagesPanel(options) {
   const roots = options.roots;
   let projectId = null;
@@ -213,6 +304,8 @@ export function createWorkspaceStagesPanel(options) {
   let view = null;
   let assetView = null;
   let stageViews = {};
+  let budgetState = null;
+  let runLockState = null;
   let adjustments = {};
   let busy = false;
   let sequence = 0;
@@ -258,6 +351,7 @@ export function createWorkspaceStagesPanel(options) {
       ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
       ${stagePath(task, stage)}
       <div class="production-stage-notice ${stagePosition(task, stage)}"><svg class="icon" aria-hidden="true"><use href="#i-spark" /></svg><span>${notice(stage)}</span></div>
+      ${["video_preview", "delivery"].includes(stage) ? productionStatusStrip(budgetState, runLockState) : ""}
       <div class="production-stage-body">${body}</div>
     </div>`;
     root.querySelectorAll("[data-planning-stage]").forEach(function (button) {
@@ -283,6 +377,9 @@ export function createWorkspaceStagesPanel(options) {
     if (!root || !stage || !projectId || !task) return;
     renderLoading(root);
     try {
+      const productionStatusPromise = ["video_preview", "delivery"].includes(stage)
+        ? Promise.allSettled([options.api.getOwnBudget(), options.api.getProductionStatus()])
+        : null;
       if (stage === "delivery") {
         const results = await Promise.all(stageOrder.map(function (item) { return options.api.getStageVersions(projectId, task.id, item); }));
         if (loadSequence !== sequence) return;
@@ -295,6 +392,20 @@ export function createWorkspaceStagesPanel(options) {
         if (loadSequence !== sequence) return;
         view = results[0];
         if (stage === "storyboard") assetView = results[1];
+      }
+      if (productionStatusPromise) {
+        const productionResults = await productionStatusPromise;
+        if (loadSequence !== sequence) return;
+        try {
+          budgetState = productionResults[0].status === "fulfilled"
+            ? { presentation: workspaceBudgetPresentation(productionResults[0].value.budget, options.getCurrentAccountId?.()) }
+            : { error: productionResults[0].reason };
+        } catch (error) { budgetState = { error: error }; }
+        try {
+          runLockState = productionResults[1].status === "fulfilled"
+            ? { presentation: workspaceRunLockPresentation(productionResults[1].value, task.id) }
+            : { error: productionResults[1].reason };
+        } catch (error) { runLockState = { error: error }; }
       }
       task = { ...task, ...view.videoTask };
       render();
@@ -408,6 +519,8 @@ export function createWorkspaceStagesPanel(options) {
       view = null;
       assetView = null;
       stageViews = {};
+      budgetState = null;
+      runLockState = null;
       adjustments = {};
       void loadStage();
     },

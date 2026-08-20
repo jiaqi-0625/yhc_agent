@@ -25,6 +25,18 @@
 .production-stage-notice .icon { width: 13px; height: 13px; }
 .production-stage-body { min-height: 350px; }
 
+.production-status-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.production-status-strip > p { grid-column: 1 / -1; margin: -1px 1px 0; color: var(--muted-foreground); font-size: 8px; }
+.production-status-card { position: relative; display: grid; min-width: 0; min-height: 72px; align-content: center; gap: 4px; padding: 10px 12px 10px 15px; overflow: hidden; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--card); }
+.production-status-card::before { position: absolute; inset: 9px auto 9px 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--border); content: ""; }
+.production-status-card > span, .production-status-card > small { overflow: hidden; color: var(--muted-foreground); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.production-status-card > strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.production-status-card.success::before { background: var(--success); }
+.production-status-card.warning::before, .production-status-card.pending::before { background: var(--warning); }
+.production-status-card.danger::before { background: var(--destructive); }
+.production-status-card.danger > strong { color: var(--destructive); }
+.production-status-card.pending > strong { color: var(--warning); }
+
 .production-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); }
 .production-card h3 { margin: 0; font-size: 11px; }
 .stage-mini-status { display: inline-flex; min-height: 20px; align-items: center; padding: 0 7px; border-radius: 999px; color: var(--muted-foreground); background: var(--muted); font-size: 8px; font-style: normal; white-space: nowrap; }
@@ -140,6 +152,7 @@
   .storyboard-shot { grid-template-columns: 112px minmax(0, 1fr); }
   .shot-assets { grid-template-columns: 1fr; }
   .preview-player { min-height: 350px; }
+  .production-status-card { padding-right: 9px; padding-left: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
