@@ -392,6 +392,44 @@ export function agentActionFailurePresentation(error) {
   };
 }
 
+export async function executeAgentActionCommand(
+  proposal,
+  context,
+  requestId,
+  executionBlocked = false,
+  executeCommand = agentApi.executeCommand,
+) {
+  const stableRequestId = requestId || createAgentActionRequestId();
+  if (executionBlocked) {
+    return { kind: "blocked", requestId: stableRequestId };
+  }
+  try {
+    const response = await executeCommand(
+      context.projectId,
+      context.videoTaskId,
+      agentActionRequestBody(proposal, stableRequestId),
+    );
+    return {
+      kind: "success",
+      requestId: stableRequestId,
+      response,
+      presentation: agentActionSuccessPresentation(
+        proposal,
+        stableRequestId,
+        context.projectId,
+        context.accountId,
+        response,
+      ),
+    };
+  } catch (error) {
+    return {
+      kind: "failure",
+      requestId: stableRequestId,
+      presentation: agentActionFailurePresentation(error),
+    };
+  }
+}
+
 const panelMinimumWidth = 320;
 const panelMaximumWidth = 560;
 const panelResizerWidth = 6;

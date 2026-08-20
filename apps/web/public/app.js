@@ -2,12 +2,9 @@ import { agentApi } from "./agent-api.js";
 import { createAssetMatchingPanel } from "./asset-matching.js";
 import {
   agentActionAvailability,
-  agentActionFailurePresentation,
-  agentActionRequestBody,
-  agentActionSuccessPresentation,
   agentBudgetPresentation,
   bindAgentPanel,
-  createAgentActionRequestId,
+  executeAgentActionCommand,
   extractAgentActionCard,
 } from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
@@ -1118,7 +1115,12 @@ async function refreshAgentContextAfterCommand(sessionId, videoTaskId, expectedS
 }
 
 async function executeActionProposal(card, proposal) {
-  if (state.busy || state.workflowBusy) return;
+  if (
+    state.busy
+    || state.workflowBusy
+    || card.dataset.executionBlocked === "true"
+    || card.dataset.executed === "true"
+  ) return;
   const button = card.querySelector("button");
   const status = card.querySelector(".agent-action-status");
   const result = card.querySelector(".agent-action-result");
@@ -1147,36 +1149,33 @@ async function executeActionProposal(card, proposal) {
   delete card.dataset.executionBlocked;
   card.classList.remove("failed");
   try {
-    const requestId = card.dataset.commandRequestId || createAgentActionRequestId();
-    card.dataset.commandRequestId = requestId;
-    const response = await agentApi.executeCommand(
-      context.projectId,
-      context.videoTaskId,
-      agentActionRequestBody(proposal, requestId),
-    );
-    const presentation = agentActionSuccessPresentation(
+    const execution = await executeAgentActionCommand(
       proposal,
-      requestId,
-      context.projectId,
-      context.accountId,
-      response,
+      context,
+      card.dataset.commandRequestId,
+      card.dataset.executionBlocked === "true",
     );
-    applyAgentCommandRevision(response, context);
-    status.textContent = presentation.status;
-    result.textContent = presentation.message;
-    result.hidden = false;
-    card.dataset.commandReceiptId = presentation.receiptId;
-    card.dataset.commandReplayed = String(presentation.replayed);
-    card.dataset.executed = "true";
-    card.classList.add("completed");
-    void refreshAgentContextAfterCommand(
-      context.sessionId,
-      context.videoTaskId,
-      context.scopeGeneration,
-    );
-    elements.messages.scrollTop = elements.messages.scrollHeight;
-  } catch (error) {
-    const failure = agentActionFailurePresentation(error);
+    card.dataset.commandRequestId = execution.requestId;
+    if (execution.kind === "blocked") return;
+    if (execution.kind === "success") {
+      const { presentation, response } = execution;
+      applyAgentCommandRevision(response, context);
+      status.textContent = presentation.status;
+      result.textContent = presentation.message;
+      result.hidden = false;
+      card.dataset.commandReceiptId = presentation.receiptId;
+      card.dataset.commandReplayed = String(presentation.replayed);
+      card.dataset.executed = "true";
+      card.classList.add("completed");
+      void refreshAgentContextAfterCommand(
+        context.sessionId,
+        context.videoTaskId,
+        context.scopeGeneration,
+      );
+      elements.messages.scrollTop = elements.messages.scrollHeight;
+      return;
+    }
+    const failure = execution.presentation;
     status.textContent = failure.status;
     result.textContent = failure.message;
     result.hidden = false;

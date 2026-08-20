@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -262,10 +262,12 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.ok(start >= 0 && end > start);
   const commandWiring = source.slice(start, end);
   assert.match(commandWiring, /currentSelectedVideoTaskId\(\) !== context\.videoTask\.id/u);
-  assert.match(commandWiring, /if \(state\.busy \|\| state\.workflowBusy\) return;/u);
+  assert.match(commandWiring, /state\.busy[\s\S]*\|\| state\.workflowBusy/u);
   assert.match(commandWiring, /context\.scopeGeneration !== expectedContext\.scopeGeneration/u);
   assert.match(commandWiring, /response\.videoTask\.revision < context\.revision/u);
-  assert.match(commandWiring, /agentApi\.executeCommand/u);
+  assert.match(commandWiring, /executeAgentActionCommand/u);
+  assert.match(commandWiring, /card\.dataset\.executionBlocked === "true"/u);
+  assert.match(commandWiring, /card\.dataset\.executed === "true"/u);
   assert.doesNotMatch(commandWiring, /\/v1\/works\//u);
   assert.match(source, /state\.busy \|\| state\.workflowBusy, card\.dataset\.executionBlocked/u);
 
@@ -428,4 +430,90 @@ test("Agent action failures never invite a duplicate when the server reports a c
     blocksCard: true,
     stale: false,
   });
+});
+
+test("Agent action HTTP business failures surface card states and block a second command", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const actionContext = {
+    projectId: "project_1",
+    videoTaskId: "task_1",
+    accountId: "account_creator_a",
+  };
+  const cases: Array<[string, string]> = [
+    ["AIC-WORKFLOW-REVISION_CONFLICT", "已失效"],
+    ["AIC-AUTH-TASK_OWNER_REQUIRED", "无执行权限"],
+    ["AIC-COST-BUDGET_EXCEEDED", "额度不足"],
+    ["AIC-AGENT-COMMAND-STATE_CONFLICT", "状态冲突"],
+  ];
+  for (const [code, expectedStatus] of cases) {
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return Response.json({
+        code,
+        message: "internal server detail",
+        retryable: false,
+        charged: false,
+      }, { status: 409 });
+    }) as typeof fetch;
+    const first = await executeAgentActionCommand(
+      generationCard,
+      actionContext,
+      "agent_action_http_failure",
+    );
+    assert.equal(first.kind, "failure");
+    if (first.kind !== "failure") continue;
+    assert.equal(first.presentation.status, expectedStatus);
+    assert.equal(first.presentation.blocksCard, true);
+    assert.doesNotMatch(first.presentation.message, /AIC-|internal server detail/u);
+
+    const second = await executeAgentActionCommand(
+      generationCard,
+      actionContext,
+      first.requestId,
+      first.presentation.blocksCard,
+    );
+    assert.deepEqual(second, {
+      kind: "blocked",
+      requestId: "agent_action_http_failure",
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test("Agent action transport failure retries only explicitly and reuses its request ID", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  const requestIds: string[] = [];
+  globalThis.fetch = (async (_input, init) => {
+    requestIds.push((JSON.parse(String(init?.body)) as { requestId: string }).requestId);
+    throw new TypeError("fetch failed");
+  }) as typeof fetch;
+  const actionContext = {
+    projectId: "project_1",
+    videoTaskId: "task_1",
+    accountId: "account_creator_a",
+  };
+  const first = await executeAgentActionCommand(
+    generationCard,
+    actionContext,
+    "agent_action_transport_retry",
+  );
+  assert.equal(first.kind, "failure");
+  if (first.kind !== "failure") return;
+  assert.equal(first.presentation.blocksCard, false);
+  assert.equal(requestIds.length, 1);
+
+  const explicitRetry = await executeAgentActionCommand(
+    generationCard,
+    actionContext,
+    first.requestId,
+    first.presentation.blocksCard,
+  );
+  assert.equal(explicitRetry.kind, "failure");
+  assert.deepEqual(requestIds, [
+    "agent_action_transport_retry",
+    "agent_action_transport_retry",
+  ]);
 });
