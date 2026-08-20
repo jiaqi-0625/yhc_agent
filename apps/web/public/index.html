@@ -6,9 +6,10 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=asset-matching-ws406-v1" />
-    <link rel="stylesheet" href="/workspace-frame.css?build=asset-matching-ws406-v1" />
-    <link rel="stylesheet" href="/asset-matching.css?build=asset-matching-ws406-v1" />
+    <link rel="stylesheet" href="/app.css?build=workspace-stages-ws407-v1" />
+    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-stages-ws407-v1" />
+    <link rel="stylesheet" href="/asset-matching.css?build=workspace-stages-ws407-v1" />
+    <link rel="stylesheet" href="/workspace-stages.css?build=workspace-stages-ws407-v1" />
     <link rel="stylesheet" href="/agent-panel.css?build=workspace-details-ws405-v1" />
   </head>
   <body>
@@ -266,15 +267,7 @@
                 </section>
               </section>
 
-              <section class="workspace-module-panel" data-workspace-frame-panel="planning">
-                <div>
-                  <header class="workspace-module-heading"><h2 id="workspace-frame-module-title">策划</h2></header>
-                  <div class="workspace-stage-path" aria-label="视频制作流程">
-                    <span class="active">营销策略</span><span>脚本</span><span>资产匹配</span><span>分镜</span><span>视频预览</span><span>交付</span>
-                  </div>
-                </div>
-                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-grid" /></svg><strong>策划工作区</strong><span>暂无内容</span></div></div>
-              </section>
+              <section id="workspace-planning-panel" class="workspace-module-panel workspace-production-panel" data-workspace-frame-panel="planning" aria-live="polite"></section>
               <section class="workspace-module-panel" data-workspace-frame-panel="assets" hidden>
                 <div id="asset-matching-panel" class="asset-matching-panel" aria-live="polite">
                   <header class="asset-matching-header">
@@ -306,18 +299,9 @@
                   </div>
                 </div>
               </section>
-              <section class="workspace-module-panel" data-workspace-frame-panel="storyboard" hidden>
-                <header class="workspace-module-heading"><h2>分镜</h2></header>
-                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-image" /></svg><strong>分镜工作区</strong><span>暂无内容</span></div></div>
-              </section>
-              <section class="workspace-module-panel" data-workspace-frame-panel="production" hidden>
-                <header class="workspace-module-heading"><h2>制作</h2></header>
-                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg><strong>制作工作区</strong><span>暂无内容</span></div></div>
-              </section>
-              <section class="workspace-module-panel" data-workspace-frame-panel="delivery" hidden>
-                <header class="workspace-module-heading"><h2>交付</h2></header>
-                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg><strong>交付工作区</strong><span>暂无内容</span></div></div>
-              </section>
+              <section id="workspace-storyboard-panel" class="workspace-module-panel workspace-production-panel" data-workspace-frame-panel="storyboard" aria-live="polite" hidden></section>
+              <section id="workspace-production-panel" class="workspace-module-panel workspace-production-panel" data-workspace-frame-panel="production" aria-live="polite" hidden></section>
+              <section id="workspace-delivery-panel" class="workspace-module-panel workspace-production-panel" data-workspace-frame-panel="delivery" aria-live="polite" hidden></section>
             </div>
           </section>
 
@@ -591,6 +575,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="/app.js?build=asset-matching-ws406-v1"></script>
+    <script type="module" src="/app.js?build=workspace-stages-ws407-v1"></script>
   </body>
 </html>

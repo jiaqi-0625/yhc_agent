@@ -99,6 +99,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   const [
     styleResponse,
     workspaceFrameStyleResponse,
+    workspaceStagesStyleResponse,
     agentStyleResponse,
     scriptResponse,
     authApiResponse,
@@ -107,11 +108,13 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     workspaceApiResponse,
     workspaceShellResponse,
     workspaceFrameResponse,
+    workspaceStagesResponse,
     projectLibraryResponse,
     projectWizardResponse,
   ] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
     fetch(`${baseUrl}/workspace-frame.css`),
+    fetch(`${baseUrl}/workspace-stages.css`),
     fetch(`${baseUrl}/agent-panel.css`),
     fetch(`${baseUrl}/app.js`),
     fetch(`${baseUrl}/auth-api.js`),
@@ -120,6 +123,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     fetch(`${baseUrl}/workspace-api.js`),
     fetch(`${baseUrl}/workspace-shell.js`),
     fetch(`${baseUrl}/workspace-frame.js`),
+    fetch(`${baseUrl}/workspace-stages.js`),
     fetch(`${baseUrl}/project-library.js`),
     fetch(`${baseUrl}/project-creation-wizard.js`),
   ]);
@@ -127,6 +131,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
   assert.equal(workspaceFrameStyleResponse.status, 200);
   assert.match(await workspaceFrameStyleResponse.text(), /\.project-workspace-page/u);
+  assert.equal(workspaceStagesStyleResponse.status, 200);
+  assert.match(await workspaceStagesStyleResponse.text(), /\.production-stage-shell/u);
   assert.equal(agentStyleResponse.status, 200);
   assert.match(await agentStyleResponse.text(), /\.agent-action-card/u);
   assert.equal(scriptResponse.status, 200);
@@ -137,6 +143,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(workspaceApiResponse.status, 200);
   assert.equal(workspaceShellResponse.status, 200);
   assert.equal(workspaceFrameResponse.status, 200);
+  assert.equal(workspaceStagesResponse.status, 200);
   assert.equal(projectLibraryResponse.status, 200);
   assert.equal(projectWizardResponse.status, 200);
   const script = await scriptResponse.text();

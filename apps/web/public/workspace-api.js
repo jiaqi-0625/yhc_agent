@@ -57,6 +57,35 @@ export const workspaceApi = {
       jsonOptions("POST", input),
     );
   },
+  getStageVersions: function (projectId, videoTaskId, stage) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/" + encodeURIComponent(stage) + "/versions",
+    );
+  },
+  getStageInvalidations: function (projectId, videoTaskId) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/stage-invalidations",
+    );
+  },
+  confirmStage: function (projectId, videoTaskId, stage, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/" + encodeURIComponent(stage) + "/confirmations",
+      jsonOptions("POST", input),
+    );
+  },
+  rollbackStage: function (projectId, videoTaskId, stage, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/" + encodeURIComponent(stage) + "/rollbacks",
+      jsonOptions("POST", input),
+    );
+  },
   listWorks: function () { return api("/v1/works"); },
   getWork: function (workId) { return api("/v1/works/" + encodeURIComponent(workId)); },
   createWork: function (input) { return api("/v1/works", jsonOptions("POST", input)); },
