@@ -93,7 +93,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /viewport-notice/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /workspace-frame-ws404/u);
+  assert.match(page, /workspace-details-ws405/u);
   assert.match(page, /type="module"/u);
 
   const [

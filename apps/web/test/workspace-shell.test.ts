@@ -151,6 +151,9 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(page, /class="workspace-project-rail"[^>]*aria-label="项目与视频任务"/u);
   assert.match(page, /class="workspace-main-surface"[^>]*aria-label="工作区主区域"/u);
   assert.match(page, /class="workspace-agent-slot"[^>]*aria-label="萤火虫助手"/u);
+  assert.match(page, /id="workspace-frame-overview-panel"[^>]*aria-labelledby="workspace-frame-overview-title"/u);
+  assert.match(page, />项目信息<\/h3>[\s\S]*>任务概况<\/h3>[\s\S]*>视频任务<\/h3>/u);
+  assert.match(page, />任务<\/span><span>当前阶段<\/span><span>状态<\/span><span>负责人<\/span><span>更新<\/span>/u);
   assert.match(page, />策划<\/button>[\s\S]*>资产<\/button>[\s\S]*>分镜<\/button>[\s\S]*>制作<\/button>[\s\S]*>交付<\/button>/u);
   assert.match(page, />营销策略<\/span><span>脚本<\/span><span>资产匹配<\/span><span>分镜<\/span><span>视频预览<\/span><span>交付<\/span>/u);
   assert.match(page, /请使用桌面端打开/u);
@@ -160,5 +163,6 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(styles, /\.app-shell \{ display: none; \}/u);
   assert.match(workspaceFrameStyles, /grid-template-columns: 248px minmax\(0, 1fr\) 356px/u);
   assert.match(workspaceFrameStyles, /grid-template-columns: 220px minmax\(0, 1fr\) 320px/u);
+  assert.match(workspaceFrameStyles, /\.workspace-overview-task-row/u);
   assert.match(page, /id="brand-navigation-status"[^>]*role="status"[^>]*aria-live="polite"/u);
 });

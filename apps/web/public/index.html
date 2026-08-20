@@ -6,9 +6,9 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-frame-ws404-v1" />
-    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-frame-ws404-v1" />
-    <link rel="stylesheet" href="/agent-panel.css?build=workspace-frame-ws404-v1" />
+    <link rel="stylesheet" href="/app.css?build=workspace-details-ws405-v1" />
+    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-details-ws405-v1" />
+    <link rel="stylesheet" href="/agent-panel.css?build=workspace-details-ws405-v1" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -222,6 +222,49 @@
             </header>
 
             <div class="workspace-module-content">
+              <section id="workspace-frame-overview-panel" class="workspace-overview-panel" aria-labelledby="workspace-frame-overview-title">
+                <header class="workspace-overview-heading">
+                  <div>
+                    <h2 id="workspace-frame-overview-title">项目概览</h2>
+                    <p id="workspace-frame-overview-name">—</p>
+                  </div>
+                  <span id="workspace-frame-overview-status" class="badge neutral">—</span>
+                </header>
+
+                <div class="workspace-overview-grid">
+                  <section class="workspace-overview-card" aria-labelledby="workspace-frame-project-info-title">
+                    <h3 id="workspace-frame-project-info-title">项目信息</h3>
+                    <dl class="workspace-overview-facts">
+                      <div><dt>品牌</dt><dd id="workspace-frame-overview-brand">—</dd></div>
+                      <div><dt>车型</dt><dd id="workspace-frame-overview-vehicle">—</dd></div>
+                      <div><dt>画幅</dt><dd id="workspace-frame-overview-ratio">—</dd></div>
+                      <div><dt>车型事实</dt><dd id="workspace-frame-overview-vehicle-version">—</dd></div>
+                    </dl>
+                  </section>
+
+                  <section class="workspace-overview-card" aria-labelledby="workspace-frame-task-summary-title">
+                    <h3 id="workspace-frame-task-summary-title">任务概况</h3>
+                    <dl class="workspace-overview-metrics">
+                      <div><dt>全部任务</dt><dd id="workspace-frame-overview-task-total">0</dd></div>
+                      <div><dt>进行中</dt><dd id="workspace-frame-overview-task-active">0</dd></div>
+                      <div><dt>待确认</dt><dd id="workspace-frame-overview-task-pending">0</dd></div>
+                      <div><dt>由我负责</dt><dd id="workspace-frame-overview-task-mine">0</dd></div>
+                    </dl>
+                  </section>
+                </div>
+
+                <section class="workspace-overview-tasks" aria-labelledby="workspace-frame-overview-task-list-title">
+                  <header>
+                    <h3 id="workspace-frame-overview-task-list-title">视频任务</h3>
+                    <span id="workspace-frame-overview-updated">最近更新 —</span>
+                  </header>
+                  <div class="workspace-overview-task-columns" aria-hidden="true">
+                    <span>任务</span><span>当前阶段</span><span>状态</span><span>负责人</span><span>更新</span>
+                  </div>
+                  <div id="workspace-frame-overview-task-list" class="workspace-overview-task-list"></div>
+                </section>
+              </section>
+
               <section class="workspace-module-panel" data-workspace-frame-panel="planning">
                 <div>
                   <header class="workspace-module-heading"><h2 id="workspace-frame-module-title">策划</h2></header>
@@ -505,6 +548,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/app.js?build=workspace-frame-ws404-v1"></script>
+    <script type="module" src="/app.js?build=workspace-details-ws405-v1"></script>
   </body>
 </html>
