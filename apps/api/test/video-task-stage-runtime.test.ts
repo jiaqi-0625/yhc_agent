@@ -535,6 +535,94 @@ test("asset matching confirmation atomically locks the exact server-composed sna
   assert.deepEqual(await value.tasks.load(value.taskId), persisted);
 });
 
+test("WS-503 acceptance path reaches delivery through all six human confirmation gates", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+
+  const confirmations: StageConfirmation[] = [];
+  const strategy = await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_ws503_confirm_strategy",
+    expectedTaskRevision: 3,
+    comment: "人工确认策略。",
+  }, value.creator);
+  confirmations.push(strategy.confirmation);
+
+  const submitArtifactStage = async (
+    stage: "script" | "storyboard" | "video_preview" | "delivery",
+    expectedTaskRevision: number,
+  ) => {
+    const current = await value.tasks.load(value.taskId);
+    assert.ok(current);
+    assert.equal(current.videoTask.currentStage, stage);
+    await value.tasks.save({
+      ...structuredClone(current),
+      videoTask: {
+        ...structuredClone(current.videoTask),
+        stageStatus: "awaiting_confirmation",
+      },
+    });
+    return value.stages.confirmStage(project.id, value.taskId, stage, {
+      requestId: `request_ws503_confirm_${stage}`,
+      expectedTaskRevision,
+      artifact: {
+        artifactId: `mock_ws503_${stage}_artifact`,
+        schemaName: `mock_ws503_${stage}_artifact`,
+        schemaVersion: 1,
+        contentHashSha256: expectedTaskRevision.toString(16).padStart(64, "0"),
+      },
+      comment: "WS-503 自动化中的模拟产物，仅用于验证人工确认链路。",
+    }, value.creator);
+  };
+
+  const script = await submitArtifactStage("script", 4);
+  confirmations.push(script.confirmation);
+
+  const assets = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    {
+      requestId: "request_ws503_confirm_asset_matching",
+      expectedTaskRevision: 5,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 1,
+        selectedAssets: selectedReusableAssets(),
+      },
+      comment: "人工确认人物与场景素材。",
+    },
+    value.creator,
+  );
+  confirmations.push(assets.confirmation);
+
+  const storyboard = await submitArtifactStage("storyboard", 6);
+  confirmations.push(storyboard.confirmation);
+  const preview = await submitArtifactStage("video_preview", 7);
+  confirmations.push(preview.confirmation);
+  const delivery = await submitArtifactStage("delivery", 8);
+  confirmations.push(delivery.confirmation);
+
+  const completed = await value.tasks.load(value.taskId);
+  assert.ok(completed);
+  assert.equal(completed.videoTask.status, "completed");
+  assert.equal(completed.videoTask.currentStage, "delivery");
+  assert.equal(completed.videoTask.stageStatus, "confirmed");
+  assert.equal(completed.videoTask.revision, 9);
+  assert.deepEqual(
+    confirmations.map(({ stage, source }) => ({ stage, source })),
+    [
+      { stage: "strategy", source: "human_action" },
+      { stage: "script", source: "human_action" },
+      { stage: "asset_matching", source: "human_action" },
+      { stage: "storyboard", source: "human_action" },
+      { stage: "video_preview", source: "human_action" },
+      { stage: "delivery", source: "human_action" },
+    ],
+  );
+  assert.equal(completed.stageArtifactVersions.length, 6);
+  assert.equal(completed.stageConfirmations.length, 6);
+  assert.equal(completed.taskAssetSnapshots.length, 1);
+});
+
 test("a persisted awaiting asset selection remains confirmable through the canonical transaction", async () => {
   const value = await fixture();
   await prepareAssetMatchingApproval(value);

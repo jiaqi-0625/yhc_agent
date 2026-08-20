@@ -418,6 +418,7 @@ export function createApiServer(
   readiness: ApiReadinessProbe = alwaysReady,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
+  environment: ApiEnvironment = process.env,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -446,7 +447,7 @@ export function createApiServer(
   }
   const adminStore = workspaceSessions === undefined
     ? new LocalWorkspaceAdminStore(
-        process.env.WORKSPACE_ADMIN_DATA_DIRECTORY ?? ".data/workspace-admin",
+        environment.WORKSPACE_ADMIN_DATA_DIRECTORY ?? ".data/workspace-admin",
         {
           brands: DEFAULT_ADMIN_BRANDS,
           vehicleVersions: DEFAULT_ADMIN_VEHICLES,
@@ -457,7 +458,7 @@ export function createApiServer(
     : undefined;
   const activeWorkspaceSessions = workspaceSessions ?? new WorkspaceSessionRuntime(
     new LocalWorkspaceSessionStore(
-      process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
+      environment.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
     ),
     adminStore!,
   );
@@ -466,7 +467,7 @@ export function createApiServer(
     workspaceSessions === undefined
       ? new AccountRunLockRuntime(
           new LocalAccountRunLockStore(
-            process.env.ACCOUNT_RUN_LOCK_DATA_DIRECTORY ?? ".data/account-run-locks",
+            environment.ACCOUNT_RUN_LOCK_DATA_DIRECTORY ?? ".data/account-run-locks",
           ),
         )
       : undefined
@@ -475,7 +476,7 @@ export function createApiServer(
     adminStore,
     new AccountBudgetRuntime(
       new LocalAccountBudgetStore(
-        process.env.ACCOUNT_BUDGET_DATA_DIRECTORY ?? ".data/account-budgets",
+        environment.ACCOUNT_BUDGET_DATA_DIRECTORY ?? ".data/account-budgets",
       ),
       {
         async estimate() {
@@ -487,7 +488,7 @@ export function createApiServer(
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
   const batchProjectStore = adminStore === undefined ? undefined : new LocalBatchProjectStore(
-    process.env.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
+    environment.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
   );
   const activeProjectCreation = projectCreation ?? (adminStore === undefined ? undefined : new ProjectCreationRuntime(
     adminStore,
@@ -495,10 +496,10 @@ export function createApiServer(
     companyAssetProvider,
   ));
   const videoTaskStore = adminStore === undefined ? undefined : new LocalVideoTaskProductionStore(
-    process.env.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
+    environment.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
   );
   const temporaryAssetStore = adminStore === undefined ? undefined : new LocalTemporaryAssetStore(
-    process.env.TEMPORARY_ASSET_DATA_DIRECTORY ?? ".data/temporary-assets",
+    environment.TEMPORARY_ASSET_DATA_DIRECTORY ?? ".data/temporary-assets",
   );
   const activeVideoTasks = videoTasks ?? (adminStore === undefined ? undefined : new VideoTaskRuntime(
     adminStore,
@@ -591,7 +592,7 @@ export function createApiServer(
         });
   const activeRuntime = runtime ?? createBusinessAgentRuntime(
     business,
-    loadLocalAgentConfig(),
+    loadLocalAgentConfig(environment),
     {
       disableLegacyStrategyTools: legacyWritesDisabled,
       ...(legacyWritesDisabled
@@ -738,6 +739,7 @@ export async function startApiServer(
   forceLegacyWritesDisabled = false,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
+  environment: ApiEnvironment = process.env,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -762,6 +764,7 @@ export async function startApiServer(
       readiness,
       assetMatching,
       accountRunLocks,
+      environment,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -880,8 +883,11 @@ export async function startConfiguredApiServer(
       undefined,
       migrationStateDirectory,
       undefined,
-      undefined,
+      alwaysReady,
       true,
+      undefined,
+      undefined,
+      environment,
     );
   }
 
@@ -935,6 +941,7 @@ export async function startConfiguredApiServer(
       true,
       postgres.assetMatching,
       postgres.accountRunLocks,
+      environment,
     );
     attachPostgresLifecycle(
       server,
