@@ -12,6 +12,8 @@ import {
 } from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
+import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
+import { createManagementCenter } from "./management-center.js?build=management-center-ws409-v3";
 import {
   applyProjectLibraryTaskUpdate,
   bindProjectLibrary,
@@ -70,6 +72,7 @@ let agentSelectionRequest = 0;
 let workspaceFrame = null;
 let assetMatchingPanel = null;
 let workspaceStagesPanel = null;
+let managementCenter = null;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -1422,6 +1425,10 @@ function renderAccount() {
   elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || "未知角色" : "—";
   const displayName = state.account?.displayName || "";
   elements.accountAvatar.textContent = Array.from(displayName.trim())[0] || "账";
+  managementCenter?.setAccount(
+    state.account,
+    state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy?.() || state.workspaceHydrating,
+  );
 }
 
 function renderNavigationBrands() {
@@ -2154,6 +2161,35 @@ const projectCreationWizard = createProjectCreationWizard({
     await loadProjectLibrary(captureWorkspaceScope());
   },
 });
+
+const managementBrandSwitcher = document.querySelector(".topbar-brand-switcher");
+managementCenter = createManagementCenter({
+  api: managementApi,
+  topbarTitle: elements.topbarWorkName,
+  getProjects: function () { return state.projectLibrary; },
+  onBeforeOpen: function () {
+    workspaceFrame?.close({ historyMode: "replace" });
+    projectCreationWizard.close();
+    elements.libraryView.hidden = true;
+    elements.projectCreationView.hidden = true;
+    elements.projectWorkspaceView.hidden = true;
+    elements.workspaceShell.hidden = true;
+    if (managementBrandSwitcher) managementBrandSwitcher.hidden = true;
+  },
+  onAfterClose: function () {
+    elements.libraryView.hidden = false;
+    if (managementBrandSwitcher) managementBrandSwitcher.hidden = false;
+    renderProjectLibraryPage();
+  },
+  onCatalogChanged: async function () {
+    await loadNavigationBrands();
+    await loadProjectLibrary(captureWorkspaceScope());
+  },
+});
+managementCenter.setAccount(
+  state.account,
+  state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy?.() || state.workspaceHydrating,
+);
 
 bindWorkspaceShell({
   elements,

@@ -1,0 +1,2147 @@
+.management-entry {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.management-entry:hover,
+.management-entry[aria-expanded="true"] {
+  border-color: color-mix(in oklch, var(--primary) 44%, var(--border));
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.management-entry .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.management-center-page {
+  position: fixed;
+  inset: 64px 0 0;
+  display: grid;
+  width: 100%;
+  height: calc(100dvh - 64px);
+  min-width: 0;
+  min-height: 0;
+  grid-template-columns: 232px minmax(0, 1fr);
+  overflow: hidden;
+  color: var(--foreground);
+  background: var(--background);
+}
+
+.management-sidebar {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  padding: 20px 14px 16px;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+  color: var(--sidebar-foreground);
+  background: var(--sidebar);
+}
+
+.management-sidebar-brand {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-sidebar-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid color-mix(in oklch, var(--primary) 34%, var(--border));
+  border-radius: var(--radius);
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, var(--sidebar));
+}
+
+.management-sidebar-mark .icon {
+  width: 17px;
+  height: 17px;
+}
+
+.management-sidebar-brand > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.management-sidebar-brand strong {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.management-sidebar-brand div span {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: .08em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.management-navigation {
+  display: grid;
+  gap: 3px;
+  margin-top: 16px;
+}
+
+.management-navigation button {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 560;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+
+.management-navigation button::before {
+  position: absolute;
+  left: -7px;
+  width: 2px;
+  height: 18px;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+}
+
+.management-navigation button:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.management-navigation button.active {
+  border-color: color-mix(in oklch, var(--primary) 28%, var(--border));
+  color: var(--accent-foreground);
+  background: var(--sidebar-accent);
+}
+
+.management-navigation button.active::before {
+  background: var(--primary);
+}
+
+.management-navigation .icon {
+  width: 15px;
+  height: 15px;
+}
+
+.management-security-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: auto;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted) 58%, transparent);
+}
+
+.management-security-note > .icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--success);
+}
+
+.management-security-note div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.management-security-note strong {
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.management-security-note span {
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.management-workbench {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--background);
+}
+
+.management-page-header {
+  display: grid;
+  min-height: 82px;
+  grid-template-columns: 126px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 22px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklch, var(--card) 86%, var(--background));
+}
+
+.management-back {
+  display: inline-flex;
+  width: fit-content;
+  min-height: 30px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--muted-foreground);
+  background: transparent;
+  font-size: 10px;
+  cursor: pointer;
+  transition: color 160ms ease, background 160ms ease;
+}
+
+.management-back:hover {
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.management-back span:first-child {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.management-heading {
+  min-width: 0;
+}
+
+.management-eyebrow,
+.management-kicker {
+  color: var(--primary);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+}
+
+.management-eyebrow {
+  margin: 0 0 6px;
+}
+
+.management-heading > div {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.management-heading h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 720;
+  letter-spacing: -.035em;
+  white-space: nowrap;
+}
+
+.management-heading div p {
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-header-actions,
+.management-inline-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.management-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.management-button .icon {
+  width: 13px;
+  height: 13px;
+}
+
+.management-button:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+.management-button.primary {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.management-button.primary:hover {
+  background: color-mix(in oklch, var(--primary) 88%, var(--foreground));
+}
+
+.management-button.secondary:hover,
+.management-button.ghost:hover {
+  border-color: color-mix(in oklch, var(--primary) 42%, var(--border));
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.management-button.ghost {
+  border-color: transparent;
+  background: transparent;
+}
+
+.management-button.danger {
+  border-color: var(--destructive);
+  color: var(--destructive-foreground);
+  background: var(--destructive);
+}
+
+.management-button.danger:hover {
+  background: color-mix(in oklch, var(--destructive) 88%, var(--foreground));
+}
+
+.management-button.danger-ghost {
+  border-color: color-mix(in oklch, var(--destructive) 28%, var(--border));
+  color: var(--destructive);
+  background: transparent;
+}
+
+.management-button.danger-ghost:hover {
+  border-color: color-mix(in oklch, var(--destructive) 52%, var(--border));
+  background: color-mix(in oklch, var(--destructive) 9%, var(--card));
+}
+
+.management-button:disabled,
+.management-navigation button:disabled,
+.management-master-row:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+  transform: none;
+}
+
+.management-entry:focus-visible,
+.management-navigation button:focus-visible,
+.management-back:focus-visible,
+.management-button:focus-visible,
+.management-master-row:focus-visible,
+.management-table-link:focus-visible,
+.management-missing-assets button:focus-visible,
+.management-dialog-close:focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--ring) 24%, transparent);
+  outline-offset: 1px;
+  box-shadow: none;
+}
+
+.management-alert {
+  display: flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 24px;
+  border-bottom: 1px solid color-mix(in oklch, var(--destructive) 34%, var(--border));
+  color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 8%, var(--card));
+  font-size: 10px;
+}
+
+.management-alert > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.management-alert .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.management-content {
+  min-width: 0;
+  min-height: 0;
+  padding: 22px 24px 36px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.management-card {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.management-asset-context,
+.management-consumption-card,
+.management-vehicle-table-card {
+  overflow: hidden;
+}
+
+.management-card-header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 17px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-card-header > div {
+  min-width: 0;
+}
+
+.management-card-header h2,
+.management-brand-summary h2,
+.management-budget-intro h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 690;
+  letter-spacing: -.02em;
+}
+
+.management-card-header p,
+.management-budget-intro p {
+  margin: 5px 0 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.management-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.management-metric-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.management-metric-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--primary);
+  background: var(--accent);
+}
+
+.management-metric-icon .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.management-metric-card > div {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 3px 10px;
+}
+
+.management-metric-card div > span {
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.management-metric-card strong {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  font-size: 22px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.04em;
+}
+
+.management-metric-card small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(340px, .86fr);
+  gap: 12px;
+}
+
+.management-consumption-list {
+  display: grid;
+  gap: 0;
+  padding: 0 17px;
+}
+
+.management-consumption-list > article {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-consumption-list > article:last-child {
+  border-bottom: 0;
+}
+
+.management-consumption-list article > header,
+.management-consumption-list article > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.management-consumption-list header div {
+  display: grid;
+  gap: 4px;
+}
+
+.management-consumption-list header strong {
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+
+.management-consumption-list header span,
+.management-consumption-list footer {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-consumption-list header b {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.management-progress {
+  height: 5px;
+  margin: 11px 0 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.management-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--primary);
+  transition: width 220ms ease;
+}
+
+.management-task-overview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.management-source-badge,
+.management-revision-badge,
+.management-badge {
+  display: inline-flex;
+  min-height: 21px;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: 8px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.management-source-badge .icon {
+  width: 11px;
+  height: 11px;
+  color: var(--success);
+}
+
+.management-revision-badge {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 550;
+  letter-spacing: .02em;
+}
+
+.management-badge.success {
+  border-color: color-mix(in oklch, var(--success) 36%, var(--border));
+  color: var(--success);
+  background: color-mix(in oklch, var(--success) 9%, var(--card));
+}
+
+.management-badge.muted {
+  color: var(--muted-foreground);
+}
+
+.management-task-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 18px 17px;
+}
+
+.management-task-metrics > div {
+  display: grid;
+  gap: 4px;
+  padding: 0 13px;
+  border-right: 1px solid var(--border);
+}
+
+.management-task-metrics > div:first-child {
+  padding-left: 0;
+}
+
+.management-task-metrics > div:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.management-task-metrics dt,
+.management-task-metrics span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-task-metrics dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 720;
+  font-variant-numeric: tabular-nums;
+}
+
+.management-boundary-callout,
+.management-boundary-banner,
+.management-form-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid color-mix(in oklch, var(--success) 30%, var(--border));
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  background: color-mix(in oklch, var(--success) 6%, var(--card));
+}
+
+.management-boundary-callout {
+  margin: auto 17px 17px;
+  padding: 11px 12px;
+}
+
+.management-boundary-callout > .icon,
+.management-boundary-banner > .icon,
+.management-form-callout > .icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: var(--success);
+}
+
+.management-boundary-callout p {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.management-boundary-callout strong,
+.management-boundary-banner strong {
+  color: var(--foreground);
+  font-size: 9px;
+}
+
+.management-boundary-callout span,
+.management-boundary-banner span {
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.management-master-detail {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 248px minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.management-master-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.management-master-panel > header {
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-master-panel > header > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.management-master-panel h2 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.management-master-panel header span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-master-panel > div {
+  display: grid;
+  gap: 2px;
+  max-height: calc(100dvh - 208px);
+  padding: 7px;
+  overflow-y: auto;
+}
+
+.management-master-row {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  min-height: 52px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.management-master-row:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+  background: var(--muted);
+}
+
+.management-master-row.selected {
+  border-color: color-mix(in oklch, var(--primary) 42%, var(--border));
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.management-master-avatar,
+.management-account-cell > span,
+.management-budget-dialog-summary > span {
+  display: grid;
+  place-items: center;
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--primary-foreground);
+  background: var(--primary);
+  font-size: 10px;
+  font-weight: 720;
+}
+
+.management-master-avatar {
+  width: 30px;
+  height: 30px;
+}
+
+.management-master-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.management-master-copy strong,
+.management-master-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-master-copy strong {
+  color: inherit;
+  font-size: 10px;
+}
+
+.management-master-copy small {
+  color: var(--muted-foreground);
+  font: 8px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.management-detail-stack {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.management-brand-summary {
+  padding: 16px 17px;
+}
+
+.management-brand-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.management-brand-summary .management-kicker {
+  display: block;
+  margin-bottom: 5px;
+}
+
+.management-summary-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 20px;
+  margin: 15px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.management-summary-facts > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.management-summary-facts > div.wide {
+  grid-column: 1 / -1;
+}
+
+.management-summary-facts dt {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-summary-facts dd {
+  min-width: 0;
+  margin: 0;
+  font-size: 9px;
+  text-align: right;
+}
+
+.management-summary-facts code,
+.management-missing-assets code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font: 8px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.management-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.management-table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+.management-table th {
+  height: 35px;
+  padding: 0 13px;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  font-size: 8px;
+  font-weight: 650;
+  letter-spacing: .025em;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.management-table td {
+  height: 54px;
+  padding: 9px 13px;
+  border-top: 1px solid var(--border);
+  color: var(--foreground);
+  font-size: 9px;
+  vertical-align: middle;
+}
+
+.management-table tbody tr:first-child td {
+  border-top: 0;
+}
+
+.management-table tbody tr.selected td {
+  background: color-mix(in oklch, var(--primary) 7%, var(--card));
+}
+
+.management-table tbody tr:hover td {
+  background: color-mix(in oklch, var(--muted) 62%, var(--card));
+}
+
+.management-table td > small,
+.management-table td > strong {
+  display: block;
+}
+
+.management-table td > small {
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-table time,
+.management-table td:nth-last-child(2) {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.management-table-link {
+  display: grid;
+  width: 100%;
+  gap: 3px;
+  padding: 2px;
+  border: 0;
+  border-radius: calc(var(--radius) - 4px);
+  color: var(--foreground);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.management-table-link strong {
+  font-size: 9px;
+}
+
+.management-table-link span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-table-link:hover strong {
+  color: var(--primary);
+}
+
+.management-vehicle-detail > .management-card-header {
+  align-items: flex-start;
+}
+
+.management-fact-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(220px, .65fr);
+  gap: 16px;
+  padding: 17px;
+}
+
+.management-fact-layout > section {
+  min-width: 0;
+}
+
+.management-fact-layout > section + section {
+  padding-left: 16px;
+  border-left: 1px solid var(--border);
+}
+
+.management-fact-layout h3,
+.management-version-history h3 {
+  margin: 0 0 11px;
+  font-size: 10px;
+}
+
+.management-parameter-list,
+.management-claim-counts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--border);
+}
+
+.management-parameter-list > div,
+.management-claim-counts > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 9px;
+  background: var(--card);
+}
+
+.management-parameter-list dt,
+.management-claim-counts dt {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-parameter-list dd,
+.management-claim-counts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: 9px;
+  font-weight: 650;
+}
+
+.management-claim-counts {
+  grid-template-columns: 1fr;
+}
+
+.management-claim-counts dd {
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.management-muted-copy {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+
+.management-version-history {
+  padding: 0 17px 17px;
+}
+
+.management-version-history > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 15px;
+  border-top: 1px solid var(--border);
+}
+
+.management-version-history > header h3 {
+  margin: 0;
+}
+
+.management-version-history > header span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-version-history ol {
+  display: grid;
+  gap: 0;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.management-version-history li {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+}
+
+.management-version-history li:not(:last-child)::before {
+  position: absolute;
+  top: 25px;
+  bottom: -9px;
+  left: 5px;
+  width: 1px;
+  background: var(--border);
+  content: "";
+}
+
+.management-version-dot {
+  width: 11px;
+  height: 11px;
+  border: 3px solid var(--card);
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  outline: 1px solid var(--border);
+}
+
+.management-version-history li.current .management-version-dot {
+  background: var(--success);
+  outline-color: color-mix(in oklch, var(--success) 55%, var(--border));
+}
+
+.management-version-history li > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.management-version-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.management-version-actions .management-button {
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.management-version-history li strong,
+.management-version-history li small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-version-history li strong {
+  font-size: 9px;
+}
+
+.management-version-history li small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-context-selectors {
+  display: grid;
+  grid-template-columns: minmax(180px, .7fr) minmax(220px, 1fr) minmax(210px, .8fr);
+  align-items: end;
+  gap: 12px;
+  padding: 15px 17px 17px;
+}
+
+.management-context-selectors > label,
+.management-compact-field,
+.management-field {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  font-weight: 580;
+}
+
+.management-context-selectors select,
+.management-compact-field select,
+.management-field input,
+.management-field select,
+.management-field textarea,
+.management-search input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--foreground);
+  background: var(--input);
+  font-size: 10px;
+}
+
+.management-context-selectors select,
+.management-compact-field select,
+.management-field input,
+.management-field select {
+  height: 34px;
+  padding: 0 10px;
+}
+
+.management-field textarea {
+  min-height: 112px;
+  padding: 9px 10px;
+  resize: vertical;
+  font: 9px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 2;
+}
+
+.management-context-selectors select:focus-visible,
+.management-compact-field select:focus-visible,
+.management-field input:focus-visible,
+.management-field select:focus-visible,
+.management-field textarea:focus-visible,
+.management-search input:focus-visible {
+  border-color: var(--ring);
+  outline: 3px solid color-mix(in oklch, var(--ring) 17%, transparent);
+  outline-offset: 0;
+  box-shadow: none;
+}
+
+.management-field input[readonly] {
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.management-field small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+  font-weight: 450;
+  line-height: 1.45;
+}
+
+.management-selection-summary {
+  display: grid;
+  min-width: 0;
+  min-height: 54px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in oklch, var(--primary) 30%, var(--border));
+  border-radius: calc(var(--radius) - 2px);
+  background: color-mix(in oklch, var(--primary) 5%, var(--card));
+}
+
+.management-selection-summary > span {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--primary);
+  background: var(--accent);
+}
+
+.management-selection-summary .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.management-selection-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.management-selection-summary strong,
+.management-selection-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-selection-summary strong {
+  font-size: 9px;
+}
+
+.management-selection-summary small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-alert-card {
+  margin-top: 12px;
+  padding: 13px 15px;
+  border: 1px solid color-mix(in oklch, var(--warning) 38%, var(--border));
+  border-radius: var(--radius);
+  color: var(--warning);
+  background: color-mix(in oklch, var(--warning) 7%, var(--card));
+}
+
+.management-alert-card > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.management-alert-card > header .icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+}
+
+.management-alert-card header div {
+  display: grid;
+  gap: 4px;
+}
+
+.management-alert-card strong {
+  color: var(--foreground);
+  font-size: 9px;
+}
+
+.management-alert-card header span {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-missing-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 11px;
+}
+
+.management-missing-assets > span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 9px;
+  border: 1px solid color-mix(in oklch, var(--warning) 28%, var(--border));
+  border-radius: 999px;
+  background: var(--card);
+}
+
+.management-missing-assets button {
+  min-height: 20px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 8%, var(--card));
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.management-asset-browser {
+  margin-top: 12px;
+}
+
+.management-filterbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 210px) auto;
+  align-items: end;
+  gap: 10px;
+  padding: 12px 17px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-search {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.management-search > .icon {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 13px;
+  height: 13px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+
+.management-search input {
+  height: 34px;
+  padding: 0 10px 0 31px;
+}
+
+.management-search input::placeholder,
+.management-field input::placeholder,
+.management-field textarea::placeholder {
+  color: color-mix(in oklch, var(--muted-foreground) 72%, transparent);
+}
+
+.management-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 14px;
+}
+
+.management-asset-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 11px;
+  padding: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.management-asset-card:hover {
+  border-color: color-mix(in oklch, var(--primary) 42%, var(--border));
+  transform: translateY(-1px);
+}
+
+.management-asset-card.selected {
+  border-color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 7%, var(--card));
+}
+
+.management-asset-card:focus-within {
+  outline: 3px solid color-mix(in oklch, var(--ring) 20%, transparent);
+  outline-offset: 1px;
+}
+
+.management-asset-card > input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.management-asset-preview {
+  position: relative;
+  display: grid;
+  width: 92px;
+  height: 72px;
+  place-items: center;
+  overflow: hidden;
+  border-radius: calc(var(--radius) - 3px);
+  color: var(--muted-foreground);
+  background: var(--muted);
+}
+
+.management-asset-preview > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.management-asset-preview > .icon {
+  width: 20px;
+  height: 20px;
+}
+
+.management-asset-category {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 3px 5px;
+  border-radius: 999px;
+  color: var(--card-foreground);
+  background: color-mix(in oklch, var(--card) 88%, transparent);
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: .05em;
+}
+
+.management-asset-copy {
+  display: grid;
+  min-width: 0;
+  align-content: center;
+  gap: 5px;
+  padding-right: 18px;
+}
+
+.management-asset-copy strong,
+.management-asset-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-asset-copy strong {
+  font-size: 9px;
+}
+
+.management-asset-copy > span {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.management-asset-copy small {
+  color: var(--muted-foreground);
+  font-size: 7px;
+}
+
+.management-checkmark {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: transparent;
+  background: var(--card);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.management-asset-card.selected .management-checkmark {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.management-access-card + .management-boundary-banner {
+  margin-top: 12px;
+}
+
+.management-access-table {
+  min-width: 760px;
+}
+
+.management-account-cell {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+}
+
+.management-account-cell > span {
+  width: 30px;
+  height: 30px;
+}
+
+.management-account-cell > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.management-account-cell strong,
+.management-account-cell small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-account-cell strong {
+  font-size: 9px;
+}
+
+.management-account-cell small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-row-action {
+  min-width: 136px;
+  text-align: right;
+}
+
+.management-row-action .management-button {
+  min-height: 28px;
+  padding: 0 9px;
+}
+
+.management-row-action > span {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-foreground);
+  font-size: 7px;
+}
+
+.management-boundary-banner {
+  padding: 12px 14px;
+}
+
+.management-boundary-banner > div {
+  display: grid;
+  gap: 4px;
+}
+
+.management-budget-intro {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 14px;
+  padding: 2px 2px 15px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-budget-intro .management-kicker {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.management-budget-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.management-budget-card {
+  display: flex;
+  min-width: 0;
+  min-height: 270px;
+  flex-direction: column;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.management-budget-card > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-budget-amount {
+  display: grid;
+  gap: 5px;
+  padding: 18px 0 5px;
+}
+
+.management-budget-amount > span,
+.management-budget-amount > small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-budget-amount strong {
+  overflow: hidden;
+  font-size: 22px;
+  font-weight: 730;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-budget-card dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 10px 0 15px;
+}
+
+.management-budget-card dl > div {
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--muted);
+}
+
+.management-budget-card dt {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-budget-card dd {
+  margin: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.management-budget-card > .management-button {
+  width: 100%;
+  margin-top: auto;
+}
+
+.management-budget-empty {
+  display: grid;
+  min-height: 126px;
+  place-items: center;
+  align-content: center;
+  gap: 7px;
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  background: var(--muted);
+  text-align: center;
+}
+
+.management-budget-empty span {
+  color: var(--foreground);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.management-budget-empty p {
+  margin: 0;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.management-empty {
+  display: grid;
+  min-height: 150px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 22px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.management-empty > .icon {
+  width: 21px;
+  height: 21px;
+  margin-bottom: 2px;
+  color: var(--primary);
+}
+
+.management-empty h3 {
+  margin: 0;
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.management-empty p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.management-empty .management-button {
+  margin-top: 5px;
+}
+
+.management-loading {
+  display: grid;
+  min-height: min(480px, calc(100dvh - 190px));
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  color: var(--muted-foreground);
+  text-align: center;
+}
+
+.management-loading strong {
+  color: var(--foreground);
+  font-size: 11px;
+}
+
+.management-loading p {
+  margin: 0;
+  font-size: 9px;
+}
+
+.management-spinner {
+  width: 24px;
+  height: 24px;
+  margin-bottom: 4px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: management-spin 700ms linear infinite;
+}
+
+.management-skeleton-list {
+  display: grid;
+  width: 100%;
+  gap: 8px;
+  padding: 12px;
+}
+
+.management-skeleton-row {
+  display: block;
+  width: 100%;
+  height: 42px;
+  border-radius: calc(var(--radius) - 2px);
+  background: linear-gradient(90deg, var(--muted), color-mix(in oklch, var(--muted) 58%, var(--card)), var(--muted));
+  background-size: 200% 100%;
+  animation: management-shimmer 1.35s ease-in-out infinite;
+}
+
+.management-dialog {
+  width: min(560px, calc(100vw - 48px));
+  max-width: none;
+  max-height: min(760px, calc(100dvh - 48px));
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) + 3px);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: 0 22px 64px color-mix(in oklch, var(--border) 65%, transparent);
+}
+
+.management-dialog.wide {
+  width: min(1020px, calc(100vw - 64px));
+}
+
+.management-dialog::backdrop {
+  background: color-mix(in oklch, var(--foreground) 34%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+.management-dialog-shell {
+  display: grid;
+  max-height: inherit;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.management-dialog-shell > header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-dialog-shell > header > div {
+  min-width: 0;
+}
+
+.management-dialog-shell h2 {
+  margin: 5px 0 0;
+  font-size: 16px;
+  letter-spacing: -.025em;
+}
+
+.management-dialog-shell header p {
+  margin: 6px 0 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.management-dialog-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--muted-foreground);
+  background: var(--secondary);
+  font-size: 19px;
+  font-weight: 300;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.management-dialog-close:hover {
+  border-color: color-mix(in oklch, var(--primary) 38%, var(--border));
+  color: var(--foreground);
+  background: var(--accent);
+}
+
+.management-dialog-error {
+  padding: 10px 20px;
+  border-bottom: 1px solid color-mix(in oklch, var(--destructive) 36%, var(--border));
+  color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 8%, var(--popover));
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.management-dialog-body {
+  min-height: 0;
+  padding: 18px 20px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.management-dialog-shell > footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in oklch, var(--card) 80%, var(--popover));
+}
+
+.management-dialog-shell > footer .management-button {
+  min-width: 78px;
+}
+
+.management-form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.management-form-grid.two-columns {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.management-json-fields {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding-top: 2px;
+}
+
+.management-form-callout {
+  padding: 11px 12px;
+}
+
+.management-form-callout p {
+  margin: 0;
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.management-confirmation {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--muted);
+}
+
+.management-confirmation > span {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: var(--radius);
+  color: var(--primary);
+  background: var(--accent);
+}
+
+.management-confirmation > span .icon {
+  width: 19px;
+  height: 19px;
+}
+
+.management-confirmation > div {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.management-confirmation strong {
+  font-size: 11px;
+}
+
+.management-confirmation p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.management-budget-dialog-summary {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 15px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.management-budget-dialog-summary > span {
+  width: 38px;
+  height: 38px;
+}
+
+.management-budget-dialog-summary > div {
+  display: grid;
+  gap: 4px;
+}
+
+.management-budget-dialog-summary strong {
+  font-size: 10px;
+}
+
+.management-budget-dialog-summary small {
+  color: var(--muted-foreground);
+  font-size: 8px;
+}
+
+.management-version-readonly {
+  display: grid;
+  gap: 16px;
+}
+
+.management-version-readonly .management-summary-facts {
+  margin-top: 0;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.management-version-readonly h3 {
+  margin: 0 0 8px;
+  font-size: 10px;
+}
+
+.management-version-readonly pre {
+  max-height: 440px;
+  margin: 0;
+  padding: 13px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: var(--input);
+  font: 9px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+  tab-size: 2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.management-toast {
+  position: fixed;
+  top: 76px;
+  right: 20px;
+  max-width: 380px;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid color-mix(in oklch, var(--success) 42%, var(--border));
+  border-radius: var(--radius);
+  color: var(--foreground);
+  background: color-mix(in oklch, var(--success) 9%, var(--card));
+  box-shadow: 0 12px 32px color-mix(in oklch, var(--border) 58%, transparent);
+  font-size: 10px;
+  line-height: 1.5;
+  animation: management-toast-in 180ms ease-out;
+}
+
+@keyframes management-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes management-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@keyframes management-toast-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 1439px) {
+  .management-page-header {
+    gap: 16px;
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .management-content {
+    padding: 18px 20px 30px;
+  }
+
+  .management-heading div p {
+    max-width: 360px;
+  }
+
+  .management-master-detail {
+    grid-template-columns: 228px minmax(0, 1fr);
+  }
+
+  .management-asset-card {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+
+  .management-asset-preview {
+    width: 78px;
+    height: 68px;
+  }
+
+  .management-budget-card {
+    padding: 14px;
+  }
+}
+
+@media (min-width: 1800px) {
+  .management-page-header {
+    padding-right: 32px;
+    padding-left: 32px;
+  }
+
+  .management-content {
+    padding: 28px 32px 44px;
+  }
+
+  .management-metric-grid,
+  .management-overview-grid,
+  .management-master-detail,
+  .management-detail-stack,
+  .management-budget-grid {
+    gap: 14px;
+  }
+
+  .management-asset-grid,
+  .management-budget-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .management-entry,
+  .management-navigation button,
+  .management-back,
+  .management-button,
+  .management-progress > span,
+  .management-asset-card,
+  .management-toast {
+    transition: none;
+  }
+
+  .management-spinner,
+  .management-skeleton-row,
+  .management-toast {
+    animation: none;
+  }
+}

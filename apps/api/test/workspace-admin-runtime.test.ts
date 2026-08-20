@@ -66,7 +66,16 @@ const vehicleFacts = {
   modelYear: 2027,
   trim: "旗舰版",
   parameters: { seats: 5 },
-  fixedClaims: [],
+  fixedClaims: [{
+    id: "claim_x1_seats",
+    kind: "fixed" as const,
+    name: "五座布局",
+    statement: "车型采用五座布局",
+    requiredInVoiceover: false,
+    requiredInSubtitle: false,
+    mayRephrase: true,
+    riskNotes: [],
+  }],
   optionalClaims: [],
   prohibitedClaims: ["禁止无证据的第一表述"],
 };
@@ -139,6 +148,54 @@ test("admin creates brands and immutable vehicle fact versions with optimistic c
   assert.equal(created.administratorGrant.access.kind, "brand");
 
   const refreshedAdministrator = await scope(store);
+  await assert.rejects(
+    runtime.createVehicle(
+      created.brand.id,
+      { ...vehicleFacts, fixedClaims: [], optionalClaims: [] },
+      refreshedAdministrator,
+    ),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError && error.code === "AIC-ADMIN-VEHICLE_FACTS_INVALID",
+  );
+  await assert.rejects(
+    runtime.createVehicle(
+      created.brand.id,
+      {
+        ...vehicleFacts,
+        optionalClaims: [{ ...vehicleFacts.fixedClaims[0]!, kind: "extended" as const }],
+      },
+      refreshedAdministrator,
+    ),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError && error.code === "AIC-ADMIN-VEHICLE_FACTS_INVALID",
+  );
+  await assert.rejects(
+    runtime.createVehicle(
+      created.brand.id,
+      {
+        ...vehicleFacts,
+        fixedClaims: Array.from({ length: 21 }, (_, index) => ({
+          ...vehicleFacts.fixedClaims[0]!,
+          id: `claim_${index}`,
+        })),
+      },
+      refreshedAdministrator,
+    ),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError && error.code === "AIC-ADMIN-VEHICLE_FACTS_INVALID",
+  );
+  await assert.rejects(
+    runtime.createVehicle(
+      created.brand.id,
+      {
+        ...vehicleFacts,
+        fixedClaims: [{ ...vehicleFacts.fixedClaims[0]!, kind: "extended" as const }],
+      },
+      refreshedAdministrator,
+    ),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError && error.code === "AIC-ADMIN-VEHICLE_FACTS_INVALID",
+  );
   const vehicle = await runtime.createVehicle(created.brand.id, vehicleFacts, refreshedAdministrator);
   assert.equal(vehicle.version, 1);
   const outcomes = await Promise.allSettled([
@@ -205,6 +262,30 @@ test("asset browsing and recommended associations use the same canonical brand a
     (error: unknown) => error instanceof BusinessRuntimeError &&
       error.code === "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_MISMATCH",
   );
+
+  await assert.rejects(
+    runtime.replaceVehicleAssetAssociations(
+      "vehicle_firefly_e5_2026_long_range",
+      { expectedRevision: 1, assets: [] },
+      administrator,
+    ),
+    (error: unknown) => error instanceof BusinessRuntimeError &&
+      error.code === "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_REQUIRED",
+  );
+
+  const vehicleFreeAssets = packageView.association?.assets.filter(
+    (reference) => reference.category !== "vehicle",
+  ) ?? [];
+  assert.ok(vehicleFreeAssets.length > 0);
+  await assert.rejects(
+    runtime.replaceVehicleAssetAssociations(
+      "vehicle_firefly_e5_2026_long_range",
+      { expectedRevision: 1, assets: vehicleFreeAssets },
+      administrator,
+    ),
+    (error: unknown) => error instanceof BusinessRuntimeError &&
+      error.code === "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_REQUIRED",
+  );
 });
 
 test("grant and budget commands validate target accounts and become visible through the shared store", async () => {
@@ -228,16 +309,44 @@ test("grant and budget commands validate target accounts and become visible thro
 
   const budget = await runtime.createAccountBudget("account_creator_a", "CNY", 20_000, administrator);
   assert.equal(budget.revision, 1);
+  await runtime.createAccountBudget("account_creator_b", "KWD", 30_000, administrator);
   const view = await runtime.getAccountBudget("account_creator_a", administrator);
   assert.equal(view?.balance.availableAmountMinor, 20_000);
   const overview = await runtime.getOverview(administrator);
-  assert.equal(overview.counts.configuredBudgets, 1);
-  assert.equal(overview.consumptionByCurrency[0]?.limitAmountMinor, 20_000);
+  assert.equal(overview.counts.configuredBudgets, 2);
+  assert.deepEqual(
+    Object.fromEntries(overview.consumptionByCurrency.map((entry) => [entry.currency, entry.limitAmountMinor])),
+    { CNY: 20_000, KWD: 30_000 },
+  );
 
   const creator = await scope(store, "account_creator_a");
   await assert.rejects(
     runtime.listBrands(creator),
     (error: unknown) => error instanceof BusinessRuntimeError && error.statusCode === 403,
+  );
+});
+
+test("budget overview rejects totals that cannot be represented exactly", async () => {
+  const { store, runtime } = fixture();
+  const administrator = await scope(store);
+  await runtime.createAccountBudget(
+    "account_creator_a",
+    "CNY",
+    Number.MAX_SAFE_INTEGER,
+    administrator,
+  );
+  await runtime.createAccountBudget(
+    "account_creator_b",
+    "CNY",
+    Number.MAX_SAFE_INTEGER,
+    administrator,
+  );
+  await assert.rejects(
+    runtime.getOverview(administrator),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError &&
+      error.code === "AIC-COST-BUDGET_AGGREGATE_OVERFLOW" &&
+      error.statusCode === 422,
   );
 });
 
