@@ -265,7 +265,7 @@ export function createTaskAssetTools(reader: TaskAssetSnapshotReader): readonly 
   const getTaskAssetSnapshot: AgentTool<typeof GetTaskAssetSnapshotRequestSchema> = {
     name: "get_task_asset_snapshot",
     label: "读取任务素材快照",
-    description: "读取服务端绑定任务在资产匹配确认时锁定的素材快照、精确版本公司素材和逐项来源风险；车型素材不可替换，本地上传必须提示人工复核来源和使用权，不查询项目最新素材池。",
+    description: "读取服务端绑定任务在素材匹配经人工确认后锁定的只读快照、精确版本公司素材、逐项来源风险和锁定的人物/场景推荐；仅在资产匹配确认后开放，车型素材不可替换，本地上传必须提示人工复核来源和使用权，不回退查询项目最新素材池。",
     parameters: GetTaskAssetSnapshotRequestSchema,
     async execute(_toolCallId, _params, signal) {
       const details = await reader.read(signal);

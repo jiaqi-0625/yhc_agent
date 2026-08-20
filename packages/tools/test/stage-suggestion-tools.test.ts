@@ -45,7 +45,6 @@ const stageOrder: readonly VideoTaskStage[] = [
   "video_preview",
   "delivery",
 ];
-
 type SuggestionStage = "script" | "asset_matching" | "storyboard" | "delivery";
 
 function taskContext(stage: SuggestionStage, revision = 8): TaskContext {
@@ -63,7 +62,9 @@ function taskContext(stage: SuggestionStage, revision = 8): TaskContext {
       stageStatus: "in_progress",
       revision,
       vehicleSnapshotId: "vehicle_snapshot_1",
-      assetSnapshotId: "asset_snapshot_1",
+      ...(stage === "script" || stage === "asset_matching"
+        ? {}
+        : { assetSnapshotId: "asset_snapshot_1" }),
       ownership: { state: "owned_by_current_account" },
     },
     productionBrief: {
@@ -103,7 +104,7 @@ function productionRecord(stage: SuggestionStage): VideoTaskProductionRecord {
   const currentIndex = stageOrder.indexOf(stage);
   const upstream = stageOrder.slice(0, currentIndex).map(artifact);
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: "task_1",
       tenantId: "tenant_1",
@@ -115,7 +116,9 @@ function productionRecord(stage: SuggestionStage): VideoTaskProductionRecord {
       stageStatus: "in_progress",
       revision: 8,
       vehicleSnapshotId: "vehicle_snapshot_1",
-      assetSnapshotId: "asset_snapshot_1",
+      ...(stage === "script" || stage === "asset_matching"
+        ? {}
+        : { assetSnapshotId: "asset_snapshot_1" }),
       audience: "家庭用户",
       theme: "周末出行",
       durationSeconds: 30,
@@ -219,10 +222,19 @@ test("stage suggestion context rejects mismatched asset catalog scope", () => {
   );
 });
 
+test("script and asset matching suggestion contexts do not require an asset snapshot", async () => {
+  for (const stage of ["script", "asset_matching"] as const) {
+    assert.equal(taskContext(stage).videoTask.assetSnapshotId, undefined);
+    const result = await readerFor(stage).read();
+    assert.equal(result.stage, stage);
+  }
+});
+
 test("stage suggestion context rejects stale task state, missing confirmation, invalidation, and cross-tenant records", async () => {
   const cases = [
     readerFor("script", (record) => { record.videoTask.revision = 9; }),
     readerFor("script", (record) => { record.stageConfirmations = []; }),
+    readerFor("asset_matching", (record) => { record.stageConfirmations = record.stageConfirmations.slice(0, 1); }),
     readerFor("storyboard", (record) => {
       record.stageArtifactInvalidations.push({
         id: "invalidation_script_v1",
@@ -233,7 +245,7 @@ test("stage suggestion context rejects stale task state, missing confirmation, i
         artifactVersionId: "script_artifact_v1",
         reason: "上游版本回退。",
         cause: { kind: "upstream_invalidation", reasonCode: "upstream_invalidation", invalidationId: "invalidation_upstream" },
-        invalidatedDependency: { kind: "stage_artifact", stage: "asset_matching", artifactVersionId: "asset_matching_artifact_v1" },
+        invalidatedDependency: { kind: "stage_artifact", stage: "strategy", artifactVersionId: "strategy_artifact_v1" },
         occurredAt,
       });
     }),
@@ -254,5 +266,6 @@ test("stage suggestion tool accepts no model-proposed identity or artifact refer
   assert.deepEqual(Object.keys((tool.parameters as { properties?: Record<string, unknown> }).properties ?? {}), []);
   const result = await tool.execute("call_1", {});
   assert.equal(result.details.stage, "delivery");
+  assert.match(tool.description, /资产匹配阶段/u);
   assert.match(tool.description, /不生成、不持久化、不确认阶段/u);
 });

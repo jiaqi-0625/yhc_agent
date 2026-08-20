@@ -121,7 +121,7 @@ function context(
   };
 }
 
-test("strategy generation locks only vehicle facts and records a free receipt", () => {
+test("strategy generation locks only the vehicle snapshot, projects facts, and records a free receipt", () => {
   const source = sourceRecord();
   const commandContext = context("request_generate", "a".repeat(64));
   const result = generateVideoTaskStrategy(source, {
@@ -131,11 +131,12 @@ test("strategy generation locks only vehicle facts and records a free receipt", 
   }, project, pool, vehicleSnapshot, commandContext);
 
   assert.equal(source.videoTask.vehicleSnapshotId, undefined);
-  assert.equal(result.schemaVersion, 6);
+  assert.equal(result.schemaVersion, 7);
   assert.equal(result.videoTask.revision, 2);
+  assert.equal(result.videoTask.vehicleSnapshotId, vehicleSnapshot.id);
+  assert.equal(result.videoTask.assetSnapshotId, undefined);
   assert.equal(result.taskVehicleSnapshots.length, 1);
   assert.equal(result.taskAssetSnapshots.length, 0);
-  assert.equal(result.videoTask.assetSnapshotId, undefined);
   assert.equal(result.strategyDrafts.length, 1);
   assert.equal(result.strategyDrafts[0]?.items[0]?.statement, "CLTC 续航 550 公里");
   assert.equal(result.strategyDrafts[0]?.validation.valid, true);
@@ -183,7 +184,7 @@ test("strategy generation rejects idempotency conflicts and snapshot version rep
   );
 });
 
-test("strategy regeneration preserves human locks and ignores the mutable project pool", () => {
+test("strategy regeneration preserves human locks and never snapshots the mutable project pool", () => {
   const generated = generateVideoTaskStrategy(sourceRecord(), {
     expectedTaskRevision: 1,
     audience: "家庭用户",
@@ -207,6 +208,8 @@ test("strategy regeneration preserves human locks and ignores the mutable projec
   assert.equal(regenerated.strategyDrafts[1]?.items[0]?.title, "人工锁定的续航表达");
   assert.equal(regenerated.strategyDrafts[1]?.items[0]?.locked, true);
   assert.equal(regenerated.strategyDrafts[1]?.validation.valid, true);
+  assert.equal(regenerated.videoTask.assetSnapshotId, undefined);
+  assert.deepEqual(regenerated.taskAssetSnapshots, []);
 });
 
 test("approval request only enters awaiting confirmation and records immutable human intent", () => {

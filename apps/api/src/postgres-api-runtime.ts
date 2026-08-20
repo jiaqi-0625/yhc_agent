@@ -214,11 +214,6 @@ export async function createPostgresApiRuntime(
       videoTaskStore,
       () => workspaceSessions.listDevelopmentAccounts(),
     );
-    const videoTaskStages = new VideoTaskStageRuntime(
-      administrationStore,
-      projectStore,
-      videoTaskStore,
-    );
     const projectLibrary = new ProjectLibraryRuntime(
       administrationStore,
       projectStore,
@@ -242,11 +237,17 @@ export async function createPostgresApiRuntime(
     const projectAssets = new ProjectAssetRuntime(
       companyAssets,
       assetPools,
-      videoTaskStore,
-      undefined,
       undefined,
       temporaryAssetStore,
       assetCoordinator,
+    );
+    const videoTaskStages = new VideoTaskStageRuntime(
+      administrationStore,
+      projectStore,
+      videoTaskStore,
+      undefined,
+      undefined,
+      projectAssets,
     );
     const assetMatching = new AssetMatchingRuntime(
       administrationStore,
@@ -255,6 +256,7 @@ export async function createPostgresApiRuntime(
       companyAssets,
       projectAssets,
       temporaryAssets,
+      videoTaskStages,
     );
     const agentActionCommands = new AgentActionCommandRuntime(
       administrationStore,
@@ -262,7 +264,6 @@ export async function createPostgresApiRuntime(
       videoTaskStore,
       undefined,
       undefined,
-      temporaryAssetStore,
       assetCoordinator,
     );
     const accountRunLocks = new AccountRunLockRuntime(runLockStore);

@@ -1,15 +1,9 @@
-import { randomUUID } from "node:crypto";
-
 import {
-  assertCanOperateVideoTask,
-  assertCanManageBatchProjectAssets,
-  assertProjectAssetPoolAssets,
   assertCanViewBatchProject,
+  assertProjectAssetPoolAssets,
   createProjectAssetPool,
-  lockVideoTaskAssetSnapshot,
   refreshProjectAssetPool,
   type AssetPoolMutationContext,
-  type VideoTaskProductionRecord,
   type WorkspaceSessionScope,
 } from "@firefly/domain";
 import type { AssetReference, BatchProject, ProjectAssetPool } from "@firefly/schemas";
@@ -25,15 +19,15 @@ import {
 } from "./project-asset-coordinator.ts";
 import type { ProjectAssetPoolStore } from "./project-asset-pool-store.ts";
 import type { TemporaryAssetStore } from "./temporary-asset-store.ts";
-import type { VideoTaskProductionStore } from "./video-task-store.ts";
 
 export type ProjectAssetRuntimeErrorCode =
   | "AIC-ASSET-POOL-ALREADY-EXISTS"
   | "AIC-ASSET-POOL-NOT-FOUND"
   | "AIC-ASSET-POOL-PROJECT-LINK-INVALID"
   | "AIC-ASSET-POOL-CATALOG-REFERENCE-UNAVAILABLE"
-  | "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE"
-  | "AIC-VIDEO-TASK-NOT-FOUND";
+  | "AIC-ASSET-SELECTION-INVALID"
+  | "AIC-ASSET-SELECTION-REVISION-CONFLICT"
+  | "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE";
 
 export class ProjectAssetRuntimeError extends Error {
   constructor(
@@ -45,10 +39,6 @@ export class ProjectAssetRuntimeError extends Error {
   }
 }
 
-const idPrefixes = {
-  task_asset_snapshot: "tas",
-} as const;
-
 function referenceIdentity(reference: Readonly<CompanyAssetReference>): string {
   return `${reference.sourceProvider}:${reference.assetId}`;
 }
@@ -59,14 +49,25 @@ function exactReferenceIdentity(reference: Readonly<CompanyAssetReference>): str
   }`;
 }
 
+function exactAssetReferenceIdentity(reference: Readonly<AssetReference>): string {
+  if (reference.source === "company_catalog") return exactReferenceIdentity(reference);
+  return `${reference.source}:${reference.batchProjectId}:${reference.assetId}:${reference.version}:` +
+    `${reference.category}:${reference.checksumSha256.toLowerCase()}`;
+}
+
+export type TaskAssetSelectionResolver = () => Promise<ProjectAssetPool>;
+export type TaskAssetSelectionResolverFactory = (
+  project: Readonly<BatchProject>,
+  expectedProjectAssetPoolRevision: number,
+  selectedAssets: readonly AssetReference[],
+  session: Readonly<WorkspaceSessionScope>,
+) => TaskAssetSelectionResolver;
+
 export class ProjectAssetRuntime {
   constructor(
     private readonly provider: CompanyAssetProvider,
     private readonly poolStore: ProjectAssetPoolStore,
-    private readonly videoTaskStore: VideoTaskProductionStore,
     private readonly now: () => string = () => new Date().toISOString(),
-    private readonly createId: (kind: "task_asset_snapshot") => string = (kind) =>
-      `${idPrefixes[kind]}_${randomUUID()}`,
     private readonly temporaryAssetStore?: TemporaryAssetStore,
     private readonly coordinator: ProjectAssetCoordinator = defaultProjectAssetCoordinator,
   ) {}
@@ -181,7 +182,7 @@ export class ProjectAssetRuntime {
           }
           return projectAssetPoolId;
         }
-        return this.createId(kind);
+        throw new Error(`Asset pool mutation cannot create '${kind}' in this runtime.`);
       },
     };
   }
@@ -217,9 +218,13 @@ export class ProjectAssetRuntime {
   async #getCurrentPoolUncoordinated(
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
-  ): Promise<ProjectAssetPool> {
+  ): Promise<{
+    pool: ProjectAssetPool;
+    latestCatalogReferences: CompanyAssetReference[];
+  }> {
     this.#providerScope(project, session);
-    return this.poolStore.transact(project.id, async (current) => {
+    let latestCatalogReferences: CompanyAssetReference[] | undefined;
+    const pool = await this.poolStore.transact(project.id, async (current) => {
       if (current === undefined) {
         throw new ProjectAssetRuntimeError(
           "AIC-ASSET-POOL-NOT-FOUND",
@@ -233,6 +238,7 @@ export class ProjectAssetRuntime {
         );
       }
       const latestReferences = await this.#loadLatestCatalogReferences(project, session);
+      latestCatalogReferences = latestReferences;
       return refreshProjectAssetPool(
         current,
         project,
@@ -240,61 +246,236 @@ export class ProjectAssetRuntime {
         this.#mutationContext(session, this.now()),
       );
     });
+    if (latestCatalogReferences === undefined) {
+      throw new Error("The project asset catalog refresh did not resolve current references.");
+    }
+    return { pool, latestCatalogReferences };
   }
 
   async getCurrentPool(
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<ProjectAssetPool> {
-    return this.coordinator.runExclusive(project.id, () =>
-      this.#getCurrentPoolUncoordinated(project, session),
+    return this.coordinator.runExclusive(project.id, async () =>
+      (await this.#getCurrentPoolUncoordinated(project, session)).pool,
     );
   }
 
-  async addCatalogAssets(
+  async #includeCurrentCatalogSelections(
     project: Readonly<BatchProject>,
-    selectedReferences: readonly CompanyAssetReference[],
+    pool: Readonly<ProjectAssetPool>,
+    selectedAssets: readonly AssetReference[],
+    latestCatalogReferences: readonly CompanyAssetReference[],
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<ProjectAssetPool> {
-    return this.coordinator.runExclusive(project.id, async () => {
-      assertCanManageBatchProjectAssets(session, project);
-      const normalized = await this.#normalizeSelectedReferences(
-        selectedReferences,
-        project,
-        session,
+    const poolIdentities = new Set(pool.assets.map(exactAssetReferenceIdentity));
+    const additions = selectedAssets.filter(
+      (asset): asset is CompanyAssetReference =>
+        !poolIdentities.has(exactAssetReferenceIdentity(asset)) &&
+        asset.source === "company_catalog",
+    );
+    const hasMissingLocalSelection = selectedAssets.some(
+      (asset) =>
+        !poolIdentities.has(exactAssetReferenceIdentity(asset)) &&
+        asset.source === "local_upload",
+    );
+    const latestCatalogIdentities = new Set(
+      latestCatalogReferences.map(exactReferenceIdentity),
+    );
+    if (
+      hasMissingLocalSelection ||
+      additions.some((asset) => !latestCatalogIdentities.has(exactReferenceIdentity(asset)))
+    ) {
+      throw new ProjectAssetRuntimeError(
+        "AIC-ASSET-SELECTION-INVALID",
+        "Every selected asset must exactly match the current project pool or current visible company catalog.",
       );
-      return this.poolStore.transact(project.id, (current) => {
-        if (current === undefined || current.id !== project.assetPoolId) {
+    }
+    if (additions.length === 0) return structuredClone(pool);
+
+    return this.poolStore.transact(project.id, (current) => {
+      if (current === undefined || current.id !== project.assetPoolId) {
+        throw new ProjectAssetRuntimeError(
+          "AIC-ASSET-POOL-NOT-FOUND",
+          `Batch project '${project.id}' does not have its linked asset pool.`,
+        );
+      }
+      if (current.revision !== pool.revision) {
+        throw new ProjectAssetRuntimeError(
+          "AIC-ASSET-SELECTION-REVISION-CONFLICT",
+          "The project asset pool changed while the task selection was being confirmed.",
+        );
+      }
+      const assets = [...structuredClone(current.assets), ...structuredClone(additions)];
+      try {
+        assertProjectAssetPoolAssets(project, assets);
+      } catch (error: unknown) {
+        throw new ProjectAssetRuntimeError(
+          "AIC-ASSET-SELECTION-INVALID",
+          error instanceof Error ? error.message : "The selected task assets are invalid.",
+        );
+      }
+      const occurredAt = this.now();
+      return {
+        ...structuredClone(current),
+        revision: current.revision + 1,
+        assets,
+        updatedAt: occurredAt,
+        updatedBy: session.actorAccountId,
+      };
+    });
+  }
+
+  #createTaskAssetSelectionResolver(
+    project: Readonly<BatchProject>,
+    expectedProjectAssetPoolRevision: number,
+    selectedAssets: readonly AssetReference[],
+    session: Readonly<WorkspaceSessionScope>,
+  ): TaskAssetSelectionResolver {
+    let resolved: ProjectAssetPool | undefined;
+    return async (): Promise<ProjectAssetPool> => {
+        if (resolved !== undefined) return structuredClone(resolved);
+        const { pool, latestCatalogReferences } =
+          await this.#getCurrentPoolUncoordinated(project, session);
+        if (pool.revision !== expectedProjectAssetPoolRevision) {
           throw new ProjectAssetRuntimeError(
-            "AIC-ASSET-POOL-NOT-FOUND",
-            `Batch project '${project.id}' does not have its linked asset pool.`,
+            "AIC-ASSET-SELECTION-REVISION-CONFLICT",
+            "The project asset pool changed after this task selection was prepared.",
           );
         }
-        const existing = new Set(current.assets.map((asset) =>
-          asset.source === "company_catalog"
-            ? referenceIdentity(asset)
-            : `${asset.source}:${asset.batchProjectId}:${asset.assetId}`
-        ));
-        const additions = normalized.filter((asset) => !existing.has(referenceIdentity(asset)));
-        if (additions.length === 0) return structuredClone(current);
-        const assets = [...structuredClone(current.assets), ...structuredClone(additions)];
-        assertProjectAssetPoolAssets(project, assets);
-        const occurredAt = this.now();
-        return {
-          ...structuredClone(current),
-          revision: current.revision + 1,
+        if (
+          selectedAssets.some(
+            (asset) => asset.category !== "person" && asset.category !== "scene",
+          )
+        ) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            "Task selection may only choose person and scene assets; vehicle and visual style assets are server-locked.",
+          );
+        }
+        const selectedIdentities = selectedAssets.map(exactAssetReferenceIdentity).sort((left, right) =>
+          left.localeCompare(right, "en")
+        );
+        if (new Set(selectedIdentities).size !== selectedIdentities.length) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            "Task selection cannot contain duplicate exact asset references.",
+          );
+        }
+        const selectionPool = await this.#includeCurrentCatalogSelections(
+          project,
+          pool,
+          selectedAssets,
+          latestCatalogReferences,
+          session,
+        );
+        const currentByIdentity = new Map(
+          selectionPool.assets.map((asset) => [exactAssetReferenceIdentity(asset), asset] as const),
+        );
+        const fixedAssets = selectionPool.assets
+          .filter(
+            (asset) =>
+              asset.category === "vehicle" ||
+              (asset.category === "visual_style" && asset.assetId === project.visualStylePresetId),
+          )
+          .sort((left, right) => exactAssetReferenceIdentity(left).localeCompare(
+            exactAssetReferenceIdentity(right),
+            "en",
+          ));
+        if (!fixedAssets.some(
+          (asset) =>
+            asset.category === "visual_style" &&
+            asset.assetId === project.visualStylePresetId,
+        )) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            "The current project visual style is unavailable for the task snapshot.",
+          );
+        }
+        const assets = [
+          ...fixedAssets.map((asset) => structuredClone(asset)),
+          ...selectedIdentities.map((identity) => structuredClone(currentByIdentity.get(identity)!)),
+        ];
+        const latestCatalogIdentities = new Set(
+          latestCatalogReferences.map(exactReferenceIdentity),
+        );
+        if (assets.some(
+          (asset) =>
+            asset.source === "company_catalog" &&
+            !latestCatalogIdentities.has(exactReferenceIdentity(asset)),
+        )) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            "Every company asset in the task snapshot must remain available at its exact current catalog version.",
+          );
+        }
+        const selection: ProjectAssetPool = {
+          ...structuredClone(selectionPool),
           assets,
-          updatedAt: occurredAt,
-          updatedBy: session.actorAccountId,
         };
-      });
-    });
+        try {
+          assertProjectAssetPoolAssets(project, selection.assets);
+        } catch (error: unknown) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            error instanceof Error ? error.message : "The selected task assets are invalid.",
+          );
+        }
+        await this.#assertTemporaryReferencesUsable(selection, project);
+        resolved = selection;
+        return structuredClone(selection);
+    };
+  }
+
+  /**
+   * Acquires the project coordinator before the caller enters any other
+   * aggregate lock. The supplied factory keeps selection resolution lazy so an
+   * idempotent task replay can return without consulting a newer pool.
+   */
+  async coordinateTaskAssetSelection<Result>(
+    batchProjectId: string,
+    operation: (
+      createResolver: TaskAssetSelectionResolverFactory,
+    ) => Result | Promise<Result>,
+  ): Promise<Result> {
+    return this.coordinator.runExclusive(batchProjectId, () =>
+      operation((project, expectedRevision, selectedAssets, session) => {
+        if (project.id !== batchProjectId) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-SELECTION-INVALID",
+            "The coordinated task selection belongs to a different batch project.",
+          );
+        }
+        return this.#createTaskAssetSelectionResolver(
+          project,
+          expectedRevision,
+          selectedAssets,
+          session,
+        );
+      }),
+    );
+  }
+
+  async withTaskAssetSelection<Result>(
+    project: Readonly<BatchProject>,
+    expectedProjectAssetPoolRevision: number,
+    selectedAssets: readonly AssetReference[],
+    session: Readonly<WorkspaceSessionScope>,
+    operation: (resolveSelection: TaskAssetSelectionResolver) => Result | Promise<Result>,
+  ): Promise<Result> {
+    return this.coordinateTaskAssetSelection(project.id, (createResolver) =>
+      operation(createResolver(
+        project,
+        expectedProjectAssetPoolRevision,
+        selectedAssets,
+        session,
+      )),
+    );
   }
 
   async #assertTemporaryReferencesUsable(
     pool: Readonly<ProjectAssetPool>,
     project: Readonly<BatchProject>,
-    occurredAt: string,
   ): Promise<void> {
     const references = pool.assets.filter((asset) => asset.source === "local_upload");
     if (references.length === 0) return;
@@ -305,14 +486,14 @@ export class ProjectAssetRuntime {
       );
     }
     const assets = await this.temporaryAssetStore.loadProject(project.id);
-    const occurredAtTimestamp = Date.parse(occurredAt);
+    const validationTimestamp = Date.parse(this.now());
     for (const reference of references) {
       const asset = assets.find((candidate) => candidate.id === reference.assetId);
       const expiresAtTimestamp =
         asset?.expiresAt === undefined ? undefined : Date.parse(asset.expiresAt);
       if (
         asset === undefined ||
-        !Number.isFinite(occurredAtTimestamp) ||
+        !Number.isFinite(validationTimestamp) ||
         asset.tenantId !== project.tenantId ||
         asset.batchProjectId !== project.id ||
         asset.vehicleId !== project.vehicleId ||
@@ -323,7 +504,7 @@ export class ProjectAssetRuntime {
         !asset.rightsConfirmed ||
         asset.validationIssues.length > 0 ||
         (expiresAtTimestamp !== undefined &&
-          (!Number.isFinite(expiresAtTimestamp) || expiresAtTimestamp <= occurredAtTimestamp))
+          (!Number.isFinite(expiresAtTimestamp) || expiresAtTimestamp <= validationTimestamp))
       ) {
         throw new ProjectAssetRuntimeError(
           "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE",
@@ -333,34 +514,4 @@ export class ProjectAssetRuntime {
     }
   }
 
-  async lockTaskSnapshot(
-    videoTaskId: string,
-    expectedTaskRevision: number,
-    project: Readonly<BatchProject>,
-    session: Readonly<WorkspaceSessionScope>,
-    selectedAssets?: readonly AssetReference[],
-  ): Promise<VideoTaskProductionRecord> {
-    return this.coordinator.runExclusive(project.id, async () => {
-      const pool = await this.#getCurrentPoolUncoordinated(project, session);
-      const occurredAt = this.now();
-      await this.#assertTemporaryReferencesUsable(pool, project, occurredAt);
-      return this.videoTaskStore.transact(videoTaskId, (current) => {
-        if (current === undefined) {
-          throw new ProjectAssetRuntimeError(
-            "AIC-VIDEO-TASK-NOT-FOUND",
-            `Video task '${videoTaskId}' was not found.`,
-          );
-        }
-        assertCanOperateVideoTask(session, project, current.videoTask);
-        return lockVideoTaskAssetSnapshot(
-          current,
-          project,
-          pool,
-          expectedTaskRevision,
-          this.#mutationContext(session, occurredAt),
-          selectedAssets,
-        );
-      });
-    });
-  }
 }

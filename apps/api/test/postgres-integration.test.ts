@@ -127,7 +127,7 @@ function videoTask(
   batchProjectId = "project_integration",
 ): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id,
       tenantId,

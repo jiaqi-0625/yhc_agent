@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AfterToolCallContext, BeforeToolCallContext, StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { toolPolicies } from "@firefly/domain";
+import type { TaskContext } from "@firefly/schemas";
 import { InMemoryVehicleService } from "@firefly/tools";
 
 import { ADVERTISING_AGENT_SYSTEM_PROMPT, createAdvertisingAgent, redactSensitive } from "../src/index.ts";
@@ -35,6 +36,7 @@ const scope = {
   budgetRemaining: 100,
   hasInteractiveApprovalChannel: true,
 };
+const TASK_ASSET_SNAPSHOT_ID = "asset_snapshot_factory_001";
 
 function createAgent(status: "created" | "script_draft" = "created") {
   return createAdvertisingAgent({
@@ -44,6 +46,27 @@ function createAgent(status: "created" | "script_draft" = "created") {
     getWorkStatus: () => status,
     vehicleService: new InMemoryVehicleService([]),
   });
+}
+
+function taskContextWithoutAssetSnapshot(): TaskContext {
+  const { assetSnapshotId, ...videoTask } = MOCK_TASK_CONTEXT.videoTask;
+  void assetSnapshotId;
+  return {
+    ...MOCK_TASK_CONTEXT,
+    videoTask: { ...videoTask, currentStage: "script", stageStatus: "in_progress" },
+  };
+}
+
+function taskContextWithAssetSnapshot(): TaskContext {
+  return {
+    ...MOCK_TASK_CONTEXT,
+    videoTask: {
+      ...MOCK_TASK_CONTEXT.videoTask,
+      currentStage: "storyboard",
+      stageStatus: "in_progress",
+      assetSnapshotId: TASK_ASSET_SNAPSHOT_ID,
+    },
+  };
 }
 
 test("agent registers only the two current domain tools", () => {
@@ -97,16 +120,17 @@ test("business assembly adds strategy tools without exposing an approval decisio
 });
 
 test("task-bound assembly adds the immutable asset snapshot reader only for the matching task", () => {
+  const taskContext = taskContextWithAssetSnapshot();
   const reader = {
-    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
-    assetSnapshotId: MOCK_TASK_CONTEXT.videoTask.assetSnapshotId,
+    videoTaskId: taskContext.videoTask.id,
+    assetSnapshotId: TASK_ASSET_SNAPSHOT_ID,
     async read() { throw new Error("not called"); },
   };
   const agent = createAdvertisingAgent({
     model,
     streamFn,
     scope,
-    taskContext: MOCK_TASK_CONTEXT,
+    taskContext,
     getWorkStatus: () => "created",
     vehicleService: new InMemoryVehicleService([]),
     taskAssetReader: reader,
@@ -119,16 +143,17 @@ test("task-bound assembly adds the immutable asset snapshot reader only for the 
   assert.match(agent.state.systemPrompt, /本地上传必须提示人工复核原始来源说明与使用权声明/u);
   assert.match(agent.state.systemPrompt, /精确版本和推荐理由/u);
   assert.match(agent.state.systemPrompt, /车型素材不可跨车型替换/u);
+  assert.match(agent.state.systemPrompt, /资产匹配确认后.*当前任务锁定的素材快照/u);
   assert.match(
     agent.state.tools.find((tool) => tool.name === "get_task_asset_snapshot")?.description ?? "",
-    /资产匹配确认时锁定.*逐项来源风险/u,
+    /素材匹配经人工确认后锁定.*逐项来源风险.*人物\/场景推荐.*资产匹配确认后/u,
   );
   assert.throws(
     () => createAdvertisingAgent({
       model,
       streamFn,
       scope,
-      taskContext: MOCK_TASK_CONTEXT,
+      taskContext,
       getWorkStatus: () => "created",
       vehicleService: new InMemoryVehicleService([]),
       taskAssetReader: { ...reader, videoTaskId: "task_other" },
@@ -137,16 +162,51 @@ test("task-bound assembly adds the immutable asset snapshot reader only for the 
   );
 });
 
+test("task-bound assembly omits the asset snapshot tool until a snapshot pointer exists", () => {
+  const taskContext = taskContextWithoutAssetSnapshot();
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    taskContext,
+    getWorkStatus: () => "script_draft",
+    vehicleService: new InMemoryVehicleService([]),
+  });
+  assert.deepEqual(agent.state.tools.map((tool) => tool.name), [
+    "get_vehicle_snapshot",
+    "validate_vehicle_claims",
+  ]);
+  assert.doesNotMatch(agent.state.tools.map((tool) => tool.name).join(","), /get_task_asset_snapshot/u);
+
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "script_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      taskAssetReader: {
+        videoTaskId: taskContext.videoTask.id,
+        assetSnapshotId: TASK_ASSET_SNAPSHOT_ID,
+        async read() { throw new Error("not called"); },
+      },
+    }),
+    /scope does not match/u,
+  );
+});
+
 test("task-bound assembly adds stage suggestions only for the matching server-bound task", () => {
+  const taskContext = taskContextWithoutAssetSnapshot();
   const reader = {
-    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+    videoTaskId: taskContext.videoTask.id,
     async read() { throw new Error("not called"); },
   };
   const agent = createAdvertisingAgent({
     model,
     streamFn,
     scope,
-    taskContext: MOCK_TASK_CONTEXT,
+    taskContext,
     getWorkStatus: () => "script_draft",
     vehicleService: new InMemoryVehicleService([]),
     stageSuggestionReader: reader,
@@ -158,13 +218,18 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
   ]);
   assert.match(agent.state.systemPrompt, /脚本、资产匹配、分镜或交付阶段建议前/u);
   assert.match(agent.state.systemPrompt, /已确认上游产物精确版本/u);
+  assert.match(agent.state.systemPrompt, /脚本建议只遵守已确认策略，不提前选材/u);
+  assert.match(agent.state.systemPrompt, /资产匹配建议同时遵守已确认策略和脚本/u);
+  assert.match(agent.state.systemPrompt, /分镜建议必须遵守已确认素材选择/u);
+  assert.match(agent.state.systemPrompt, /资产匹配可返回带描述词的精确版本人物\/场景候选并提出推荐/u);
+  assert.match(agent.state.systemPrompt, /不得持久化选择或确认阶段/u);
   assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);
   assert.throws(
     () => createAdvertisingAgent({
       model,
       streamFn,
       scope,
-      taskContext: MOCK_TASK_CONTEXT,
+      taskContext,
       getWorkStatus: () => "script_draft",
       vehicleService: new InMemoryVehicleService([]),
       stageSuggestionReader: { ...reader, videoTaskId: "task_other" },
@@ -174,9 +239,10 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
 });
 
 test("every dynamically assembled production tool is allowlisted and no approval decision tool is registered", () => {
+  const taskContext = taskContextWithAssetSnapshot();
   const strategyService = {
-    videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
-    async currentRevision() { return MOCK_TASK_CONTEXT.videoTask.revision; },
+    videoTaskId: taskContext.videoTask.id,
+    async currentRevision() { return taskContext.videoTask.revision; },
     async generate() { throw new Error("not called"); },
     async validate() { return { valid: true, issues: [] }; },
     async requestApproval() { throw new Error("not called"); },
@@ -185,17 +251,17 @@ test("every dynamically assembled production tool is allowlisted and no approval
     model,
     streamFn,
     scope,
-    taskContext: MOCK_TASK_CONTEXT,
+    taskContext,
     getWorkStatus: () => "strategy_draft",
     vehicleService: new InMemoryVehicleService([]),
     strategyService,
     taskAssetReader: {
-      videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
-      assetSnapshotId: MOCK_TASK_CONTEXT.videoTask.assetSnapshotId!,
+      videoTaskId: taskContext.videoTask.id,
+      assetSnapshotId: TASK_ASSET_SNAPSHOT_ID,
       async read() { throw new Error("not called"); },
     },
     stageSuggestionReader: {
-      videoTaskId: MOCK_TASK_CONTEXT.videoTask.id,
+      videoTaskId: taskContext.videoTask.id,
       async read() { throw new Error("not called"); },
     },
   });

@@ -9,15 +9,15 @@ import type {
 import { LocalBusinessRuntime } from "./business-runtime.ts";
 
 function stageForLegacyStatus(status: WorkStatus): VideoTaskStage {
-  if (status === "strategy_approved") return "asset_matching";
   if (
+    status === "strategy_approved" ||
     status === "script_draft" ||
-    status === "awaiting_script_approval" ||
-    status === "script_approved" ||
-    status === "prompt_draft" ||
-    status === "awaiting_prompt_approval"
+    status === "awaiting_script_approval"
   ) return "script";
+  if (status === "script_approved") return "asset_matching";
   if (
+    status === "prompt_draft" ||
+    status === "awaiting_prompt_approval" ||
     status === "prompt_approved" ||
     status === "storyboard_draft" ||
     status === "awaiting_storyboard_approval"

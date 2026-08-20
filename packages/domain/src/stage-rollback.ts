@@ -54,10 +54,8 @@ function assertRollbackScope(
 
 function planDownstreamInvalidations(
   record: Readonly<VideoTaskProductionRecord>,
-  stage: VideoTaskStage,
   fromArtifactVersionId: string,
 ): PlannedInvalidation[] {
-  const stageIndex = videoTaskStageOrder.indexOf(stage);
   const alreadyInvalidated = new Set(
     record.stageArtifactInvalidations.map((item) => item.artifactVersionId),
   );
@@ -70,8 +68,7 @@ function planDownstreamInvalidations(
     for (const artifact of record.stageArtifactVersions) {
       if (
         affectedIds.has(artifact.id) ||
-        alreadyInvalidated.has(artifact.id) ||
-        videoTaskStageOrder.indexOf(artifact.stage) <= stageIndex
+        alreadyInvalidated.has(artifact.id)
       ) {
         continue;
       }
@@ -102,6 +99,41 @@ function rollbackWorkflowState(stage: VideoTaskStage): {
     return { status: "completed", currentStage: "delivery", stageStatus: "confirmed" };
   }
   return { status: "active", currentStage: nextStage, stageStatus: "in_progress" };
+}
+
+function resumedWorkflowState(
+  record: Readonly<VideoTaskProductionRecord>,
+  activeStageArtifactVersionIds: Readonly<Partial<Record<VideoTaskStage, string>>>,
+  stage: VideoTaskStage,
+  invalidatedArtifactIds: ReadonlySet<string>,
+): ReturnType<typeof rollbackWorkflowState> {
+  if (invalidatedArtifactIds.size === 0) return rollbackWorkflowState(stage);
+  let upstreamStage: VideoTaskStage | undefined;
+  let upstreamArtifactVersionId: string | undefined;
+  for (const candidateStage of videoTaskStageOrder) {
+    const artifactVersionId = activeStageArtifactVersionIds[candidateStage];
+    const artifact = record.stageArtifactVersions.find(
+      (candidate) =>
+        candidate.id === artifactVersionId &&
+        candidate.stage === candidateStage &&
+        !invalidatedArtifactIds.has(candidate.id),
+    );
+    const dependsOnCurrentUpstream = upstreamStage === undefined || (
+      upstreamArtifactVersionId !== undefined &&
+      artifact?.dependencies.some(
+        (dependency) =>
+          dependency.kind === "stage_artifact" &&
+          dependency.stage === upstreamStage &&
+          dependency.artifactVersionId === upstreamArtifactVersionId,
+      )
+    );
+    if (artifact === undefined || !dependsOnCurrentUpstream) {
+      return { status: "active", currentStage: candidateStage, stageStatus: "in_progress" };
+    }
+    upstreamStage = candidateStage;
+    upstreamArtifactVersionId = artifact.id;
+  }
+  return { status: "completed", currentStage: "delivery", stageStatus: "confirmed" };
 }
 
 export function rollbackVideoTaskStage(
@@ -143,7 +175,7 @@ export function rollbackVideoTaskStage(
     throw new StageRollbackDeniedError("An invalidated artifact version cannot be selected.");
   }
 
-  const planned = planDownstreamInvalidations(record, request.stage, activeArtifact.id);
+  const planned = planDownstreamInvalidations(record, activeArtifact.id);
   const rollbackId = context.createId("rollback");
   const invalidationIdsByArtifact = new Map<string, string>();
   for (const item of planned) {
@@ -202,12 +234,35 @@ export function rollbackVideoTaskStage(
       delete activeStageArtifactVersionIds[invalidation.stage];
     }
   }
-  const workflow = rollbackWorkflowState(request.stage);
+  const workflow = resumedWorkflowState(
+    record,
+    activeStageArtifactVersionIds,
+    request.stage,
+    new Set(planned.map(({ artifact }) => artifact.id)),
+  );
+  const videoTask = structuredClone(record.videoTask);
+  const activeAssetMatchingArtifactId = activeStageArtifactVersionIds.asset_matching;
+  const activeAssetMatchingArtifact = record.stageArtifactVersions.find(
+    (artifact) =>
+      artifact.id === activeAssetMatchingArtifactId && artifact.stage === "asset_matching",
+  );
+  if (activeAssetMatchingArtifact === undefined) {
+    delete videoTask.assetSnapshotId;
+  } else {
+    const selectedAssetSnapshot = activeAssetMatchingArtifact.dependencies.find(
+      (dependency) => dependency.kind === "asset_snapshot",
+    );
+    if (selectedAssetSnapshot?.kind === "asset_snapshot") {
+      videoTask.assetSnapshotId = selectedAssetSnapshot.assetSnapshotId;
+    } else {
+      delete videoTask.assetSnapshotId;
+    }
+  }
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
-      ...structuredClone(record.videoTask),
+      ...videoTask,
       ...workflow,
       revision: record.videoTask.revision + 1,
       updatedAt: context.occurredAt,

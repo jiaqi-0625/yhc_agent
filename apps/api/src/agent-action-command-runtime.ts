@@ -24,7 +24,6 @@ import type {
 import type { BatchProjectAggregate, BatchProjectStore } from "./batch-project-store.ts";
 import { BusinessRuntimeError } from "./business-runtime.ts";
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
-import type { TemporaryAssetStore } from "./temporary-asset-store.ts";
 import {
   defaultProjectAssetCoordinator,
   type ProjectAssetCoordinator,
@@ -97,7 +96,6 @@ export class AgentActionCommandRuntime {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: (kind: CommandIdKind) => string =
       (kind) => `${kind}_${randomUUID()}`,
-    private readonly temporaryAssets?: TemporaryAssetStore,
     private readonly assetCoordinator: ProjectAssetCoordinator = defaultProjectAssetCoordinator,
   ) {}
 
@@ -226,51 +224,6 @@ export class AgentActionCommandRuntime {
       createdAt: occurredAt,
       createdBy: actorAccountId,
     };
-  }
-
-  async #assertTemporaryReferencesUsable(
-    aggregate: Readonly<BatchProjectAggregate>,
-    occurredAt: string,
-  ): Promise<void> {
-    const { project, assetPool } = aggregate;
-    const references = assetPool.assets.filter((asset) => asset.source === "local_upload");
-    if (references.length === 0) return;
-    if (this.temporaryAssets === undefined) {
-      throw runtimeError(
-        "AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID",
-        "Temporary asset metadata is unavailable for command snapshot validation.",
-        409,
-      );
-    }
-    const assets = await this.temporaryAssets.loadProject(project.id);
-    const occurredAtTimestamp = Date.parse(occurredAt);
-    for (const reference of references) {
-      const asset = assets.find((candidate) => candidate.id === reference.assetId);
-      const expiresAtTimestamp = asset?.expiresAt === undefined
-        ? undefined
-        : Date.parse(asset.expiresAt);
-      if (
-        asset === undefined ||
-        !Number.isFinite(occurredAtTimestamp) ||
-        asset.tenantId !== project.tenantId ||
-        asset.batchProjectId !== project.id ||
-        asset.vehicleId !== project.vehicleId ||
-        asset.version !== reference.version ||
-        asset.category !== reference.category ||
-        asset.checksumSha256.toLowerCase() !== reference.checksumSha256.toLowerCase() ||
-        asset.validationStatus !== "valid" ||
-        !asset.rightsConfirmed ||
-        asset.validationIssues.length > 0 ||
-        (expiresAtTimestamp !== undefined &&
-          (!Number.isFinite(expiresAtTimestamp) || expiresAtTimestamp <= occurredAtTimestamp))
-      ) {
-        throw runtimeError(
-          "AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID",
-          "A project-local asset is invalid, expired, or no longer matches its pool reference.",
-          409,
-        );
-      }
-    }
   }
 
   #receipt(

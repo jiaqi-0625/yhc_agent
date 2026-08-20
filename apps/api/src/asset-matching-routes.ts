@@ -22,8 +22,10 @@ const TemporaryUploadPath = new RegExp(
   "u",
 );
 const LockSelectionSchema = Type.Object({
+  requestId: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
   expectedTaskRevision: Type.Integer({ minimum: 1 }),
-  selectedAssets: Type.Array(AssetReferenceSchema, { minItems: 1, maxItems: 500 }),
+  expectedProjectAssetPoolRevision: Type.Integer({ minimum: 1 }),
+  selectedAssets: Type.Array(AssetReferenceSchema, { maxItems: 498 }),
 }, { additionalProperties: false });
 const UploadSchema = Type.Object({
   fileName: Type.String({ minLength: 1, maxLength: 255, pattern: "^[^\\\\/\\r\\n]+$" }),
@@ -145,7 +147,12 @@ export async function handleAssetMatchingRoute(
       return true;
     }
     if (request.method === "POST") {
-      const body = validateBody<{ expectedTaskRevision: number; selectedAssets: AssetReference[] }>(
+      const body = validateBody<{
+        requestId: string;
+        expectedTaskRevision: number;
+        expectedProjectAssetPoolRevision: number;
+        selectedAssets: AssetReference[];
+      }>(
         LockSelectionSchema,
         await readJson(request),
       );
@@ -155,7 +162,9 @@ export async function handleAssetMatchingRoute(
         await runtime.lockSelection(
           matching[1],
           matching[2],
+          body.requestId,
           body.expectedTaskRevision,
+          body.expectedProjectAssetPoolRevision,
           body.selectedAssets,
           session.scope,
         ),

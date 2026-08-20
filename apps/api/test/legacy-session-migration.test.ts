@@ -64,7 +64,7 @@ function snapshot(): VehicleSnapshot {
 
 function taskRecord(overrides: Partial<VideoTaskProductionRecord["videoTask"]> = {}): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: taskId,
       tenantId: project.tenantId,

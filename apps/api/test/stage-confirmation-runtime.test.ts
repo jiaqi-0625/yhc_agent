@@ -16,7 +16,7 @@ import {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: "task_persisted",
       tenantId: "tenant_firefly",
@@ -28,7 +28,6 @@ function productionRecord(): VideoTaskProductionRecord {
       stageStatus: "awaiting_confirmation",
       revision: 5,
       vehicleSnapshotId: "vehicle_snapshot_1",
-      assetSnapshotId: "asset_snapshot_1",
       audience: "家庭用户",
       theme: "城市通勤",
       durationSeconds: 30,
@@ -415,7 +414,7 @@ test("store upgrades WS-102 schema v1 records and selects each stage's latest ve
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 6);
+  assert.equal(upgraded?.schemaVersion, 7);
   assert.equal(upgraded?.activeStageArtifactVersionIds.strategy, "strategy_v2");
   assert.deepEqual(upgraded?.stageRollbacks, []);
   assert.deepEqual(upgraded?.stageArtifactInvalidations, []);
@@ -437,7 +436,7 @@ test("store upgrades WS-103 schema v2 records with an empty ownership audit", as
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 6);
+  assert.equal(upgraded?.schemaVersion, 7);
   assert.deepEqual(upgraded?.ownershipTransfers, []);
   assert.deepEqual(upgraded?.taskAssetSnapshots, []);
   assert.deepEqual(upgraded?.stageMutationReceipts, []);
@@ -456,7 +455,7 @@ test("store upgrades WS-202 schema v3 records with an empty task asset snapshot 
   await writeFile(join(directory, "task_persisted.json"), `${JSON.stringify(legacy)}\n`, "utf8");
 
   const upgraded = await new LocalVideoTaskProductionStore(directory).load("task_persisted");
-  assert.equal(upgraded?.schemaVersion, 6);
+  assert.equal(upgraded?.schemaVersion, 7);
   assert.deepEqual(upgraded?.taskAssetSnapshots, []);
   assert.deepEqual(upgraded?.stageMutationReceipts, []);
   assert.equal(upgraded?.ownershipTransfers.length, current.ownershipTransfers.length);

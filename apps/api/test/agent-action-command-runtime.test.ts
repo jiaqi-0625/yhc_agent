@@ -436,7 +436,7 @@ test("locked vehicle facts survive catalog archival and successful commands repl
   assert.equal(replayed.videoTask.ownerAccountId, "account_creator_b");
 });
 
-test("strategy ignores mutable temporary candidates while project authorization precedes task lookup", async () => {
+test("project authorization precedes task lookup and unusable temporary assets do not block strategy", async () => {
   const { administration, creator, projects, taskId, tasks } = await fixture();
   const temporaryAssets = new LocalTemporaryAssetStore(".data/test-ws305-temporary", false);
   const checksumSha256 = "c".repeat(64);
@@ -477,20 +477,21 @@ test("strategy ignores mutable temporary candidates while project authorization 
     updatedAt: "2026-08-19T14:00:00.000Z",
     updatedBy: creator.actorAccountId,
   }]);
+  let temporarySequence = 0;
   const runtime = new AgentActionCommandRuntime(
     administration,
     projects,
     tasks,
     () => "2026-08-19T14:30:00.000Z",
-    (kind) => `${kind}_temporary_test`,
-    temporaryAssets,
+    (kind) => `${kind}_temporary_test_${++temporarySequence}`,
   );
 
-  const generated = await runtime.execute(project.id, taskId, {
-      requestId: "command_expired_asset",
-      card: generateCard(taskId),
-    }, creator);
-  assert.equal(generated.videoTask.assetSnapshotId, undefined);
+  const generatedWithExpiredAsset = await runtime.execute(project.id, taskId, {
+    requestId: "command_expired_asset",
+    card: generateCard(taskId),
+  }, creator);
+  assert.equal(generatedWithExpiredAsset.videoTask.revision, 2);
+  assert.equal(generatedWithExpiredAsset.videoTask.assetSnapshotId, undefined);
   await temporaryAssets.transactProject(project.id, (current) => current.map((asset) => ({
     ...asset,
     revision: asset.revision + 1,
@@ -501,6 +502,11 @@ test("strategy ignores mutable temporary candidates while project authorization 
     }],
     expiresAt: "2026-08-20T14:30:00.000Z",
   })));
+  const regeneratedWithReviewAsset = await runtime.execute(project.id, taskId, {
+    requestId: "command_review_asset",
+    card: generateCard(taskId, 2),
+  }, creator);
+  assert.equal(regeneratedWithReviewAsset.videoTask.revision, 3);
   assert.equal((await tasks.load(taskId))?.taskAssetSnapshots.length, 0);
   await assert.rejects(
     runtime.execute(project.id, "task_guessed", {
@@ -511,7 +517,7 @@ test("strategy ignores mutable temporary candidates while project authorization 
   );
 });
 
-test("strategy regeneration remains independent from the mutable project asset pool", async () => {
+test("strategy regeneration stays vehicle-bound after a later project asset expires", async () => {
   const { administration, commandRuntime, creator, projects, taskId, tasks } = await fixture();
   await commandRuntime.execute(project.id, taskId, {
     requestId: "command_lock_asset_snapshot",
@@ -566,7 +572,6 @@ test("strategy regeneration remains independent from the mutable project asset p
     tasks,
     () => "2026-08-19T14:30:00.000Z",
     (kind) => `${kind}_locked_regeneration`,
-    temporaryAssets,
   );
 
   const regenerated = await runtime.execute(project.id, taskId, {
@@ -578,6 +583,7 @@ test("strategy regeneration remains independent from the mutable project asset p
   assert.equal(regenerated.receipt.result.kind, "strategy_generated");
   const persisted = await tasks.load(taskId);
   assert.equal(persisted?.taskAssetSnapshots.length, 0);
+  assert.equal(persisted?.videoTask.assetSnapshotId, undefined);
   assert.equal(persisted?.strategyDrafts.length, 2);
 });
 

@@ -114,7 +114,7 @@ function pool(overrides: Partial<ProjectAssetPool> = {}): ProjectAssetPool {
 
 function record(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: "task_asset_lock",
       tenantId: project.tenantId,
@@ -123,7 +123,7 @@ function record(): VideoTaskProductionRecord {
       ownerAccountId: "account_owner",
       status: "active",
       currentStage: "asset_matching",
-      stageStatus: "in_progress",
+      stageStatus: "awaiting_confirmation",
       revision: 5,
       vehicleSnapshotId: "vehicle_snapshot_1",
       audience: "家庭用户",
@@ -311,7 +311,7 @@ test("lockVideoTaskAssetSnapshot atomically appends an immutable snapshot and ad
   const sourcePool = pool();
   const result = lockVideoTaskAssetSnapshot(source, project, sourcePool, 5, context());
 
-  assert.equal(result.schemaVersion, 6);
+  assert.equal(result.schemaVersion, 7);
   assert.equal(result.videoTask.assetSnapshotId, "asset_snapshot_created");
   assert.equal(result.videoTask.revision, 6);
   assert.equal(result.videoTask.updatedAt, "2026-08-19T06:00:00.000Z");
@@ -335,6 +335,34 @@ test("lockVideoTaskAssetSnapshot atomically appends an immutable snapshot and ad
   assert.deepEqual(source.taskAssetSnapshots, []);
   sourcePool.assets[0] = vehicleAsset(9);
   assert.equal(result.taskAssetSnapshots[0]?.assets[0]?.version, 1);
+});
+
+test("asset-matching confirmation options replace the pointer without a separate revision advance", () => {
+  const source = record();
+  source.videoTask.assetSnapshotId = "asset_snapshot_previous";
+  source.taskAssetSnapshots.push({
+    id: "asset_snapshot_previous",
+    tenantId: project.tenantId,
+    batchProjectId: project.id,
+    videoTaskId: source.videoTask.id,
+    version: 1,
+    sourceProjectAssetPoolRevision: 1,
+    vehicleSnapshotId: "vehicle_snapshot_1",
+    assets: [vehicleAsset()],
+    createdAt: "2026-08-18T10:00:00.000Z",
+    createdBy: "account_owner",
+  });
+
+  const result = lockVideoTaskAssetSnapshot(source, project, pool(), 5, context(), {
+    advanceTaskRevision: false,
+    replaceExistingAssetSnapshot: true,
+  });
+
+  assert.equal(result.videoTask.revision, 5);
+  assert.equal(result.videoTask.assetSnapshotId, "asset_snapshot_created");
+  assert.equal(result.taskAssetSnapshots.length, 2);
+  assert.equal(result.taskAssetSnapshots[1]?.version, 2);
+  assert.equal(source.videoTask.assetSnapshotId, "asset_snapshot_previous");
 });
 
 test("lockVideoTaskAssetSnapshot increments snapshot versions from immutable history", () => {
@@ -408,7 +436,7 @@ test("lockVideoTaskAssetSnapshot rejects already locked, invalid workflow, and m
   const invalidWorkflowRecords = [record(), record(), record()];
   invalidWorkflowRecords[0]!.videoTask.status = "completed";
   invalidWorkflowRecords[1]!.videoTask.currentStage = "script";
-  invalidWorkflowRecords[2]!.videoTask.stageStatus = "awaiting_confirmation";
+  invalidWorkflowRecords[2]!.videoTask.stageStatus = "in_progress";
   for (const invalid of invalidWorkflowRecords) {
     assert.throws(
       () => lockVideoTaskAssetSnapshot(invalid, project, pool(), 5, context()),
@@ -467,4 +495,23 @@ test("asset matching locks the exact human selection and rejects catalog outside
     ),
     assetPoolError("AIC-ASSET-POOL_SCOPE_INVALID"),
   );
+
+  const substitutedSelections: AssetReference[][] = [
+    [vehicleAsset(2), reusableAsset()],
+    [vehicleAsset(), reusableAsset(1, { category: "scene" })],
+    [vehicleAsset(), temporaryAsset({ checksumSha256: "b".repeat(64) })],
+  ];
+  for (const substitutedSelection of substitutedSelections) {
+    assert.throws(
+      () => lockVideoTaskAssetSnapshot(
+        record(),
+        project,
+        sourcePool,
+        5,
+        context(),
+        substitutedSelection,
+      ),
+      assetPoolError("AIC-ASSET-POOL_SCOPE_INVALID"),
+    );
+  }
 });

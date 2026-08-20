@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import type { VideoTaskProductionRecord } from "@firefly/domain";
+import {
+  rollbackVideoTaskStage,
+  type VideoTaskProductionRecord,
+} from "@firefly/domain";
 
 import {
   LocalVideoTaskProductionStore,
@@ -19,7 +22,7 @@ function record(
   batchProjectId = "project_e5_launch",
 ): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id,
       tenantId,
@@ -238,7 +241,6 @@ function recordWithArtifactGraph(): VideoTaskProductionRecord {
     ...value.videoTask,
     revision: 12,
     vehicleSnapshotId: "vehicle_snapshot_e5_v1",
-    assetSnapshotId: "asset_snapshot_1",
   };
   value.taskVehicleSnapshots = [structuredClone(recordWithCommandState().taskVehicleSnapshots[0]!)];
   value.taskAssetSnapshots = [{
@@ -479,6 +481,113 @@ function recordWithAllMutationReceipts(): VideoTaskProductionRecord {
   return value;
 }
 
+function legacyV6WorkflowRecord(kind: "early" | "advanced"): VideoTaskProductionRecord {
+  const value = record(`task_legacy_v6_${kind}`);
+  const vehicleSnapshotId = `vehicle_snapshot_legacy_v6_${kind}`;
+  const assetSnapshotId = `asset_snapshot_legacy_v6_${kind}`;
+  value.videoTask = {
+    ...value.videoTask,
+    currentStage: kind === "early" ? "asset_matching" : "storyboard",
+    stageStatus: "in_progress",
+    revision: 10,
+    vehicleSnapshotId,
+    assetSnapshotId,
+  };
+  value.taskVehicleSnapshots = [{
+    id: vehicleSnapshotId,
+    projectId: value.videoTask.batchProjectId,
+    vehicleId: "vehicle_e5",
+    vehicleVersion: 1,
+    brandId: "brand_firefly",
+    brand: "萤火汽车",
+    series: "E5",
+    modelYear: 2026,
+    trim: "长续航版",
+    parameters: {},
+    fixedClaims: [],
+    optionalClaims: [],
+    prohibitedClaims: [],
+    referenceAssetIds: ["asset_vehicle_legacy_v6"],
+    createdAt: "2026-08-19T08:00:00.000Z",
+    createdBy: "account_creator",
+  }];
+  value.taskAssetSnapshots = [{
+    id: assetSnapshotId,
+    tenantId: value.videoTask.tenantId,
+    batchProjectId: value.videoTask.batchProjectId,
+    videoTaskId: value.videoTask.id,
+    version: 1,
+    sourceProjectAssetPoolRevision: 2,
+    vehicleSnapshotId,
+    assets: [{
+      assetId: "asset_vehicle_legacy_v6",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "vehicle",
+      vehicleId: "vehicle_e5",
+    }],
+    createdAt: "2026-08-19T08:00:30.000Z",
+    createdBy: "account_creator",
+  }];
+
+  const stages = kind === "early"
+    ? ["strategy"] as const
+    : ["strategy", "asset_matching", "script", "storyboard"] as const;
+  let upstream:
+    | { stage: (typeof stages)[number]; artifactVersionId: string }
+    | undefined;
+  for (const [index, stage] of stages.entries()) {
+    const artifactVersionId = `artifact_legacy_v6_${kind}_${stage}`;
+    const confirmationId = `confirmation_legacy_v6_${kind}_${stage}`;
+    const occurredAt = `2026-08-19T08:0${index + 1}:00.000Z`;
+    value.stageArtifactVersions.push({
+      id: artifactVersionId,
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage,
+      version: 1,
+      content: {
+        artifactId: `content_legacy_v6_${kind}_${stage}`,
+        schemaName: `${stage}_artifact`,
+        schemaVersion: 1,
+        contentHashSha256: (index + 1).toString(16).repeat(64),
+      },
+      dependencies: [
+        { kind: "vehicle_snapshot", vehicleSnapshotId },
+        { kind: "asset_snapshot", assetSnapshotId },
+        ...(upstream === undefined
+          ? []
+          : [{
+              kind: "stage_artifact" as const,
+              stage: upstream.stage,
+              artifactVersionId: upstream.artifactVersionId,
+            }]),
+      ],
+      provenance: { kind: "human_confirmation", confirmationId },
+      createdAt: occurredAt,
+      createdBy: "account_creator",
+    });
+    value.stageConfirmations.push({
+      id: confirmationId,
+      tenantId: value.videoTask.tenantId,
+      batchProjectId: value.videoTask.batchProjectId,
+      videoTaskId: value.videoTask.id,
+      stage,
+      artifactVersionId,
+      decision: "confirmed",
+      source: "human_action",
+      expectedTaskRevision: index + 1,
+      actorAccountId: "account_creator",
+      occurredAt,
+    });
+    value.activeStageArtifactVersionIds[stage] = artifactVersionId;
+    upstream = { stage, artifactVersionId };
+  }
+  return value;
+}
+
 function transactionLockDirectory(directory: string): string {
   const digest = createHash("sha256").update("task:task_launch_hero").digest("hex");
   return join(directory, ".locks", `${digest}.lock`);
@@ -510,7 +619,7 @@ test("video task store creates, scopes, sorts, and returns defensive copies", as
   assert.equal((await store.list("tenant_missing")).length, 0);
 });
 
-test("v6 command state accepts warnings and preserves its complete reference graph", async (context) => {
+test("v7 command state accepts warnings and preserves its complete reference graph", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-command-state-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const store = new LocalVideoTaskProductionStore(directory);
@@ -647,7 +756,7 @@ test("legacy migration approval identities and artifact provenance fail closed",
   }
 });
 
-test("v6 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {
+test("v7 command state fails closed on invalid scope, pointers, revisions, and request identities", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["draft scope", (candidate) => { candidate.strategyDrafts[0]!.tenantId = "tenant_attacker"; }],
     ["vehicle scope", (candidate) => { candidate.taskVehicleSnapshots[0]!.projectId = "project_attacker"; }],
@@ -734,7 +843,7 @@ test("v6 command state fails closed on invalid scope, pointers, revisions, and r
   }
 });
 
-test("v6 artifact graph accepts a complete rollback invalidation closure", async (context) => {
+test("v7 artifact graph accepts a complete rollback invalidation closure", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v5-artifact-graph-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   const input = recordWithArtifactGraph();
@@ -745,7 +854,7 @@ test("v6 artifact graph accepts a complete rollback invalidation closure", async
   );
 });
 
-test("v6 artifact graph fails closed on invalid dependencies and provenance", async () => {
+test("v7 artifact graph fails closed on invalid dependencies and provenance", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["missing dependency artifact", (candidate) => {
       candidate.stageArtifactVersions[2]!.dependencies[0] = {
@@ -766,6 +875,13 @@ test("v6 artifact graph fails closed on invalid dependencies and provenance", as
         kind: "stage_artifact",
         stage: "script",
         artifactVersionId: "artifact_script_v1",
+      };
+    }],
+    ["non-adjacent stage dependency", (candidate) => {
+      candidate.stageArtifactVersions[3]!.dependencies[0] = {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: "artifact_strategy_v2",
       };
     }],
     ["missing vehicle snapshot", (candidate) => {
@@ -822,7 +938,7 @@ test("v6 artifact graph fails closed on invalid dependencies and provenance", as
   }
 });
 
-test("v6 artifact graph fails closed on invalid rollback and invalidation closure", async () => {
+test("v7 artifact graph fails closed on invalid rollback and invalidation closure", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["missing rollback source", (candidate) => {
       candidate.stageRollbacks[0]!.fromArtifactVersionId = "artifact_missing";
@@ -898,14 +1014,14 @@ test("v6 artifact graph fails closed on invalid rollback and invalidation closur
   }
 });
 
-test("v6 mutation receipts preserve a complete command and stage audit graph", async () => {
+test("v7 mutation receipts preserve a complete command and stage audit graph", async () => {
   const input = recordWithAllMutationReceipts();
   const store = new LocalVideoTaskProductionStore(".data/test-video-task-v6-receipt-graph", false);
   await store.save(input);
   assert.deepEqual(await store.load(input.videoTask.id), input);
 });
 
-test("v6 mutation receipts reserve IDs, actor requests, and revisions across collections", async () => {
+test("v7 mutation receipts reserve IDs, actor requests, and revisions across collections", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void, RegExp]> = [
     ["receipt ID", (candidate) => {
       candidate.stageMutationReceipts[0]!.id = candidate.commandReceipts[0]!.id;
@@ -931,7 +1047,7 @@ test("v6 mutation receipts reserve IDs, actor requests, and revisions across col
   }
 });
 
-test("v6 confirmation receipts fail closed on mismatched result and audit details", async () => {
+test("v7 confirmation receipts fail closed on mismatched result and audit details", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["confirmation ID", (candidate) => {
       const receipt = candidate.stageMutationReceipts[0];
@@ -980,7 +1096,7 @@ test("v6 confirmation receipts fail closed on mismatched result and audit detail
   }
 });
 
-test("v6 rollback receipts fail closed on mismatched result and audit details", async () => {
+test("v7 rollback receipts fail closed on mismatched result and audit details", async () => {
   const cases: Array<[string, (candidate: VideoTaskProductionRecord) => void]> = [
     ["rollback ID", (candidate) => {
       const receipt = candidate.stageMutationReceipts.at(-1);
@@ -1151,6 +1267,79 @@ test("transactions preserve immutable audit history and require an audited activ
   );
 });
 
+test("an audited legacy asset rollback can clear a pointer when its target has no snapshot dependency", async () => {
+  const seed = legacyV6WorkflowRecord("advanced");
+  const targetArtifactId = "artifact_legacy_asset_without_snapshot";
+  seed.stageArtifactVersions.push({
+    id: targetArtifactId,
+    tenantId: seed.videoTask.tenantId,
+    batchProjectId: seed.videoTask.batchProjectId,
+    videoTaskId: seed.videoTask.id,
+    stage: "asset_matching",
+    version: 2,
+    content: {
+      artifactId: "content_legacy_asset_without_snapshot",
+      schemaName: "asset_matching_artifact",
+      schemaVersion: 1,
+      contentHashSha256: "d".repeat(64),
+    },
+    dependencies: [
+      {
+        kind: "vehicle_snapshot",
+        vehicleSnapshotId: seed.videoTask.vehicleSnapshotId!,
+      },
+      {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: seed.activeStageArtifactVersionIds.strategy!,
+      },
+    ],
+    provenance: {
+      kind: "legacy_inferred",
+      migrationId: "migration_legacy_asset_without_snapshot",
+      note: "旧资产匹配版本没有任务素材快照依赖。",
+    },
+    createdAt: "2026-08-19T08:00:30.000Z",
+    createdBy: "account_creator",
+  });
+  const store = new LocalVideoTaskProductionStore(
+    ".data/test-video-task-v7-legacy-asset-rollback",
+    false,
+  );
+  await store.save(seed);
+
+  const result = await store.transact(seed.videoTask.id, (current) => {
+    assert.ok(current);
+    let sequence = 0;
+    return rollbackVideoTaskStage(
+      current,
+      {
+        expectedTaskRevision: current.videoTask.revision,
+        stage: "asset_matching",
+        targetArtifactVersionId: targetArtifactId,
+        reason: "恢复旧版选材并按新顺序重新确认。",
+      },
+      {
+        tenantId: current.videoTask.tenantId,
+        batchProjectId: current.videoTask.batchProjectId,
+        actorAccountId: current.videoTask.ownerAccountId,
+        occurredAt: "2026-08-19T09:00:00.000Z",
+        createId: (kind) => `${kind}_legacy_asset_${++sequence}`,
+      },
+    );
+  });
+
+  assert.equal(result.videoTask.assetSnapshotId, undefined);
+  assert.equal(result.videoTask.currentStage, "script");
+  assert.equal(result.activeStageArtifactVersionIds.asset_matching, targetArtifactId);
+  assert.equal(result.activeStageArtifactVersionIds.script, undefined);
+  assert.equal(result.activeStageArtifactVersionIds.storyboard, undefined);
+  assert.deepEqual(
+    result.stageArtifactInvalidations.map(({ stage }) => stage),
+    ["script", "storyboard"],
+  );
+});
+
 test("transactions reject receipt backfills but allow an exact idempotent replay", async () => {
   const receiptSource = recordWithStageMutationReceipts();
   for (const [index, receipt] of [
@@ -1196,8 +1385,8 @@ test("transactions reject receipt backfills but allow an exact idempotent replay
   );
 });
 
-test("persisted v1 through v5 aggregates upgrade explicitly to v6", async (context) => {
-  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v6-upgrade-"));
+test("persisted v1 through v5 aggregates upgrade explicitly to v7", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v7-upgrade-"));
   context.after(async () => rm(directory, { recursive: true, force: true }));
   for (const version of [1, 2, 3, 4, 5] as const) {
     const current = version === 5
@@ -1264,7 +1453,7 @@ test("persisted v1 through v5 aggregates upgrade explicitly to v6", async (conte
       "utf8",
     );
     const upgraded = await new LocalVideoTaskProductionStore(directory).load(current.videoTask.id);
-    assert.equal(upgraded?.schemaVersion, 6);
+    assert.equal(upgraded?.schemaVersion, 7);
     assert.deepEqual(upgraded?.stageMutationReceipts, []);
     if (version === 5) {
       assert.deepEqual(upgraded?.taskVehicleSnapshots, current.taskVehicleSnapshots);
@@ -1284,6 +1473,114 @@ test("persisted v1 through v5 aggregates upgrade explicitly to v6", async (conte
       legacyApprovalId: `legacy_confirmation_v${version}`,
     });
   }
+});
+
+test("persisted v6 old-order early and advanced workflows resume at script without losing history", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v6-workflow-upgrade-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+
+  for (const kind of ["early", "advanced"] as const) {
+    const legacy = legacyV6WorkflowRecord(kind);
+    const historicalArtifacts = structuredClone(legacy.stageArtifactVersions);
+    const historicalConfirmations = structuredClone(legacy.stageConfirmations);
+    const historicalAssetSnapshots = structuredClone(legacy.taskAssetSnapshots);
+    await writeFile(
+      join(directory, `${legacy.videoTask.id}.json`),
+      `${JSON.stringify({ ...structuredClone(legacy), schemaVersion: 6 })}\n`,
+      "utf8",
+    );
+
+    const upgraded = await new LocalVideoTaskProductionStore(directory).load(
+      legacy.videoTask.id,
+    );
+    assert.ok(upgraded);
+    assert.equal(upgraded.schemaVersion, 7);
+    assert.equal(upgraded.videoTask.currentStage, "script");
+    assert.equal(upgraded.videoTask.stageStatus, "in_progress");
+    assert.equal(upgraded.videoTask.status, "active");
+    assert.equal(upgraded.videoTask.revision, legacy.videoTask.revision);
+    assert.equal(upgraded.videoTask.assetSnapshotId, undefined);
+    assert.deepEqual(upgraded.activeStageArtifactVersionIds, {
+      strategy: `artifact_legacy_v6_${kind}_strategy`,
+    });
+    assert.deepEqual(upgraded.stageArtifactVersions, historicalArtifacts);
+    assert.deepEqual(upgraded.stageConfirmations, historicalConfirmations);
+    assert.deepEqual(upgraded.taskAssetSnapshots, historicalAssetSnapshots);
+  }
+});
+
+test("persisted v6 canonical in-progress selection keeps strategy and script but clears the unconfirmed pointer", async (context) => {
+  const directory = await mkdtemp(join(tmpdir(), "firefly-video-task-v6-unconfirmed-selection-"));
+  context.after(async () => rm(directory, { recursive: true, force: true }));
+
+  const legacy = legacyV6WorkflowRecord("early");
+  const strategy = legacy.stageArtifactVersions[0]!;
+  strategy.dependencies = strategy.dependencies.filter(
+    (dependency) => dependency.kind !== "asset_snapshot",
+  );
+  const scriptArtifactId = "artifact_legacy_v6_canonical_script";
+  const scriptConfirmationId = "confirmation_legacy_v6_canonical_script";
+  legacy.stageArtifactVersions.push({
+    id: scriptArtifactId,
+    tenantId: legacy.videoTask.tenantId,
+    batchProjectId: legacy.videoTask.batchProjectId,
+    videoTaskId: legacy.videoTask.id,
+    stage: "script",
+    version: 1,
+    content: {
+      artifactId: "content_legacy_v6_canonical_script",
+      schemaName: "script_artifact",
+      schemaVersion: 1,
+      contentHashSha256: "a".repeat(64),
+    },
+    dependencies: [
+      {
+        kind: "vehicle_snapshot",
+        vehicleSnapshotId: legacy.videoTask.vehicleSnapshotId!,
+      },
+      {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: strategy.id,
+      },
+    ],
+    provenance: { kind: "human_confirmation", confirmationId: scriptConfirmationId },
+    createdAt: "2026-08-19T08:02:00.000Z",
+    createdBy: "account_creator",
+  });
+  legacy.stageConfirmations.push({
+    id: scriptConfirmationId,
+    tenantId: legacy.videoTask.tenantId,
+    batchProjectId: legacy.videoTask.batchProjectId,
+    videoTaskId: legacy.videoTask.id,
+    stage: "script",
+    artifactVersionId: scriptArtifactId,
+    decision: "confirmed",
+    source: "human_action",
+    expectedTaskRevision: 2,
+    actorAccountId: "account_creator",
+    occurredAt: "2026-08-19T08:02:00.000Z",
+  });
+  legacy.activeStageArtifactVersionIds.script = scriptArtifactId;
+  const historicalSnapshots = structuredClone(legacy.taskAssetSnapshots);
+  await writeFile(
+    join(directory, `${legacy.videoTask.id}.json`),
+    `${JSON.stringify({ ...structuredClone(legacy), schemaVersion: 6 })}\n`,
+    "utf8",
+  );
+
+  const upgraded = await new LocalVideoTaskProductionStore(directory).load(legacy.videoTask.id);
+  assert.ok(upgraded);
+  assert.equal(upgraded.schemaVersion, 7);
+  assert.equal(upgraded.videoTask.currentStage, "asset_matching");
+  assert.equal(upgraded.videoTask.stageStatus, "in_progress");
+  assert.equal(upgraded.videoTask.revision, legacy.videoTask.revision);
+  assert.equal(upgraded.videoTask.assetSnapshotId, undefined);
+  assert.deepEqual(upgraded.activeStageArtifactVersionIds, {
+    strategy: strategy.id,
+    script: scriptArtifactId,
+  });
+  assert.deepEqual(upgraded.taskAssetSnapshots, historicalSnapshots);
 });
 
 test("creation metadata makes concurrent requests replay-safe and rejects conflicts", async () => {

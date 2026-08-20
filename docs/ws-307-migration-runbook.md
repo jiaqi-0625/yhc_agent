@@ -73,7 +73,7 @@ npm run migrate:workspace-v2 -- plan "--config=$migrationConfig"
 - `targets`：目标类型、ID、是否需要写入、前像和预期后像 hash；
 - `summary`：作品、策略版本、审批、推断产物、Session 和目标写入数量。
 
-把完整输出附到变更单，逐项核对来源数量、目标 ID、`writeRequired`、已有目标以及 summary。尤其确认 Work 数量与最新盘点一致，且没有未知 Session、目标冲突或意外 no-op。
+把完整输出附到变更单，逐项核对来源数量、目标 ID、`writeRequired`、已有目标以及 summary。尤其确认 Work 数量与最新盘点一致，且没有未知 Session、目标冲突或意外 no-op。视频任务预期后像必须通过 schema v7 Store 校验，并遵循 `strategy → script → asset_matching → storyboard → video_preview → delivery`：`strategy_approved` 及更早记录不能带活动素材快照，`script_approved` 及更后记录的兼容推断必须保留 `legacy_inferred` 来源，不能伪造人工确认。
 
 只复制该次已获批准输出中的 `planHashSha256`。若修改配置，或任一源/目标文件发生变化，旧 hash 必须作废；重新运行 `plan` 并重新审批，不能为了通过校验而盲目接受新 hash。
 
@@ -106,7 +106,7 @@ npm run migrate:workspace-v2 -- status "--config=$migrationConfig"
 - `completedAt` 存在，所有 `writeRequired: true` 的 target 都有与预期后像一致的 `appliedSha256`；
 - 内置备份和 manifest 均已复制到受保护的审计存储，但原目录仍保留且不被改写；
 - 配置、已批准 plan、命令输出和运维快照已关联到同一变更单；
-- API 重启后能读取目标项目和任务，且不存在 `in_progress` migration。
+- API 重启后能读取目标项目及 schema v7 视频任务，任务阶段、活动版本依赖和素材快照指针符合新顺序，且不存在 `in_progress` migration。
 
 成功迁移不会删除旧 Work。API 在看到 `completed` manifest 后仍允许读取 V1 作品，但所有 V1 写接口固定返回 HTTP `410 Gone`；新的业务写入只能走 V2 项目/任务接口。这个开关在 API 启动时读取，因此必须在迁移完成后重新启动 API，不能让停机前的进程继续服务。
 

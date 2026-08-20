@@ -24,6 +24,7 @@ import type {
   TrustedTemporaryAssetInspection,
 } from "./temporary-asset-runtime.ts";
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
+import type { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
 import type { WorkspaceAdminState, WorkspaceAdminStore } from "./workspace-admin-store.ts";
 
 export interface AssetMatchingView {
@@ -33,6 +34,7 @@ export interface AssetMatchingView {
     "id" | "name" | "status" | "currentStage" | "stageStatus" | "revision" | "assetSnapshotId"
   >;
   matchingReady: boolean;
+  confirmationReady: boolean;
   matchingLocked: boolean;
   gateMessage: string;
   poolRevision: number;
@@ -76,6 +78,7 @@ export class AssetMatchingRuntime {
     private readonly companyAssets: CompanyAssetProvider,
     private readonly projectAssets: ProjectAssetRuntime,
     private readonly temporaryAssets: TemporaryAssetRuntime,
+    private readonly stages: VideoTaskStageRuntime,
   ) {}
 
   async #scopeAndProject(
@@ -145,13 +148,19 @@ export class AssetMatchingRuntime {
         [exactIdentity(item.reference), structuredClone(item)] as const
       ),
     );
-    const snapshot = record.videoTask.assetSnapshotId === undefined
+    const mayUseLockedAssetSnapshot =
+      record.videoTask.currentStage === "storyboard" ||
+      record.videoTask.currentStage === "video_preview" ||
+      record.videoTask.currentStage === "delivery";
+    const snapshot = !mayUseLockedAssetSnapshot || record.videoTask.assetSnapshotId === undefined
       ? undefined
       : record.taskAssetSnapshots.find((item) => item.id === record.videoTask.assetSnapshotId);
     const matchingReady = record.videoTask.status === "active" &&
       record.videoTask.currentStage === "asset_matching" &&
-      record.videoTask.stageStatus === "in_progress" &&
+      (record.videoTask.stageStatus === "in_progress" ||
+        record.videoTask.stageStatus === "awaiting_confirmation") &&
       record.videoTask.ownerAccountId === scope.actorAccountId;
+    const confirmationReady = matchingReady;
     const agentRecommendations = matchingReady ? [
       ...pool.assets.filter((asset) => asset.category === "vehicle"),
       ...["person", "scene"].flatMap((category) =>
@@ -170,7 +179,9 @@ export class AssetMatchingRuntime {
     const gateMessage = snapshot
       ? "素材版本已锁定，Agent 不会覆盖人工结果。"
       : matchingReady
-        ? "已根据确认的策略、脚本和素材描述词生成推荐。"
+        ? record.videoTask.stageStatus === "awaiting_confirmation"
+          ? "选材等待人工确认；确认后才会锁定最终素材版本。"
+          : "已根据确认的策略、脚本和素材描述词生成推荐；确认选择后将一次性锁定最终素材版本。"
         : record.videoTask.currentStage === "strategy" || record.videoTask.currentStage === "script"
           ? "确认策略和脚本后，Agent 才会开始选材。"
           : "当前任务不在资产匹配阶段。";
@@ -190,11 +201,12 @@ export class AssetMatchingRuntime {
         currentStage: record.videoTask.currentStage,
         stageStatus: record.videoTask.stageStatus,
         revision: record.videoTask.revision,
-        ...(record.videoTask.assetSnapshotId === undefined
+        ...(snapshot === undefined
           ? {}
-          : { assetSnapshotId: record.videoTask.assetSnapshotId }),
+          : { assetSnapshotId: snapshot.id }),
       },
       matchingReady,
+      confirmationReady,
       matchingLocked: snapshot !== undefined,
       gateMessage,
       poolRevision: pool.revision,
@@ -235,25 +247,25 @@ export class AssetMatchingRuntime {
   async lockSelection(
     projectId: string,
     videoTaskId: string,
+    requestId: string,
     expectedTaskRevision: number,
+    expectedProjectAssetPoolRevision: number,
     selectedAssets: readonly AssetReference[],
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<AssetMatchingView> {
-    const { scope, aggregate } = await this.#scopeAndProject(projectId, session);
-    const selectedCompanyAssets = selectedAssets.filter(
-      (asset) => asset.source === "company_catalog",
-    );
-    await this.projectAssets.addCatalogAssets(
-      aggregate.project,
-      selectedCompanyAssets,
-      scope,
-    );
-    await this.projectAssets.lockTaskSnapshot(
+    await this.stages.confirmStage(
+      projectId,
       videoTaskId,
-      expectedTaskRevision,
-      aggregate.project,
-      scope,
-      selectedAssets,
+      "asset_matching",
+      {
+        requestId,
+        expectedTaskRevision,
+        assetSelection: {
+          expectedProjectAssetPoolRevision,
+          selectedAssets: structuredClone([...selectedAssets]),
+        },
+      },
+      session,
     );
     return this.getView(projectId, videoTaskId, session);
   }

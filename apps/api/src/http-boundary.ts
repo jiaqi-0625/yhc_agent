@@ -112,6 +112,16 @@ export function errorStatus(error: Error): number {
     return 503;
   }
   if (error instanceof BusinessRuntimeError) return error.statusCode;
+  if (error instanceof ProjectAssetRuntimeError) {
+    switch (error.code) {
+      case "AIC-ASSET-POOL-NOT-FOUND":
+        return 404;
+      case "AIC-ASSET-SELECTION-INVALID":
+        return 400;
+      default:
+        return 409;
+    }
+  }
   if (error instanceof LocalAgentRunError) return error.statusCode;
   if (error instanceof WorkspaceAccessDeniedError) return 403;
   if (error instanceof CompanyAssetCatalogAccessError) return 403;
@@ -176,6 +186,7 @@ export function requestErrorBody(error: Error): RequestErrorBody {
   return {
     code:
       error instanceof BusinessRuntimeError ||
+      error instanceof ProjectAssetRuntimeError ||
       error instanceof RevisionConflictError ||
       error instanceof AccountBudgetError ||
       error instanceof AccountHighCostTaskRunningError ||
@@ -191,7 +202,6 @@ export function requestErrorBody(error: Error): RequestErrorBody {
       error instanceof TaskTakeoverDeniedError ||
       error instanceof TemporaryAssetError ||
       error instanceof TemporaryAssetRuntimeError ||
-      error instanceof ProjectAssetRuntimeError ||
       error instanceof LocalAgentRunError ||
       error instanceof LocalAgentCredentialsError ||
       error instanceof CompanyAssetCatalogAccessError ||

@@ -1944,6 +1944,7 @@ assetMatchingPanel = createAssetMatchingPanel({
   },
   api: workspaceApi,
   onTaskUpdated: function (updatedTask) {
+    let updatedProjectId = null;
     for (const summary of state.projectLibrary) {
       const task = summary.tasks.find(function (candidate) { return candidate.id === updatedTask.id; });
       if (!task) continue;
@@ -1952,7 +1953,14 @@ assetMatchingPanel = createAssetMatchingPanel({
       task.stageStatus = updatedTask.stageStatus;
       task.status = updatedTask.status;
       task.updatedAt = updatedTask.updatedAt;
+      updatedProjectId = summary.project.id;
       break;
+    }
+    if (updatedProjectId && workspaceFrame) {
+      workspaceFrame.open(updatedProjectId, updatedTask.id, {
+        historyMode: "replace",
+        focus: false,
+      });
     }
   },
 });

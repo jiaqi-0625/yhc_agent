@@ -21,7 +21,7 @@ class ScriptedDatabase implements PostgresTransactionProvider {
 
 function record(id = "task_launch", name = "首发 主片"): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id, tenantId: "tenant_firefly", batchProjectId: "project_launch", name,
       ownerAccountId: "account_creator", status: "active", currentStage: "strategy", stageStatus: "in_progress",

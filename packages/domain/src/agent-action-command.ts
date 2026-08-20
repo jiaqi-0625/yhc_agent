@@ -137,7 +137,6 @@ function assertMutableStrategyScope(
 function assertProjectInputs(
   record: Readonly<VideoTaskProductionRecord>,
   project: Readonly<BatchProject>,
-  pool: Readonly<ProjectAssetPool>,
   vehicleSnapshot: Readonly<VehicleSnapshot>,
   context: Readonly<AgentActionCommandContext>,
 ): void {
@@ -153,7 +152,7 @@ function assertProjectInputs(
   ) {
     throw new AgentActionCommandError(
       "AIC-AGENT-COMMAND-SNAPSHOT_INVALID",
-      "The project, asset pool, and vehicle snapshot do not share the task scope.",
+      "The project and vehicle snapshot do not share the task scope.",
     );
   }
   // Asset candidates intentionally stay mutable until the later asset-matching stage.
@@ -219,7 +218,7 @@ export function generateVideoTaskStrategy(
   record: Readonly<VideoTaskProductionRecord>,
   command: Readonly<GenerateVideoTaskStrategyCommand>,
   project: Readonly<BatchProject>,
-  pool: Readonly<ProjectAssetPool>,
+  _pool: Readonly<ProjectAssetPool>,
   vehicleSnapshot: Readonly<VehicleSnapshot>,
   context: Readonly<AgentActionCommandContext>,
 ): VideoTaskProductionRecord {
@@ -228,7 +227,7 @@ export function generateVideoTaskStrategy(
   if (replay) return replay;
   assertRevision(command.expectedTaskRevision, record.videoTask.revision);
   assertMutableStrategyScope(record, context);
-  assertProjectInputs(record, project, pool, vehicleSnapshot, context);
+  assertProjectInputs(record, project, vehicleSnapshot, context);
 
   const lockedVehicleSnapshot = record.videoTask.vehicleSnapshotId === undefined
     ? structuredClone(vehicleSnapshot)
@@ -296,7 +295,7 @@ export function generateVideoTaskStrategy(
 
   return {
     ...structuredClone(record),
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,
@@ -383,7 +382,7 @@ export function requestVideoTaskStrategyApproval(
 
   return {
     ...structuredClone(record),
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,

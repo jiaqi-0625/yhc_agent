@@ -16,6 +16,14 @@ import {
 } from "../src/workflow.ts";
 
 test("workspace v2 workflow advances through all six stages only after human confirmation", () => {
+  assert.deepEqual(videoTaskStageOrder, [
+    "strategy",
+    "script",
+    "asset_matching",
+    "storyboard",
+    "video_preview",
+    "delivery",
+  ]);
   let state: VideoTaskWorkflowState = { ...initialVideoTaskWorkflowState };
 
   for (const stage of videoTaskStageOrder) {

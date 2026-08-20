@@ -13,7 +13,10 @@ import {
 } from "node:fs/promises";
 import { dirname, join, resolve, sep } from "node:path";
 
-import type { VideoTaskProductionRecord } from "@firefly/domain";
+import {
+  videoTaskStageOrder,
+  type VideoTaskProductionRecord,
+} from "@firefly/domain";
 import {
   AgentActionCommandReceiptSchema,
   StageArtifactInvalidationSchema,
@@ -44,8 +47,13 @@ interface LegacyVideoTaskProductionRecord {
   stageConfirmations: StageConfirmation[];
 }
 
-type LegacyVideoTaskProductionRecordV5 = Omit<
+type LegacyVideoTaskProductionRecordV6 = Omit<
   VideoTaskProductionRecord,
+  "schemaVersion"
+> & { schemaVersion: 6 };
+
+type LegacyVideoTaskProductionRecordV5 = Omit<
+  LegacyVideoTaskProductionRecordV6,
   "schemaVersion" | "stageMutationReceipts"
 > & { schemaVersion: 5 };
 
@@ -126,7 +134,7 @@ const ActiveStageArtifactVersionIdsSchema = Type.Partial(
 
 const VideoTaskProductionRecordSchema = Type.Object(
   {
-    schemaVersion: Type.Literal(6),
+    schemaVersion: Type.Literal(7),
     videoTask: VideoTaskSchema,
     stageArtifactVersions: Type.Array(StageArtifactVersionSchema),
     stageConfirmations: Type.Array(StageConfirmationSchema),
@@ -145,14 +153,23 @@ const VideoTaskProductionRecordSchema = Type.Object(
   { additionalProperties: false },
 );
 
-const videoTaskStageRank: Record<VideoTaskStage, number> = {
-  strategy: 0,
-  asset_matching: 1,
-  script: 2,
-  storyboard: 3,
-  video_preview: 4,
-  delivery: 5,
-};
+const supportedHistoricalStageDependencyPairs = new Set<string>([
+  "asset_matching:strategy",
+  "script:asset_matching",
+  "storyboard:script",
+  "script:strategy",
+  "asset_matching:script",
+  "storyboard:asset_matching",
+  "video_preview:storyboard",
+  "delivery:video_preview",
+]);
+
+function isSupportedHistoricalStageDependency(
+  stage: VideoTaskStage,
+  dependencyStage: VideoTaskStage,
+): boolean {
+  return supportedHistoricalStageDependencyPairs.has(`${stage}:${dependencyStage}`);
+}
 
 function stageArtifactDependencyIdentity(
   dependency: StageArtifactVersion["dependencies"][number],
@@ -320,9 +337,8 @@ export function validateRecord(
     (record.taskVehicleSnapshots.length > 0 &&
       (record.videoTask.vehicleSnapshotId === undefined ||
         !vehicleSnapshotIds.has(record.videoTask.vehicleSnapshotId))) ||
-    (record.taskAssetSnapshots.length > 0 &&
-      (record.videoTask.assetSnapshotId === undefined ||
-        !assetSnapshotIds.has(record.videoTask.assetSnapshotId))) ||
+    (record.videoTask.assetSnapshotId !== undefined &&
+      !assetSnapshotIds.has(record.videoTask.assetSnapshotId)) ||
     record.taskAssetSnapshots.some(
       (snapshot) =>
         record.taskVehicleSnapshots.length > 0 &&
@@ -354,6 +370,25 @@ export function validateRecord(
   const confirmationsById = new Map(
     record.stageConfirmations.map((confirmation) => [confirmation.id, confirmation] as const),
   );
+  const activeAssetMatchingArtifactId = record.activeStageArtifactVersionIds.asset_matching;
+  const activeAssetMatchingArtifact = activeAssetMatchingArtifactId === undefined
+    ? undefined
+    : artifactsById.get(activeAssetMatchingArtifactId);
+  const activeAssetSnapshotDependency = activeAssetMatchingArtifact?.dependencies.find(
+    (dependency) => dependency.kind === "asset_snapshot",
+  );
+  if (
+    (record.videoTask.assetSnapshotId !== undefined &&
+      (
+        activeAssetMatchingArtifact === undefined ||
+        activeAssetSnapshotDependency?.kind !== "asset_snapshot" ||
+        activeAssetSnapshotDependency.assetSnapshotId !== record.videoTask.assetSnapshotId
+      )) ||
+    (record.videoTask.assetSnapshotId === undefined &&
+      activeAssetSnapshotDependency?.kind === "asset_snapshot")
+  ) {
+    throw new Error("Persisted video task has an inconsistent active asset snapshot selection.");
+  }
   for (const artifact of record.stageArtifactVersions) {
     const dependencyIdentities = artifact.dependencies.map(stageArtifactDependencyIdentity);
     if (new Set(dependencyIdentities).size !== dependencyIdentities.length) {
@@ -365,7 +400,7 @@ export function validateRecord(
         if (
           dependencyArtifact === undefined ||
           dependencyArtifact.stage !== dependency.stage ||
-          videoTaskStageRank[dependencyArtifact.stage] >= videoTaskStageRank[artifact.stage]
+          !isSupportedHistoricalStageDependency(artifact.stage, dependencyArtifact.stage)
         ) {
           throw new Error("Persisted video task has an invalid stage artifact dependency graph.");
         }
@@ -397,6 +432,23 @@ export function validateRecord(
       }
     }
   }
+  const dependencyVisitState = new Map<string, "visiting" | "visited">();
+  const visitArtifactDependencies = (artifactId: string): void => {
+    const state = dependencyVisitState.get(artifactId);
+    if (state === "visiting") {
+      throw new Error("Persisted video task has a cyclic stage artifact dependency graph.");
+    }
+    if (state === "visited") return;
+    dependencyVisitState.set(artifactId, "visiting");
+    const artifact = artifactsById.get(artifactId);
+    for (const dependency of artifact?.dependencies ?? []) {
+      if (dependency.kind === "stage_artifact") {
+        visitArtifactDependencies(dependency.artifactVersionId);
+      }
+    }
+    dependencyVisitState.set(artifactId, "visited");
+  };
+  for (const artifact of record.stageArtifactVersions) visitArtifactDependencies(artifact.id);
   const referencedMigratedApprovalIds = new Set<string>();
   for (const artifact of record.stageArtifactVersions) {
     if (artifact.provenance.kind !== "migrated_confirmation") continue;
@@ -486,7 +538,7 @@ export function validateRecord(
     if (
       dependencyArtifact === undefined ||
       dependencyArtifact.stage !== dependency.stage ||
-      videoTaskStageRank[dependencyArtifact.stage] >= videoTaskStageRank[artifact.stage]
+      !isSupportedHistoricalStageDependency(artifact.stage, dependencyArtifact.stage)
     ) {
       throw new Error("Persisted video task has an invalid invalidated dependency graph.");
     }
@@ -583,7 +635,6 @@ export function validateRecord(
       for (const artifact of record.stageArtifactVersions) {
         if (
           affectedArtifactIds.has(artifact.id) ||
-          videoTaskStageRank[artifact.stage] <= videoTaskStageRank[rollback.stage] ||
           !existedAtRollback(artifact) ||
           wasInvalidatedBeforeRollback(artifact.id)
         ) {
@@ -852,6 +903,48 @@ function validateTransition(
   const newStageReceipts = next.stageMutationReceipts.slice(
     current.stageMutationReceipts.length,
   );
+  if (current.videoTask.assetSnapshotId !== next.videoTask.assetSnapshotId) {
+    const confirmedAssetSelection = newConfirmations.some((confirmation) => {
+      if (confirmation.stage !== "asset_matching") return false;
+      const artifact = newArtifacts.find(
+        (candidate) => candidate.id === confirmation.artifactVersionId,
+      );
+      return artifact?.dependencies.some(
+        (dependency) =>
+          dependency.kind === "asset_snapshot" &&
+          dependency.assetSnapshotId === next.videoTask.assetSnapshotId &&
+          next.taskAssetSnapshots
+            .slice(current.taskAssetSnapshots.length)
+            .some((snapshot) => snapshot.id === dependency.assetSnapshotId),
+      ) ?? false;
+    });
+    const rolledBackAssetSelection = newRollbacks.some((rollback) => {
+      if (rollback.stage !== "asset_matching") return false;
+      const target = next.stageArtifactVersions.find(
+        (artifact) => artifact.id === rollback.toArtifactVersionId,
+      );
+      const targetAssetSnapshot = target?.dependencies.find(
+        (dependency) => dependency.kind === "asset_snapshot",
+      );
+      return next.videoTask.assetSnapshotId === undefined
+        ? target !== undefined && targetAssetSnapshot === undefined
+        : targetAssetSnapshot?.kind === "asset_snapshot" &&
+          targetAssetSnapshot.assetSnapshotId === next.videoTask.assetSnapshotId;
+    });
+    const invalidatedAssetSelection =
+      next.videoTask.assetSnapshotId === undefined &&
+      newInvalidations.some(
+        (invalidation) =>
+          invalidation.stage === "asset_matching" &&
+          invalidation.artifactVersionId ===
+            current.activeStageArtifactVersionIds.asset_matching,
+      );
+    if (!confirmedAssetSelection && !rolledBackAssetSelection && !invalidatedAssetSelection) {
+      throw new Error(
+        "A video task transaction can only change its asset snapshot through asset confirmation, rollback, or invalidation.",
+      );
+    }
+  }
   for (const artifact of newArtifacts) {
     const confirmationId = artifact.provenance.kind === "human_confirmation"
       ? artifact.provenance.confirmationId
@@ -938,7 +1031,7 @@ function validateTransition(
     }
     rollbackStages.add(rollback.stage);
   }
-  for (const stage of Object.keys(videoTaskStageRank) as VideoTaskStage[]) {
+  for (const stage of videoTaskStageOrder) {
     const previousId = current.activeStageArtifactVersionIds[stage];
     const nextId = next.activeStageArtifactVersionIds[stage];
     if (previousId === nextId) continue;
@@ -987,9 +1080,70 @@ export interface VideoTaskCreationStore extends VideoTaskProductionStore {
   list(tenantId: string, batchProjectId?: string): Promise<VideoTaskProductionRecord[]>;
 }
 
+function upgradeLegacyWorkflowOrder(
+  parsed: Readonly<LegacyVideoTaskProductionRecordV6>,
+): VideoTaskProductionRecord {
+  const upgraded: VideoTaskProductionRecord = {
+    ...structuredClone(parsed),
+    schemaVersion: 7,
+  };
+  const task = upgraded.videoTask;
+  const activeArtifact = (stage: VideoTaskStage) => {
+    const artifactVersionId = upgraded.activeStageArtifactVersionIds[stage];
+    return upgraded.stageArtifactVersions.find(
+      (artifact) => artifact.id === artifactVersionId && artifact.stage === stage,
+    );
+  };
+  const activeScript = activeArtifact("script");
+  const activeAssetMatching = activeArtifact("asset_matching");
+  const hasActiveLegacyOrder = task.status === "active" && (
+    activeScript?.dependencies.some(
+      (dependency) =>
+        dependency.kind === "stage_artifact" && dependency.stage === "asset_matching",
+    ) === true ||
+    activeAssetMatching?.dependencies.some(
+      (dependency) =>
+        dependency.kind === "stage_artifact" && dependency.stage === "strategy",
+    ) === true
+  );
+  const legacyAssetMatchingWithoutScript =
+    task.status === "active" &&
+    task.currentStage === "asset_matching" &&
+    upgraded.activeStageArtifactVersionIds.script === undefined;
+  const earlyAssetSelection = task.status === "active" &&
+    (
+      task.currentStage === "strategy" ||
+      task.currentStage === "script" ||
+      legacyAssetMatchingWithoutScript
+    );
+  const unconfirmedCanonicalAssetSelection =
+    task.status === "active" &&
+    task.currentStage === "asset_matching" &&
+    task.stageStatus === "in_progress" &&
+    task.assetSnapshotId !== undefined &&
+    activeAssetMatching === undefined;
+  if (earlyAssetSelection || hasActiveLegacyOrder) {
+    delete task.assetSnapshotId;
+    for (const stage of videoTaskStageOrder.slice(1)) {
+      delete upgraded.activeStageArtifactVersionIds[stage];
+    }
+    task.currentStage = upgraded.activeStageArtifactVersionIds.strategy === undefined
+      ? "strategy"
+      : "script";
+    task.stageStatus = "in_progress";
+  } else if (unconfirmedCanonicalAssetSelection) {
+    // WS-406 briefly persisted a v6 snapshot pointer while canonical asset
+    // matching was still in progress. Keep its immutable history, but do not
+    // promote that unconfirmed selection into the v7 active task context.
+    delete task.assetSnapshotId;
+  }
+  return upgraded;
+}
+
 export function upgradeRecord(
   parsed:
     | VideoTaskProductionRecord
+    | LegacyVideoTaskProductionRecordV6
     | LegacyVideoTaskProductionRecordV5
     | LegacyVideoTaskProductionRecordV4
     | LegacyVideoTaskProductionRecordV3
@@ -1000,16 +1154,17 @@ export function upgradeRecord(
   if (parsed.videoTask.id !== videoTaskId) {
     throw new Error("Persisted video task has an invalid format or scope.");
   }
-  if (parsed.schemaVersion === 6) return structuredClone(parsed);
+  if (parsed.schemaVersion === 7) return structuredClone(parsed);
+  if (parsed.schemaVersion === 6) return upgradeLegacyWorkflowOrder(parsed);
   if (parsed.schemaVersion === 5) {
-    return {
+    return upgradeLegacyWorkflowOrder({
       ...structuredClone(parsed),
       schemaVersion: 6,
       stageMutationReceipts: [],
-    };
+    });
   }
   if (parsed.schemaVersion === 4) {
-    return {
+    return upgradeLegacyWorkflowOrder({
       ...structuredClone(parsed),
       schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
@@ -1018,10 +1173,10 @@ export function upgradeRecord(
       stageConfirmationRequests: [],
       commandReceipts: [],
       stageMutationReceipts: [],
-    };
+    });
   }
   if (parsed.schemaVersion === 3) {
-    return {
+    return upgradeLegacyWorkflowOrder({
       ...structuredClone(parsed),
       schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
@@ -1031,10 +1186,10 @@ export function upgradeRecord(
       stageConfirmationRequests: [],
       commandReceipts: [],
       stageMutationReceipts: [],
-    };
+    });
   }
   if (parsed.schemaVersion === 2) {
-    return {
+    return upgradeLegacyWorkflowOrder({
       ...structuredClone(parsed),
       schemaVersion: 6,
       stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
@@ -1045,7 +1200,7 @@ export function upgradeRecord(
       stageConfirmationRequests: [],
       commandReceipts: [],
       stageMutationReceipts: [],
-    };
+    });
   }
   if ((parsed as { schemaVersion: number }).schemaVersion !== 1) {
     throw new Error("Persisted video task has an unsupported schema version.");
@@ -1058,7 +1213,7 @@ export function upgradeRecord(
       activeStageArtifactVersionIds[artifact.stage] = artifact.id;
     }
   }
-  return {
+  return upgradeLegacyWorkflowOrder({
     schemaVersion: 6,
     videoTask: structuredClone(parsed.videoTask),
     stageArtifactVersions: upgradeLegacyStageArtifactVersions(parsed),
@@ -1073,7 +1228,7 @@ export function upgradeRecord(
     stageConfirmationRequests: [],
     commandReceipts: [],
     stageMutationReceipts: [],
-  };
+  });
 }
 
 export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
@@ -1322,6 +1477,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
       const record = upgradeRecord(
         rawRecord as
           | VideoTaskProductionRecord
+          | LegacyVideoTaskProductionRecordV6
           | LegacyVideoTaskProductionRecordV5
           | LegacyVideoTaskProductionRecordV4
           | LegacyVideoTaskProductionRecordV3

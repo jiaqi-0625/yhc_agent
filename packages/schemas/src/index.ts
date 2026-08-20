@@ -879,6 +879,15 @@ export const ConfirmVideoTaskStageRequestSchema = Type.Object(
     requestId: Identifier,
     expectedTaskRevision: Type.Integer({ minimum: 1 }),
     artifact: Type.Optional(StageArtifactContentReferenceSchema),
+    assetSelection: Type.Optional(
+      Type.Object(
+        {
+          expectedProjectAssetPoolRevision: Type.Integer({ minimum: 1 }),
+          selectedAssets: Type.Array(AssetReferenceSchema, { maxItems: 498 }),
+        },
+        { additionalProperties: false },
+      ),
+    ),
     comment: Type.Optional(Type.String({ maxLength: 2000 })),
   },
   { additionalProperties: false },

@@ -15,7 +15,7 @@ import { resolveWorkspaceSession } from "./workspace-session-routes.ts";
 import type { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 
 const IdentifierPath = "([A-Za-z0-9_-]{1,128})";
-const StagePath = "(strategy|asset_matching|script|storyboard|video_preview|delivery)";
+const StagePath = "(strategy|script|asset_matching|storyboard|video_preview|delivery)";
 const StageRouteBase =
   `/v1/workspace/batch-projects/${IdentifierPath}/video-tasks/${IdentifierPath}`;
 

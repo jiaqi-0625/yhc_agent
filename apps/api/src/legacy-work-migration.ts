@@ -130,7 +130,7 @@ export const legacyWorkStatusMigration: Readonly<
   },
   strategy_approved: {
     taskStatus: "active",
-    currentStage: "asset_matching",
+    currentStage: "script",
     stageStatus: "in_progress",
   },
   script_draft: { taskStatus: "active", currentStage: "script", stageStatus: "in_progress" },
@@ -141,7 +141,7 @@ export const legacyWorkStatusMigration: Readonly<
   },
   script_approved: {
     taskStatus: "active",
-    currentStage: "storyboard",
+    currentStage: "asset_matching",
     stageStatus: "in_progress",
   },
   prompt_draft: { taskStatus: "active", currentStage: "storyboard", stageStatus: "in_progress" },
@@ -295,19 +295,21 @@ function migratedDraft(
 
 function commonDependencies(
   vehicleSnapshotId: string,
-  assetSnapshotId: string,
+  assetSnapshotId?: string,
 ): StageArtifactDependency[] {
-  return [
+  const dependencies: StageArtifactDependency[] = [
     { kind: "vehicle_snapshot", vehicleSnapshotId },
-    { kind: "asset_snapshot", assetSnapshotId },
   ];
+  if (assetSnapshotId !== undefined) {
+    dependencies.push({ kind: "asset_snapshot", assetSnapshotId });
+  }
+  return dependencies;
 }
 
 function approvedStrategyArtifacts(
   drafts: readonly VideoTaskStrategyDraft[],
   approvals: readonly StrategyApproval[],
   snapshot: Readonly<VehicleSnapshot>,
-  assetSnapshotId: string,
   workId: string,
   config: Readonly<LegacyWorkMigrationConfig>,
 ): StageArtifactVersion[] {
@@ -336,7 +338,7 @@ function approvedStrategyArtifacts(
           schemaVersion: draft.schemaVersion,
           contentHashSha256: contentSha256(draft),
         },
-        dependencies: commonDependencies(snapshot.id, assetSnapshotId),
+        dependencies: commonDependencies(snapshot.id),
         provenance: {
           kind: "migrated_confirmation",
           legacyApprovalId: approval.id,
@@ -352,7 +354,7 @@ function inferredArtifact(
   version: number,
   upstream: StageArtifactVersion | undefined,
   snapshot: Readonly<VehicleSnapshot>,
-  assetSnapshotId: string,
+  assetSnapshotId: string | undefined,
   record: Readonly<LocalWorkRecord>,
   config: Readonly<LegacyWorkMigrationConfig>,
   strategyDraft?: Readonly<VideoTaskStrategyDraft>,
@@ -380,7 +382,14 @@ function inferredArtifact(
           stage,
         }),
       };
-  const dependencies = commonDependencies(snapshot.id, assetSnapshotId);
+  const requiresAssetSnapshot = stage !== "strategy" && stage !== "script";
+  if (requiresAssetSnapshot && assetSnapshotId === undefined) {
+    throw new Error(`Legacy Work '${record.work.id}' cannot infer '${stage}' without an asset snapshot.`);
+  }
+  const dependencies = commonDependencies(
+    snapshot.id,
+    requiresAssetSnapshot ? assetSnapshotId : undefined,
+  );
   if (upstream !== undefined) {
     dependencies.push({
       kind: "stage_artifact",
@@ -416,9 +425,9 @@ function inferredArtifact(
 function needsInferredStage(status: WorkStatus, stage: VideoTaskStage): boolean {
   const rank = legacyStatusRank[status];
   switch (stage) {
-    case "asset_matching":
-      return rank >= legacyStatusRank.strategy_approved;
     case "script":
+      return rank >= legacyStatusRank.script_approved;
+    case "asset_matching":
       return rank >= legacyStatusRank.script_approved;
     case "storyboard":
       return rank >= legacyStatusRank.storyboard_approved;
@@ -564,24 +573,30 @@ function migrateRecord(
     throw new Error(`Legacy Work '${record.work.id}' has no canonical vehicle snapshot.`);
   }
   const snapshot = structuredClone(canonicalSnapshot);
-  const assetSnapshotId = derivedId(
-    "legacy_asset_snapshot",
-    config.migrationId,
-    record.work.id,
-    project.id,
-  );
-  const assetSnapshot: TaskAssetSnapshot = {
-    id: assetSnapshotId,
-    tenantId: config.tenantId,
-    batchProjectId: project.id,
-    videoTaskId: record.work.id,
-    version: 1,
-    sourceProjectAssetPoolRevision: 1,
-    vehicleSnapshotId: snapshot.id,
-    assets: [...structuredClone(assets)],
-    createdAt: config.migrationOccurredAt,
-    createdBy: config.migrationActorAccountId,
-  };
+  const shouldLockAssetSnapshot =
+    legacyStatusRank[record.work.status] >= legacyStatusRank.script_approved;
+  const assetSnapshotId = shouldLockAssetSnapshot
+    ? derivedId(
+        "legacy_asset_snapshot",
+        config.migrationId,
+        record.work.id,
+        project.id,
+      )
+    : undefined;
+  const assetSnapshot: TaskAssetSnapshot | undefined = assetSnapshotId === undefined
+    ? undefined
+    : {
+        id: assetSnapshotId,
+        tenantId: config.tenantId,
+        batchProjectId: project.id,
+        videoTaskId: record.work.id,
+        version: 1,
+        sourceProjectAssetPoolRevision: 1,
+        vehicleSnapshotId: snapshot.id,
+        assets: [...structuredClone(assets)],
+        createdAt: config.migrationOccurredAt,
+        createdBy: config.migrationActorAccountId,
+      };
   const orderedStrategies = [...record.strategyVersions].sort(
     (left, right) => left.version - right.version,
   );
@@ -599,7 +614,6 @@ function migrateRecord(
     drafts,
     record.approvals,
     snapshot,
-    assetSnapshotId,
     record.work.id,
     config,
   );
@@ -627,8 +641,8 @@ function migrateRecord(
   const activeStageArtifactVersionIds: Partial<Record<VideoTaskStage, string>> = {};
   if (upstream !== undefined) activeStageArtifactVersionIds.strategy = upstream.id;
   for (const stage of [
-    "asset_matching",
     "script",
+    "asset_matching",
     "storyboard",
     "video_preview",
     "delivery",
@@ -655,7 +669,7 @@ function migrateRecord(
   const taskName = `${normalizedText(config.taskNamePrefix, "Task name prefix", 30)} ${record.work.id}`;
   if (taskName.length > 160) throw new Error(`Migrated task name for '${record.work.id}' is too long.`);
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: record.work.id,
       tenantId: config.tenantId,
@@ -667,7 +681,7 @@ function migrateRecord(
       stageStatus: workflow.stageStatus,
       revision: record.work.revision,
       vehicleSnapshotId: snapshot.id,
-      assetSnapshotId,
+      ...(assetSnapshotId === undefined ? {} : { assetSnapshotId }),
       audience,
       theme,
       durationSeconds: config.defaultDurationSeconds,
@@ -684,7 +698,7 @@ function migrateRecord(
     stageArtifactInvalidations: [],
     ownershipTransfers: [],
     taskVehicleSnapshots: [snapshot],
-    taskAssetSnapshots: [assetSnapshot],
+    taskAssetSnapshots: assetSnapshot === undefined ? [] : [assetSnapshot],
     strategyDrafts: drafts,
     ...(activeStrategy === undefined ? {} : { activeStrategyDraftId: activeStrategy.id }),
     stageConfirmationRequests: [],
