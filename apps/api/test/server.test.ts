@@ -93,7 +93,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /viewport-notice/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /project-library-ws402/u);
+  assert.match(page, /project-creation-ws403/u);
   assert.match(page, /type="module"/u);
 
   const [
@@ -106,6 +106,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     workspaceApiResponse,
     workspaceShellResponse,
     projectLibraryResponse,
+    projectWizardResponse,
   ] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
     fetch(`${baseUrl}/agent-panel.css`),
@@ -116,6 +117,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     fetch(`${baseUrl}/workspace-api.js`),
     fetch(`${baseUrl}/workspace-shell.js`),
     fetch(`${baseUrl}/project-library.js`),
+    fetch(`${baseUrl}/project-creation-wizard.js`),
   ]);
   assert.equal(styleResponse.status, 200);
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
@@ -129,6 +131,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(workspaceApiResponse.status, 200);
   assert.equal(workspaceShellResponse.status, 200);
   assert.equal(projectLibraryResponse.status, 200);
+  assert.equal(projectWizardResponse.status, 200);
   const script = await scriptResponse.text();
   const agentApiScript = await agentApiResponse.text();
   const agentPanelScript = await agentPanelResponse.text();
@@ -138,6 +141,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /\.\/agent-api\.js/u);
   assert.match(script, /\.\/workspace-api\.js/u);
   assert.match(script, /\.\/project-library\.js/u);
+  assert.match(script, /\.\/project-creation-wizard\.js/u);
   assert.match(agentApiScript, /\/runs/u);
   assert.match(agentApiScript, /listSessions/u);
   assert.match(agentApiScript, /last-event-id/u);
@@ -149,6 +153,8 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(workspaceApiScript, /generateStrategy/u);
   assert.match(workspaceApiScript, /listAdminBrands/u);
   assert.match(workspaceApiScript, /getProjectCreationOptions/u);
+  assert.match(workspaceApiScript, /createBatchProject/u);
+  assert.match(await projectWizardResponse.text(), /createProjectRequest/u);
   const workspaceShellScript = await workspaceShellResponse.text();
   assert.match(workspaceShellScript, /bindWorkspaceShell/u);
   assert.match(workspaceShellScript, /normalizeNavigationBrands/u);

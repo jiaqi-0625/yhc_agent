@@ -106,10 +106,24 @@ test("workspace brand API uses the role-specific server endpoints", async (conte
 
   await workspaceApi.listAdminBrands();
   await workspaceApi.getProjectCreationOptions();
+  await workspaceApi.getProjectAssetPackage("vehicle/e5");
+  await workspaceApi.getProjectConfiguration("vehicle/e5");
+  await workspaceApi.searchProjectCompanyAssets("vehicle/e5", {
+    category: "person",
+    searchText: "都市 驾驶者",
+    limit: 20,
+  });
+  await workspaceApi.createBatchProject({ requestId: "request_ws403" });
+  await workspaceApi.createVideoTask("project/e5", { requestId: "request_task_ws403" });
   await workspaceApi.getProjectLibrary();
   assert.deepEqual(requests, [
     "/v1/admin/brands",
     "/v1/workspace/project-creation/options",
+    "/v1/workspace/project-creation/vehicles/vehicle%2Fe5/asset-package",
+    "/v1/workspace/project-creation/vehicles/vehicle%2Fe5/configuration",
+    "/v1/workspace/project-creation/vehicles/vehicle%2Fe5/company-assets?category=person&searchText=%E9%83%BD%E5%B8%82+%E9%A9%BE%E9%A9%B6%E8%80%85&limit=20",
+    "/v1/workspace/batch-projects",
+    "/v1/workspace/batch-projects/project%2Fe5/video-tasks",
     "/v1/workspace/project-library",
   ]);
 });
@@ -127,6 +141,10 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(page, /id="project-vehicle-filter"[^>]*aria-label="按车型筛选"/u);
   assert.match(page, /id="project-status-filter"[^>]*aria-label="按项目状态筛选"/u);
   assert.match(page, /id="project-sort"[^>]*aria-label="项目排序"/u);
+  assert.match(page, /id="new-project"[^>]*>[^<]*<svg[^>]*>.*新建项目/su);
+  assert.match(page, /id="project-creation-view"[^>]*aria-labelledby="new-project-title"[^>]*hidden/u);
+  assert.match(page, /id="new-project-back"[^>]*>← 返回项目库<\/button>/u);
+  assert.match(page, /id="new-project-submit"[^>]*>创建项目<\/button>/u);
   assert.match(page, /id="workspace-shell"[^>]*hidden/u);
   assert.match(page, /请使用桌面端打开/u);
   assert.doesNotMatch(page, />[^<]*(?:Projects|Current work|Strategy workspace|Agent)[^<]*</u);

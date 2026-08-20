@@ -14,6 +14,7 @@ import {
   normalizeProjectLibrary,
   renderProjectLibrary,
 } from "./project-library.js";
+import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js";
 import {
   bindWorkspaceShell,
@@ -140,6 +141,14 @@ const elements = {
   libraryError: document.querySelector("#project-library-error"),
   libraryErrorMessage: document.querySelector("#project-library-error-message"),
   libraryRetry: document.querySelector("#project-library-retry"),
+  newProject: document.querySelector("#new-project"),
+  projectCreationView: document.querySelector("#project-creation-view"),
+  projectCreationBody: document.querySelector("#new-project-body"),
+  projectCreationError: document.querySelector("#new-project-error"),
+  projectCreationErrorMessage: document.querySelector("#new-project-error-message"),
+  projectCreationBack: document.querySelector("#new-project-back"),
+  projectCreationSubmit: document.querySelector("#new-project-submit"),
+  projectCreatedSuccess: document.querySelector("#project-created-success"),
 };
 
 const projectLibraryElements = {
@@ -1555,6 +1564,7 @@ function applyWorkspaceSession(session) {
   state.account = session.account;
   workspaceScopeGeneration += 1;
   localStorage.setItem("firefly.accountId", session.account.accountId);
+  projectCreationWizard.resetForAccount();
   renderAccount();
 }
 
@@ -1777,6 +1787,28 @@ bindAgentPanel({
 });
 
 bindProjectLibrary(projectLibraryOptions());
+
+const projectCreationWizard = createProjectCreationWizard({
+  elements: {
+    open: elements.newProject,
+    view: elements.projectCreationView,
+    library: elements.libraryView,
+    topbarTitle: elements.topbarWorkName,
+    body: elements.projectCreationBody,
+    error: elements.projectCreationError,
+    errorMessage: elements.projectCreationErrorMessage,
+    back: elements.projectCreationBack,
+    submit: elements.projectCreationSubmit,
+    success: elements.projectCreatedSuccess,
+  },
+  api: workspaceApi,
+  getAccount: function () { return state.account; },
+  getSelectedBrandId: function () { return state.navigationBrandId; },
+  onCreated: async function () {
+    clearProjectLibrary(true);
+    await loadProjectLibrary(captureWorkspaceScope());
+  },
+});
 
 bindWorkspaceShell({
   elements,

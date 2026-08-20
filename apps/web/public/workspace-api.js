@@ -11,6 +11,32 @@ function jsonOptions(method, body) {
 export const workspaceApi = {
   listAdminBrands: function () { return api("/v1/admin/brands"); },
   getProjectCreationOptions: function () { return api("/v1/workspace/project-creation/options"); },
+  getProjectAssetPackage: function (vehicleId) {
+    return api("/v1/workspace/project-creation/vehicles/" + encodeURIComponent(vehicleId) + "/asset-package");
+  },
+  getProjectConfiguration: function (vehicleId) {
+    return api("/v1/workspace/project-creation/vehicles/" + encodeURIComponent(vehicleId) + "/configuration");
+  },
+  searchProjectCompanyAssets: function (vehicleId, query = {}) {
+    const parameters = new URLSearchParams();
+    if (query.category) parameters.append("category", query.category);
+    if (query.searchText) parameters.set("searchText", query.searchText);
+    if (query.cursor) parameters.set("cursor", query.cursor);
+    parameters.set("limit", String(query.limit || 50));
+    return api(
+      "/v1/workspace/project-creation/vehicles/" + encodeURIComponent(vehicleId) +
+      "/company-assets?" + parameters.toString(),
+    );
+  },
+  createBatchProject: function (input) {
+    return api("/v1/workspace/batch-projects", jsonOptions("POST", input));
+  },
+  createVideoTask: function (projectId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) + "/video-tasks",
+      jsonOptions("POST", input),
+    );
+  },
   getProjectLibrary: function () { return api("/v1/workspace/project-library"); },
   listWorks: function () { return api("/v1/works"); },
   getWork: function (workId) { return api("/v1/works/" + encodeURIComponent(workId)); },

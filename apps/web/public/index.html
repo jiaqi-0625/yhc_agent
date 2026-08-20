@@ -6,8 +6,8 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=project-library-ws402-v1" />
-    <link rel="stylesheet" href="/agent-panel.css?build=project-library-ws402-v1" />
+    <link rel="stylesheet" href="/app.css?build=project-creation-ws403-v2" />
+    <link rel="stylesheet" href="/agent-panel.css?build=project-creation-ws403-v2" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -84,7 +84,13 @@
               <div>
                 <h1 id="project-library-title">项目库</h1>
               </div>
-              <span id="project-library-count" class="library-count" role="status" aria-live="polite">正在加载</span>
+              <div class="project-library-actions">
+                <span id="project-library-count" class="library-count" role="status" aria-live="polite">正在加载</span>
+                <button id="new-project" class="button primary" type="button" disabled>
+                  <svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>
+                  新建项目
+                </button>
+              </div>
             </header>
 
             <section id="my-tasks-section" class="my-tasks-section" aria-labelledby="my-tasks-title">
@@ -147,6 +153,24 @@
             </section>
           </div>
         </main>
+
+        <main id="project-creation-view" class="project-creation-page" aria-labelledby="new-project-title" aria-busy="false" hidden>
+          <div class="project-creation-inner">
+            <header class="project-creation-header">
+              <button id="new-project-back" class="text-button" type="button">← 返回项目库</button>
+              <h1 id="new-project-title">新建项目</h1>
+            </header>
+            <div id="new-project-error" class="project-creation-error" role="alert" hidden>
+              <span id="new-project-error-message"></span>
+            </div>
+            <div id="new-project-body" class="project-creation-body"></div>
+            <footer class="project-creation-footer">
+              <button id="new-project-submit" class="button primary" type="button" disabled>创建项目</button>
+            </footer>
+          </div>
+        </main>
+
+        <p id="project-created-success" class="project-created-success" role="status" aria-live="polite" hidden></p>
 
         <nav class="mobile-panel-switcher" aria-label="移动端工作区切换" hidden>
           <button type="button" data-mobile-target="projects"><svg class="icon"><use href="#i-folder" /></svg>项目</button>
@@ -378,6 +402,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/app.js?build=project-library-ws402-v1"></script>
+    <script type="module" src="/app.js?build=project-creation-ws403-v2"></script>
   </body>
 </html>
