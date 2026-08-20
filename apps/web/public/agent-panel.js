@@ -623,7 +623,7 @@ export function bindAgentPanel(options) {
   });
 
   createAgentPanelLayoutController({
-    shell: elements.workspaceShell,
+    shell: elements.agentLayoutShell,
     panel: elements.chatView,
     resizer: document.querySelector("#agent-resizer"),
     collapseButton: document.querySelector("#collapse-agent"),

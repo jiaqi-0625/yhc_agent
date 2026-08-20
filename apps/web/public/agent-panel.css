@@ -118,18 +118,17 @@
 .cancel-button { color: var(--destructive); background: color-mix(in oklch, var(--destructive) 10%, var(--card)); }
 .retry-button { color: var(--primary) !important; }
 
-.workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 240px minmax(480px, 1fr) 0 58px; }
-.workspace-shell[data-agent-collapsed="true"] .agent-resizer { width: 0; visibility: hidden; pointer-events: none; }
-.workspace-shell[data-agent-collapsed="true"] .chat-panel > :not(.chat-header) { display: none; }
-.workspace-shell[data-agent-collapsed="true"] .chat-header { justify-content: center; padding: 0; }
-.workspace-shell[data-agent-collapsed="true"] .agent-identity,
-.workspace-shell[data-agent-collapsed="true"] #new-session,
-.workspace-shell[data-agent-collapsed="true"] .agent-session-picker { display: none; }
-.workspace-shell[data-agent-collapsed="true"] #collapse-agent svg { transform: rotate(180deg); }
+.project-workspace-page[data-agent-collapsed="true"] { grid-template-columns: 248px minmax(480px, 1fr) 0 58px; }
+.project-workspace-page[data-agent-collapsed="true"] .agent-resizer { width: 0; visibility: hidden; pointer-events: none; }
+.project-workspace-page[data-agent-collapsed="true"] .chat-panel > :not(.chat-header) { display: none; }
+.project-workspace-page[data-agent-collapsed="true"] .chat-header { justify-content: center; padding: 0; }
+.project-workspace-page[data-agent-collapsed="true"] .agent-identity,
+.project-workspace-page[data-agent-collapsed="true"] #new-session,
+.project-workspace-page[data-agent-collapsed="true"] .agent-session-picker { display: none; }
+.project-workspace-page[data-agent-collapsed="true"] #collapse-agent svg { transform: rotate(180deg); }
 
 @media (min-width: 1280px) and (max-width: 1439px) {
-  .workspace-shell { grid-template-columns: 212px minmax(420px, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 638px)); }
-  .workspace-shell[data-agent-collapsed="true"] { grid-template-columns: 212px minmax(420px, 1fr) 0 58px; }
+  .project-workspace-page[data-agent-collapsed="true"] { grid-template-columns: 220px minmax(420px, 1fr) 0 58px; }
 }
 
 @media (max-width: 980px) {

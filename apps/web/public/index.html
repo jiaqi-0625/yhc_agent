@@ -7,10 +7,10 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
     <link rel="stylesheet" href="/app.css?build=workspace-stages-ws407-v1" />
-    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-stages-ws407-v1" />
+    <link rel="stylesheet" href="/workspace-frame.css?build=agent-mount-ag504-v1" />
     <link rel="stylesheet" href="/asset-matching.css?build=workspace-stages-ws407-v1" />
     <link rel="stylesheet" href="/workspace-stages.css?build=workspace-stages-ws407-v1" />
-    <link rel="stylesheet" href="/agent-panel.css?build=workspace-details-ws405-v1" />
+    <link rel="stylesheet" href="/agent-panel.css?build=agent-mount-ag504-v1" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -305,28 +305,64 @@
             </div>
           </section>
 
-          <aside class="workspace-agent-slot" aria-label="萤火虫助手">
-            <header class="workspace-agent-header">
-              <div class="workspace-agent-identity">
-                <span class="workspace-agent-avatar" aria-hidden="true"><svg class="icon"><use href="#i-spark" /></svg></span>
-                <div><strong>萤火虫助手</strong><span>当前视频任务</span></div>
+          <button
+            id="agent-resizer"
+            class="agent-resizer"
+            type="button"
+            role="separator"
+            aria-label="调整智能助手宽度"
+            aria-orientation="vertical"
+            title="拖动或使用左右方向键调整宽度"
+          ></button>
+
+          <aside id="chat-view" class="workspace-agent-slot chat-panel" aria-label="智能助手对话区">
+            <header class="chat-header">
+              <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫助手</strong><span><i class="online-dot"></i>已连接</span></div></div>
+              <div class="chat-header-actions">
+                <label class="agent-session-picker">
+                  <span class="sr-only">选择助手会话</span>
+                  <select id="agent-session-select" aria-label="选择助手会话"></select>
+                </label>
+                <button id="new-session" class="icon-button subtle" type="button" aria-label="新建助手会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
+                <button id="collapse-agent" class="icon-button subtle" type="button" aria-label="折叠智能助手" aria-expanded="true" aria-controls="chat-view" title="折叠智能助手（Alt+Shift+A）"><svg class="icon"><use href="#i-chevron" /></svg></button>
               </div>
-              <span id="workspace-frame-agent-status" class="badge neutral">未绑定任务</span>
             </header>
-            <dl class="workspace-agent-context">
-              <div><dt>视频任务</dt><dd id="workspace-frame-agent-task">—</dd></div>
-              <div><dt>当前阶段</dt><dd id="workspace-frame-agent-stage">—</dd></div>
-              <div><dt>负责人</dt><dd id="workspace-frame-agent-owner">—</dd></div>
-              <div><dt>任务版本</dt><dd id="workspace-frame-agent-revision">—</dd></div>
-            </dl>
-            <div class="workspace-agent-body">
-              <div class="workspace-agent-empty"><svg class="icon" aria-hidden="true"><use href="#i-message" /></svg><strong>助手工作区</strong><span>等待接入</span></div>
+
+            <div class="agent-context" aria-label="当前任务上下文">
+              <dl class="agent-context-path">
+                <div><dt>品牌</dt><dd id="agent-context-brand">—</dd></div>
+                <div><dt>车型</dt><dd id="agent-context-vehicle">—</dd></div>
+                <div><dt>项目</dt><dd id="agent-context-project">—</dd></div>
+                <div><dt>视频任务</dt><dd id="agent-context-task">—</dd></div>
+              </dl>
+              <div class="agent-context-status">
+                <span id="agent-context-owner">负责人：—</span>
+                <span id="agent-context-stage">未开始</span>
+                <span id="agent-context-revision">—</span>
+              </div>
+              <p id="agent-context-quota" class="agent-context-quota">额度：正在读取…</p>
             </div>
-            <div class="workspace-agent-composer">
-              <label class="sr-only" for="workspace-frame-agent-composer">发送消息</label>
-              <textarea id="workspace-frame-agent-composer" rows="1" placeholder="助手接入后可用" disabled></textarea>
-              <button id="workspace-frame-agent-send" type="button" aria-label="发送消息" disabled><svg class="icon" aria-hidden="true"><use href="#i-send" /></svg></button>
+
+            <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
+              <section id="welcome" class="welcome">
+                <div class="welcome-icon" aria-hidden="true"><svg class="icon"><use href="#i-message" /></svg></div>
+                <h2>开始协作</h2>
+                <div class="suggestions">
+                  <button type="button" data-prompt="介绍当前项目状态和下一步应该做什么">查看下一步</button>
+                  <button type="button" data-prompt="根据当前车型快照，说明策略生成会遵守哪些事实边界">查看事实边界</button>
+                </div>
+              </section>
             </div>
+
+            <div id="error-banner" class="alert destructive chat-error" role="alert" hidden></div>
+
+            <form id="composer" class="composer">
+              <label class="sr-only" for="prompt">发送消息</label>
+              <textarea id="prompt" rows="1" maxlength="12000" placeholder="请先选择视频任务" disabled></textarea>
+              <button id="send" class="send-button" type="submit" aria-label="发送消息" disabled><svg class="icon"><use href="#i-send" /></svg></button>
+              <button id="cancel-generation" class="send-button cancel-button" type="button" aria-label="取消当前生成" title="取消当前生成" hidden>■</button>
+            </form>
+            <footer class="chat-footer"><span><button id="retry-message" class="retry-button" type="button" hidden>重试</button><button id="reset-session" type="button">清空会话</button></span></footer>
           </aside>
         </main>
 
@@ -498,65 +534,6 @@
           </section>
         </main>
 
-        <button
-          id="agent-resizer"
-          class="agent-resizer"
-          type="button"
-          role="separator"
-          aria-label="调整智能助手宽度"
-          aria-orientation="vertical"
-          title="拖动或使用左右方向键调整宽度"
-        ></button>
-
-        <aside id="chat-view" class="chat-panel" aria-label="智能助手对话区">
-          <header class="chat-header">
-            <div class="agent-identity"><span class="agent-avatar"><svg class="icon"><use href="#i-spark" /></svg></span><div><strong>萤火虫助手</strong><span><i class="online-dot"></i>已连接</span></div></div>
-            <div class="chat-header-actions">
-              <label class="agent-session-picker">
-                <span class="sr-only">选择助手会话</span>
-                <select id="agent-session-select" aria-label="选择助手会话"></select>
-              </label>
-              <button id="new-session" class="icon-button subtle" type="button" aria-label="新建助手会话" title="新建会话"><svg class="icon"><use href="#i-plus" /></svg></button>
-              <button id="collapse-agent" class="icon-button subtle" type="button" aria-label="折叠智能助手" aria-expanded="true" aria-controls="chat-view" title="折叠智能助手（Alt+Shift+A）"><svg class="icon"><use href="#i-chevron" /></svg></button>
-            </div>
-          </header>
-
-          <div class="agent-context" aria-label="当前任务上下文">
-            <dl class="agent-context-path">
-              <div><dt>品牌</dt><dd id="agent-context-brand">—</dd></div>
-              <div><dt>车型</dt><dd id="agent-context-vehicle">—</dd></div>
-              <div><dt>项目</dt><dd id="agent-context-project">—</dd></div>
-              <div><dt>视频任务</dt><dd id="agent-context-task">—</dd></div>
-            </dl>
-            <div class="agent-context-status">
-              <span id="agent-context-owner">负责人：—</span>
-              <span id="agent-context-stage">未开始</span>
-              <span id="agent-context-revision">—</span>
-            </div>
-            <p id="agent-context-quota" class="agent-context-quota">额度：正在读取…</p>
-          </div>
-
-          <div id="messages" class="messages" aria-live="polite" aria-label="会话消息">
-            <section id="welcome" class="welcome">
-              <div class="welcome-icon" aria-hidden="true"><svg class="icon"><use href="#i-message" /></svg></div>
-              <h2>开始协作</h2>
-              <div class="suggestions">
-                <button type="button" data-prompt="介绍当前项目状态和下一步应该做什么">查看下一步</button>
-                <button type="button" data-prompt="根据当前车型快照，说明策略生成会遵守哪些事实边界">查看事实边界</button>
-              </div>
-            </section>
-          </div>
-
-          <div id="error-banner" class="alert destructive chat-error" role="alert" hidden></div>
-
-          <form id="composer" class="composer">
-            <label class="sr-only" for="prompt">发送消息</label>
-            <textarea id="prompt" rows="1" maxlength="12000" placeholder="给智能助手发送消息…"></textarea>
-            <button id="send" class="send-button" type="submit" aria-label="发送消息"><svg class="icon"><use href="#i-send" /></svg></button>
-            <button id="cancel-generation" class="send-button cancel-button" type="button" aria-label="取消当前生成" title="取消当前生成" hidden>■</button>
-          </form>
-          <footer class="chat-footer"><span><button id="retry-message" class="retry-button" type="button" hidden>重试</button><button id="reset-session" type="button">清空会话</button></span></footer>
-        </aside>
         </div>
       </div>
     </div>
@@ -575,6 +552,6 @@
       </form>
     </dialog>
 
-    <script type="module" src="/app.js?build=workspace-stages-ws407-v1"></script>
+    <script type="module" src="/app.js?build=agent-mount-ag504-v1"></script>
   </body>
 </html>

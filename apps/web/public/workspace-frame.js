@@ -187,6 +187,22 @@ export function createWorkspaceFrame(options) {
   let activeView = "overview";
   let initialRouteRestored = false;
 
+  function selectionLocked() {
+    return Boolean(options.isSelectionLocked?.());
+  }
+
+  function refreshSelectionControls() {
+    const locked = selectionLocked();
+    elements.back.disabled = locked;
+    elements.projectOverview.disabled = locked && selection?.task !== null;
+    elements.taskList.querySelectorAll("button[data-video-task-id]").forEach(function (button) {
+      button.disabled = locked && button.dataset.videoTaskId !== selection?.task?.id;
+    });
+    elements.overviewTaskList?.querySelectorAll("button[data-video-task-id]").forEach(function (button) {
+      button.disabled = locked && button.dataset.videoTaskId !== selection?.task?.id;
+    });
+  }
+
   function routeState() {
     if (!selection) return null;
     return {
@@ -246,6 +262,7 @@ export function createWorkspaceFrame(options) {
 
   function selectTask(taskId, module, historyMode = "push") {
     if (!selection) return false;
+    if (selectionLocked() && taskId !== selection.task?.id) return false;
     const resolved = resolveWorkspaceSelection([selection.project], selection.project.project.id, taskId);
     if (!resolved?.task) return false;
     selection = resolved;
@@ -261,6 +278,7 @@ export function createWorkspaceFrame(options) {
     button.type = "button";
     button.className = "workspace-task-item" + (selection.task?.id === task.id ? " active" : "");
     button.dataset.videoTaskId = task.id;
+    button.disabled = selectionLocked() && selection.task?.id !== task.id;
     button.setAttribute("aria-pressed", String(selection.task?.id === task.id));
     button.setAttribute("aria-label", "打开任务 " + task.name);
     const title = document.createElement("strong");
@@ -296,6 +314,8 @@ export function createWorkspaceFrame(options) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "workspace-overview-task-row";
+    button.dataset.videoTaskId = task.id;
+    button.disabled = selectionLocked() && selection.task?.id !== task.id;
     button.setAttribute("aria-label", "打开任务 " + task.name);
     const name = document.createElement("strong");
     name.textContent = task.name;
@@ -360,17 +380,10 @@ export function createWorkspaceFrame(options) {
     setText(elements.taskMeta, task
       ? (stageStatusLabels[task.stageStatus] || "进行中") + " · 版本 " + task.revision + " · " + workspaceOwnerLabel(task)
       : summary.project.name);
-    setText(elements.agentTask, task?.name || "未选择任务");
-    setText(elements.agentStage, task ? (stageLabels[task.currentStage] || "未开始") : "—");
-    setText(elements.agentRevision, task ? "版本 " + task.revision : "—");
-    setText(elements.agentOwner, task ? workspaceOwnerLabel(task) : "—");
-    elements.agentStatus.textContent = task ? "任务已绑定" : "未绑定任务";
-    elements.agentStatus.className = "badge " + (task ? "success" : "neutral");
-    elements.agentComposer.disabled = true;
-    elements.agentSend.disabled = true;
     renderTasks();
     renderOverview();
     renderModules();
+    refreshSelectionControls();
     options.onSelectionChange?.({
       project: summary,
       task,
@@ -391,6 +404,10 @@ export function createWorkspaceFrame(options) {
     const resolved = resolveWorkspaceSelection(getProjects(), projectId, taskId);
     if (!resolved) return false;
     const explicitTask = typeof taskId === "string" && taskId.length > 0;
+    if (
+      selectionLocked() &&
+      (explicitTask ? resolved.task?.id || null : null) !== (selection?.task?.id || null)
+    ) return false;
     selection = { project: resolved.project, task: explicitTask ? resolved.task : null };
     activeView = explicitTask ? "module" : "overview";
     activeModule = validModule(behavior.module) || workspaceModuleForStage(selection.task?.currentStage);
@@ -446,6 +463,7 @@ export function createWorkspaceFrame(options) {
   }
 
   elements.back.addEventListener("click", function () {
+    if (selectionLocked()) return;
     close();
     if (typeof onBack === "function") onBack();
   });
@@ -465,6 +483,7 @@ export function createWorkspaceFrame(options) {
   });
   elements.projectOverview.addEventListener("click", function () {
     if (!selection) return;
+    if (selectionLocked() && selection.task !== null) return;
     selection = { project: selection.project, task: null };
     activeView = "overview";
     render();
@@ -486,5 +505,5 @@ export function createWorkspaceFrame(options) {
   }
   browserWindow?.queueMicrotask?.(restoreInitialRoute);
 
-  return { open, close, restore: restoreFromLocation };
+  return { open, close, restore: restoreFromLocation, refreshSelectionControls };
 }

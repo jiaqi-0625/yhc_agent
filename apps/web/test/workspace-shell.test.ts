@@ -151,7 +151,10 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(page, /id="project-workspace-view"[^>]*class="project-workspace-page"[^>]*hidden/u);
   assert.match(page, /class="workspace-project-rail"[^>]*aria-label="项目与视频任务"/u);
   assert.match(page, /class="workspace-main-surface"[^>]*aria-label="工作区主区域"/u);
-  assert.match(page, /class="workspace-agent-slot"[^>]*aria-label="萤火虫助手"/u);
+  assert.match(page, /id="chat-view"[^>]*class="workspace-agent-slot chat-panel"[^>]*aria-label="智能助手对话区"/u);
+  assert.equal(page.match(/id="chat-view"/gu)?.length, 1);
+  assert.equal(page.match(/id="agent-session-select"/gu)?.length, 1);
+  assert.doesNotMatch(page, /助手接入后可用|等待接入/u);
   assert.match(page, /id="workspace-frame-overview-panel"[^>]*aria-labelledby="workspace-frame-overview-title"/u);
   assert.match(page, />项目信息<\/h3>[\s\S]*>任务概况<\/h3>[\s\S]*>视频任务<\/h3>/u);
   assert.match(page, />任务<\/span><span>当前阶段<\/span><span>状态<\/span><span>负责人<\/span><span>更新<\/span>/u);
@@ -162,8 +165,8 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.doesNotMatch(styles, /--platform-sidebar-width:/u);
   assert.match(styles, /@media not all and \(min-width: 1280px\)/u);
   assert.match(styles, /\.app-shell \{ display: none; \}/u);
-  assert.match(workspaceFrameStyles, /grid-template-columns: 248px minmax\(0, 1fr\) 356px/u);
-  assert.match(workspaceFrameStyles, /grid-template-columns: 220px minmax\(0, 1fr\) 320px/u);
+  assert.match(workspaceFrameStyles, /grid-template-columns: 248px minmax\(0, 1fr\) 6px min\(var\(--agent-panel-width\)/u);
+  assert.match(workspaceFrameStyles, /grid-template-columns: 220px minmax\(0, 1fr\) 6px min\(var\(--agent-panel-width\)/u);
   assert.match(workspaceFrameStyles, /\.workspace-overview-task-row/u);
   assert.match(page, /id="brand-navigation-status"[^>]*role="status"[^>]*aria-live="polite"/u);
 });
