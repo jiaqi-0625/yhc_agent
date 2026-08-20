@@ -1,0 +1,416 @@
+const stageOrder = Object.freeze([
+  "strategy", "script", "asset_matching", "storyboard", "video_preview", "delivery",
+]);
+
+const stageLabels = Object.freeze({
+  strategy: "营销策略",
+  script: "脚本",
+  asset_matching: "资产匹配",
+  storyboard: "分镜",
+  video_preview: "视频预览",
+  delivery: "交付",
+});
+
+const statusLabels = Object.freeze({
+  in_progress: "进行中",
+  awaiting_confirmation: "待确认",
+  confirmed: "已确认",
+});
+
+const stageModules = Object.freeze({
+  planning: ["strategy", "script"],
+  storyboard: ["storyboard"],
+  production: ["video_preview"],
+  delivery: ["delivery"],
+});
+
+export function stagePosition(task, stage) {
+  if (!task || !stageOrder.includes(stage)) return "locked";
+  const current = stageOrder.indexOf(task.currentStage);
+  const target = stageOrder.indexOf(stage);
+  if (task.status === "completed" || target < current) return "complete";
+  if (target === current) return "current";
+  return "locked";
+}
+
+export function rollbackImpact(stage) {
+  const index = stageOrder.indexOf(stage);
+  return index < 0 ? [] : stageOrder.slice(index + 1).map(function (item) { return stageLabels[item]; });
+}
+
+export function confirmationAvailability(task, stage, view) {
+  if (!task || task.currentStage !== stage || task.stageStatus !== "awaiting_confirmation") {
+    return { enabled: false, label: stagePosition(task, stage) === "complete" ? "已确认" : "确认本阶段" };
+  }
+  if (!task.ownedByCurrentAccount) return { enabled: false, label: "仅负责人确认" };
+  if (stage === "strategy") {
+    return view?.activeStrategyDraft && view?.confirmationRequest
+      ? { enabled: true, label: "确认策略" }
+      : { enabled: false, label: "等待确认请求" };
+  }
+  const active = view?.versions?.find(function (item) { return item.id === view.activeArtifactVersionId; });
+  return active
+    ? { enabled: true, label: "确认本阶段", artifact: active.content }
+    : { enabled: false, label: "等待产物入库" };
+}
+
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/gu, function (character) {
+    return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" })[character];
+  });
+}
+
+function dateText(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "时间未知";
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).format(date);
+}
+
+function errorText(error) {
+  if (error?.status === 401) return "账号会话已失效";
+  if (error?.status === 403) return "当前账号无操作权限";
+  if (error?.status === 409) return "任务已更新，请刷新后重试";
+  return error instanceof Error && error.message ? error.message : "操作失败，请重试";
+}
+
+function requestId(prefix) {
+  return prefix + "_" + globalThis.crypto.randomUUID();
+}
+
+function activeVersion(view) {
+  return view?.versions?.find(function (item) { return item.id === view.activeArtifactVersionId; }) || null;
+}
+
+function stagePath(task, activeStage) {
+  return `<div class="production-stage-path" aria-label="视频制作流程">${stageOrder.map(function (stage) {
+    const position = stagePosition(task, stage);
+    return `<span class="${stage === activeStage ? "active" : position}"><i></i>${escapeHtml(stageLabels[stage])}</span>`;
+  }).join("")}</div>`;
+}
+
+function statusBadge(task, stage) {
+  const position = stagePosition(task, stage);
+  const label = position === "complete" ? "已确认" : position === "locked" ? "未开始" : statusLabels[task?.stageStatus] || "进行中";
+  const tone = label === "已确认" ? "success" : label === "待确认" ? "pending" : "neutral";
+  return `<span class="badge ${tone}">${label}</span>`;
+}
+
+function artifactSummary(view) {
+  const version = activeVersion(view);
+  return version ? `当前 v${version.version} · ${dateText(version.createdAt)}` : "尚无确认版本";
+}
+
+function strategyBody(task, view) {
+  const draft = view?.activeStrategyDraft;
+  if (!draft) {
+    return `<div class="production-empty"><span>策略由 Agent 生成后在此确认</span></div>`;
+  }
+  const validation = draft.validation?.valid !== false;
+  return `<div class="strategy-layout">
+    <section class="production-card strategy-brief">
+      <header><h3>传播方向</h3><span class="stage-mini-status ${validation ? "success" : "danger"}">${validation ? "事实校验通过" : "需修正"}</span></header>
+      <dl><div><dt>受众</dt><dd>${escapeHtml(draft.audience)}</dd></div><div><dt>主题</dt><dd>${escapeHtml(draft.theme)}</dd></div><div><dt>时长</dt><dd>${escapeHtml(task.durationSeconds)} 秒</dd></div></dl>
+    </section>
+    <section class="strategy-points" aria-label="策略要点">${draft.items.map(function (item, index) {
+      return `<article class="production-card"><span class="strategy-index">${String(index + 1).padStart(2, "0")}</span><div><h3>${escapeHtml(item.title)}</h3><p>${escapeHtml(item.statement)}</p></div></article>`;
+    }).join("")}</section>
+  </div>`;
+}
+
+function scriptBody(task, view) {
+  const version = activeVersion(view);
+  if (!task.scriptInput && !version) {
+    return `<div class="production-empty"><span>策略确认后由 Agent 生成脚本</span></div>`;
+  }
+  const script = task.scriptInput || [
+    `开场：以${task.theme}建立画面。`,
+    `主体：围绕${task.audience}呈现车型卖点。`,
+    `收束：品牌与车型露出。`,
+  ].join("\n");
+  return `<div class="script-layout">
+    <section class="production-card script-document"><header><div><h3>${version ? `脚本 v${version.version}` : "已有脚本"}</h3><span>${task.durationSeconds} 秒</span></div><span class="stage-mini-status">${task.platformTags?.[0] || "信息流"}</span></header>
+      <div class="script-lines">${script.split(/\n+/u).filter(Boolean).map(function (line, index) {
+        return `<div><time>${String(index * Math.max(1, Math.floor(task.durationSeconds / 3))).padStart(2, "0")}s</time><p>${escapeHtml(line)}</p></div>`;
+      }).join("")}</div>
+    </section>
+    <aside class="production-card script-facts"><h3>脚本要求</h3><dl><div><dt>受众</dt><dd>${escapeHtml(task.audience)}</dd></div><div><dt>主题</dt><dd>${escapeHtml(task.theme)}</dd></div><div><dt>车型事实</dt><dd>已锁定</dd></div></dl></aside>
+  </div>`;
+}
+
+function assetItems(assetView) {
+  if (!assetView) return [];
+  const selected = new Set((assetView.selectedAssets || []).map(function (item) {
+    return [item.source, item.assetId, item.version, item.category].join(":");
+  }));
+  const company = (assetView.companyAssets || []).map(function (item) {
+    return { name: item.displayName, category: item.reference.category, reference: item.reference };
+  });
+  const temporary = (assetView.temporaryAssets || []).map(function (item) {
+    return { name: item.fileName, category: item.category, reference: { ...item, assetId: item.id, source: "local_upload" } };
+  });
+  return company.concat(temporary).filter(function (item) {
+    return selected.has([item.reference.source, item.reference.assetId, item.reference.version, item.reference.category].join(":"));
+  });
+}
+
+function storyboardBody(task, view, assetView, adjustments) {
+  const assets = assetItems(assetView);
+  const vehicle = assets.find(function (item) { return item.category === "vehicle"; });
+  const people = assets.filter(function (item) { return item.category === "person"; });
+  const scenes = assets.filter(function (item) { return item.category === "scene"; });
+  const count = task.durationSeconds <= 10 ? 3 : task.durationSeconds <= 15 ? 4 : 6;
+  const version = activeVersion(view);
+  const shotLength = Math.max(1, Math.floor(task.durationSeconds / count));
+  return `<div class="storyboard-toolbar"><span>${count} 个镜头 · ${task.durationSeconds} 秒</span><span>${version ? `分镜 v${version.version}` : "分镜草稿"}</span></div>
+    <div class="storyboard-grid">${Array.from({ length: count }, function (_, index) {
+      const person = adjustments[index]?.person || people[index % Math.max(people.length, 1)] || null;
+      const scene = adjustments[index]?.scene || scenes[index % Math.max(scenes.length, 1)] || null;
+      const start = index * shotLength;
+      const end = index === count - 1 ? task.durationSeconds : Math.min(task.durationSeconds, start + shotLength);
+      return `<article class="storyboard-shot">
+        <div class="shot-preview"><span>${String(index + 1).padStart(2, "0")}</span><svg class="icon" aria-hidden="true"><use href="#i-image" /></svg><small>${start}–${end}s</small></div>
+        <div class="shot-body"><header><div><h3>镜头 ${index + 1}</h3><p>${index === 0 ? "建立场景" : index === count - 1 ? "品牌收束" : "卖点演绎"}</p></div>${adjustments[index] ? '<span class="stage-mini-status pending">人工调整</span>' : ""}</header>
+          <div class="shot-assets">
+            <div><span>车型</span><strong>${escapeHtml(vehicle?.name || "已锁定车型")}</strong><em>锁定</em></div>
+            <div><span>人物</span><strong>${escapeHtml(person?.name || "未配置")}</strong><button type="button" data-shot-adjust="person" data-shot-index="${index}" ${people.length ? "" : "disabled"}>更换</button></div>
+            <div><span>场景</span><strong>${escapeHtml(scene?.name || "未配置")}</strong><button type="button" data-shot-adjust="scene" data-shot-index="${index}" ${scenes.length ? "" : "disabled"}>更换</button></div>
+          </div>
+        </div>
+      </article>`;
+    }).join("")}</div>`;
+}
+
+function previewBody(task, view, project) {
+  const version = activeVersion(view);
+  const ratio = project?.project?.aspectRatio || "9:16";
+  return `<div class="preview-layout">
+    <section class="preview-player ratio-${ratio.replace(":", "-")}"><div><span class="preview-play"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg></span><strong>模拟预览</strong><small>未接入真实视频生成</small></div><time>00:${String(task.durationSeconds).padStart(2, "0")}</time></section>
+    <aside class="production-card preview-info"><header><h3>${version ? `预览 v${version.version}` : "预览信息"}</h3>${statusBadge(task, "video_preview")}</header><dl><div><dt>画幅</dt><dd>${escapeHtml(ratio)}</dd></div><div><dt>时长</dt><dd>${task.durationSeconds} 秒</dd></div><div><dt>生成状态</dt><dd>${version ? "已生成版本" : "等待生成"}</dd></div></dl></aside>
+  </div>`;
+}
+
+function deliveryBody(task, views) {
+  const files = [
+    ["成片 MP4", "video_preview"], ["字幕", "video_preview"], ["最终脚本", "script"],
+    ["分镜", "storyboard"], ["素材清单", "asset_matching"], ["剪映草稿", "delivery"],
+  ];
+  return `<div class="delivery-summary"><section><span>${task.status === "completed" ? "交付完成" : "交付准备"}</span><strong>${files.filter(function (entry) { return activeVersion(views[entry[1]]); }).length} / ${files.length}</strong><small>文件就绪</small></section><p>真实成片与剪映草稿将在生成服务接入后提供。</p></div>
+    <div class="delivery-grid">${files.map(function ([name, stage]) {
+      const ready = Boolean(activeVersion(views[stage]));
+      return `<article class="production-card"><span class="delivery-file-icon"><svg class="icon" aria-hidden="true"><use href="${name.includes("成片") ? "#i-film" : name.includes("素材") ? "#i-package" : "#i-file"}" /></svg></span><div><h3>${name}</h3><p>${ready ? "版本已确认" : "尚未生成"}</p></div><span class="stage-mini-status ${ready ? "success" : ""}">${ready ? "就绪" : "等待"}</span></article>`;
+    }).join("")}</div>`;
+}
+
+export function createWorkspaceStagesPanel(options) {
+  const roots = options.roots;
+  let projectId = null;
+  let project = null;
+  let task = null;
+  let visibleModule = null;
+  let planningStage = "strategy";
+  let view = null;
+  let assetView = null;
+  let stageViews = {};
+  let adjustments = {};
+  let busy = false;
+  let sequence = 0;
+
+  const dialog = document.createElement("dialog");
+  dialog.className = "stage-history-dialog";
+  dialog.setAttribute("aria-labelledby", "stage-history-title");
+  document.body.append(dialog);
+
+  function currentStage() {
+    return visibleModule === "planning" ? planningStage : stageModules[visibleModule]?.[0];
+  }
+
+  function renderLoading(root) {
+    root.innerHTML = `<div class="production-loading"><span></span><span></span><span></span></div>`;
+  }
+
+  function notice(stage) {
+    if (stage === "storyboard" && Object.keys(adjustments).length > 0) {
+      return "人工调整待写入新分镜版本";
+    }
+    const position = stagePosition(task, stage);
+    if (position === "locked") return `完成${stageLabels[stageOrder[stageOrder.indexOf(stage) - 1]]}后开始`;
+    if (task.currentStage === stage && task.stageStatus === "awaiting_confirmation") return "产物待负责人确认";
+    if (position === "complete") return artifactSummary(view);
+    return "Agent 正在处理当前阶段";
+  }
+
+  function render() {
+    const root = roots[visibleModule];
+    const stage = currentStage();
+    if (!root || !stage || !task) return;
+    const availability = confirmationAvailability(task, stage, view);
+    const body = stage === "strategy" ? strategyBody(task, view)
+      : stage === "script" ? scriptBody(task, view)
+      : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
+      : stage === "video_preview" ? previewBody(task, view, project)
+      : deliveryBody(task, stageViews);
+    root.innerHTML = `<div class="production-stage-shell">
+      <header class="production-stage-header"><div><div class="production-stage-title"><h2>${stageLabels[stage]}</h2>${statusBadge(task, stage)}</div><p>${notice(stage)}</p></div>
+        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
+      </header>
+      ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
+      ${stagePath(task, stage)}
+      <div class="production-stage-notice ${stagePosition(task, stage)}"><svg class="icon" aria-hidden="true"><use href="#i-spark" /></svg><span>${notice(stage)}</span></div>
+      <div class="production-stage-body">${body}</div>
+    </div>`;
+    root.querySelectorAll("[data-planning-stage]").forEach(function (button) {
+      const selected = button.dataset.planningStage === planningStage;
+      button.classList.toggle("active", selected);
+      button.setAttribute("aria-selected", String(selected));
+      button.addEventListener("click", function () {
+        planningStage = button.dataset.planningStage;
+        void loadStage();
+      });
+    });
+    root.querySelector("[data-stage-history]")?.addEventListener("click", showHistory);
+    root.querySelector("[data-stage-confirm]")?.addEventListener("click", confirmStage);
+    root.querySelectorAll("[data-shot-adjust]").forEach(function (button) {
+      button.addEventListener("click", function () { showAssetPicker(Number(button.dataset.shotIndex), button.dataset.shotAdjust); });
+    });
+  }
+
+  async function loadStage() {
+    const root = roots[visibleModule];
+    const stage = currentStage();
+    const loadSequence = ++sequence;
+    if (!root || !stage || !projectId || !task) return;
+    renderLoading(root);
+    try {
+      if (stage === "delivery") {
+        const results = await Promise.all(stageOrder.map(function (item) { return options.api.getStageVersions(projectId, task.id, item); }));
+        if (loadSequence !== sequence) return;
+        stageViews = Object.fromEntries(stageOrder.map(function (item, index) { return [item, results[index]]; }));
+        view = stageViews.delivery;
+      } else {
+        const requests = [options.api.getStageVersions(projectId, task.id, stage)];
+        if (stage === "storyboard") requests.push(options.api.getAssetMatching(projectId, task.id));
+        const results = await Promise.all(requests);
+        if (loadSequence !== sequence) return;
+        view = results[0];
+        if (stage === "storyboard") assetView = results[1];
+      }
+      task = { ...task, ...view.videoTask };
+      render();
+    } catch (error) {
+      if (loadSequence !== sequence) return;
+      root.innerHTML = `<div class="production-error" role="alert"><span>${escapeHtml(errorText(error))}</span><button type="button" class="text-button">重试</button></div>`;
+      root.querySelector("button")?.addEventListener("click", loadStage);
+    }
+  }
+
+  async function confirmStage() {
+    const stage = currentStage();
+    const availability = confirmationAvailability(task, stage, view);
+    if (!availability.enabled || busy) return;
+    busy = true;
+    render();
+    try {
+      const result = await options.api.confirmStage(projectId, task.id, stage, {
+        requestId: requestId("confirm_stage"),
+        expectedTaskRevision: task.revision,
+        ...(availability.artifact ? { artifact: availability.artifact } : {}),
+      });
+      task = { ...task, ...result.videoTask };
+      options.onTaskUpdated?.(result.videoTask);
+      await loadStage();
+    } catch (error) {
+      showMessage(errorText(error));
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  function showMessage(message) {
+    dialog.innerHTML = `<form method="dialog" class="stage-dialog-card"><header><h2 id="stage-history-title">提示</h2><button value="close" aria-label="关闭">×</button></header><p class="stage-dialog-message">${escapeHtml(message)}</p><footer><button class="button primary" value="close">知道了</button></footer></form>`;
+    dialog.showModal();
+  }
+
+  function showHistory() {
+    const stage = currentStage();
+    const invalid = new Set((view.invalidations || []).map(function (item) { return item.artifactVersionId; }));
+    dialog.innerHTML = `<div class="stage-dialog-card"><header><div><h2 id="stage-history-title">${stageLabels[stage]}版本</h2><p>${view.versions.length} 个确认版本</p></div><button type="button" data-dialog-close aria-label="关闭">×</button></header><div class="stage-version-list">${[...view.versions].reverse().map(function (version) {
+      const active = version.id === view.activeArtifactVersionId;
+      const invalidated = invalid.has(version.id);
+      return `<article><span class="stage-version-number">v${version.version}</span><div><strong>${active ? "当前版本" : invalidated ? "已失效" : "历史版本"}</strong><small>${dateText(version.createdAt)}</small></div>${!active && !invalidated && task.ownedByCurrentAccount ? `<button type="button" class="text-button" data-rollback-version="${escapeHtml(version.id)}">回退</button>` : ""}</article>`;
+    }).join("")}</div></div>`;
+    dialog.querySelector("[data-dialog-close]")?.addEventListener("click", function () { dialog.close(); });
+    dialog.querySelectorAll("[data-rollback-version]").forEach(function (button) {
+      button.addEventListener("click", function () { showRollback(button.dataset.rollbackVersion); });
+    });
+    dialog.showModal();
+  }
+
+  function showRollback(versionId) {
+    const stage = currentStage();
+    const version = view.versions.find(function (item) { return item.id === versionId; });
+    const affected = rollbackImpact(stage);
+    dialog.innerHTML = `<form class="stage-dialog-card" data-rollback-form><header><div><h2 id="stage-history-title">回退到 v${version?.version || "—"}</h2><p>${stageLabels[stage]}</p></div><button type="button" data-dialog-close aria-label="关闭">×</button></header>
+      <div class="rollback-warning"><strong>下游版本将失效</strong><p>${affected.length ? affected.join("、") : "当前为最终阶段"}</p></div>
+      <label class="rollback-reason"><span>回退原因</span><textarea required minlength="1" maxlength="2000" placeholder="填写原因"></textarea></label>
+      <footer><button type="button" class="button secondary" data-dialog-close>取消</button><button class="button primary" type="submit">确认回退</button></footer></form>`;
+    dialog.querySelectorAll("[data-dialog-close]").forEach(function (button) { button.addEventListener("click", function () { dialog.close(); }); });
+    dialog.querySelector("[data-rollback-form]")?.addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const reason = event.currentTarget.querySelector("textarea").value.trim();
+      if (!reason || busy) return;
+      busy = true;
+      try {
+        const result = await options.api.rollbackStage(projectId, task.id, stage, {
+          requestId: requestId("rollback_stage"), expectedTaskRevision: task.revision,
+          targetArtifactVersionId: versionId, reason,
+        });
+        task = { ...task, ...result.videoTask };
+        options.onTaskUpdated?.(result.videoTask);
+        dialog.close();
+        await loadStage();
+      } catch (error) {
+        dialog.close();
+        showMessage(errorText(error));
+      } finally { busy = false; }
+    });
+  }
+
+  function showAssetPicker(shotIndex, category) {
+    const candidates = assetItems(assetView).filter(function (item) { return item.category === category; });
+    dialog.innerHTML = `<div class="stage-dialog-card"><header><div><h2 id="stage-history-title">更换${category === "person" ? "人物" : "场景"}</h2><p>镜头 ${shotIndex + 1}</p></div><button type="button" data-dialog-close aria-label="关闭">×</button></header><div class="stage-asset-picker">${candidates.map(function (item, index) {
+      return `<button type="button" data-pick-asset="${index}"><span><svg class="icon" aria-hidden="true"><use href="${category === "person" ? "#i-message" : "#i-image"}" /></svg></span><strong>${escapeHtml(item.name)}</strong></button>`;
+    }).join("")}</div></div>`;
+    dialog.querySelector("[data-dialog-close]")?.addEventListener("click", function () { dialog.close(); });
+    dialog.querySelectorAll("[data-pick-asset]").forEach(function (button) {
+      button.addEventListener("click", function () {
+        adjustments[shotIndex] = { ...(adjustments[shotIndex] || {}), [category]: candidates[Number(button.dataset.pickAsset)] };
+        dialog.close();
+        render();
+      });
+    });
+    dialog.showModal();
+  }
+
+  return {
+    setContext(nextProjectId, nextProject, nextTask, activeModule) {
+      const isVisible = Boolean(stageModules[activeModule]);
+      const nextKey = [nextProjectId || "", nextTask?.id || "", activeModule || ""].join(":");
+      const currentKey = [projectId || "", task?.id || "", visibleModule || ""].join(":");
+      projectId = nextProjectId || null;
+      project = nextProject || null;
+      task = nextTask || null;
+      visibleModule = isVisible ? activeModule : null;
+      if (!visibleModule || !task || nextKey === currentKey) return;
+      if (visibleModule === "planning") planningStage = ["strategy", "script"].includes(task.currentStage) ? task.currentStage : planningStage;
+      view = null;
+      assetView = null;
+      stageViews = {};
+      adjustments = {};
+      void loadStage();
+    },
+    refresh: loadStage,
+  };
+}

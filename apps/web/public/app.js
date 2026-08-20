@@ -19,6 +19,7 @@ import {
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js";
 import { createWorkspaceFrame } from "./workspace-frame.js";
 import {
   bindWorkspaceShell,
@@ -65,6 +66,7 @@ let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
 let workspaceFrame = null;
 let assetMatchingPanel = null;
+let workspaceStagesPanel = null;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -1953,6 +1955,24 @@ assetMatchingPanel = createAssetMatchingPanel({
   },
 });
 
+workspaceStagesPanel = createWorkspaceStagesPanel({
+  roots: {
+    planning: document.querySelector("#workspace-planning-panel"),
+    storyboard: document.querySelector("#workspace-storyboard-panel"),
+    production: document.querySelector("#workspace-production-panel"),
+    delivery: document.querySelector("#workspace-delivery-panel"),
+  },
+  api: workspaceApi,
+  onTaskUpdated: function (updatedTask) {
+    for (const summary of state.projectLibrary) {
+      const task = summary.tasks.find(function (candidate) { return candidate.id === updatedTask.id; });
+      if (!task) continue;
+      Object.assign(task, updatedTask);
+      break;
+    }
+  },
+});
+
 workspaceFrame = createWorkspaceFrame({
   elements: {
     view: elements.projectWorkspaceView,
@@ -1990,6 +2010,12 @@ workspaceFrame = createWorkspaceFrame({
       selection.project?.project?.id,
       selection.task,
       selection.activeView === "module" && selection.activeModule === "assets",
+    );
+    workspaceStagesPanel.setContext(
+      selection.project?.project?.id,
+      selection.project,
+      selection.task,
+      selection.activeView === "module" ? selection.activeModule : null,
     );
   },
 });

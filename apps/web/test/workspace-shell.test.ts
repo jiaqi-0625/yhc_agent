@@ -129,10 +129,11 @@ test("workspace brand API uses the role-specific server endpoints", async (conte
 });
 
 test("workspace shell markup is Chinese-first, embed-ready, and declares its desktop boundary", async () => {
-  const [page, styles, workspaceFrameStyles] = await Promise.all([
+  const [page, styles, workspaceFrameStyles, workspaceStages] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/app.css", import.meta.url), "utf8"),
     readFile(new URL("../public/workspace-frame.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/workspace-stages.js", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(page, /platform-sidebar/u);
   assert.match(page, /<select id="brand-navigation" aria-label="切换品牌"/u);
@@ -155,7 +156,7 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(page, />项目信息<\/h3>[\s\S]*>任务概况<\/h3>[\s\S]*>视频任务<\/h3>/u);
   assert.match(page, />任务<\/span><span>当前阶段<\/span><span>状态<\/span><span>负责人<\/span><span>更新<\/span>/u);
   assert.match(page, />策划<\/button>[\s\S]*>资产<\/button>[\s\S]*>分镜<\/button>[\s\S]*>制作<\/button>[\s\S]*>交付<\/button>/u);
-  assert.match(page, />营销策略<\/span><span>脚本<\/span><span>资产匹配<\/span><span>分镜<\/span><span>视频预览<\/span><span>交付<\/span>/u);
+  assert.match(workspaceStages, /strategy: "营销策略"[\s\S]*script: "脚本"[\s\S]*asset_matching: "资产匹配"[\s\S]*storyboard: "分镜"[\s\S]*video_preview: "视频预览"[\s\S]*delivery: "交付"/u);
   assert.match(page, /请使用桌面端打开/u);
   assert.doesNotMatch(page, />[^<]*(?:Projects|Current work|Strategy workspace|Agent)[^<]*</u);
   assert.doesNotMatch(styles, /--platform-sidebar-width:/u);
