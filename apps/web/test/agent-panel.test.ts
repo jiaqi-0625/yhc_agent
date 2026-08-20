@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -186,6 +186,7 @@ test("Agent action command responses preserve replay and human-confirmation boun
       message: "操作已由服务端执行。策略草稿已生成，任务版本更新至 4。",
       receiptId: "command_receipt_1",
       resultingRevision: 4,
+      occurredAt: "2026-08-20T00:00:00.000Z",
       replayed: false,
     },
   );
@@ -221,6 +222,75 @@ test("Agent action command responses preserve replay and human-confirmation boun
   assert.match(presentation.message, /未重复执行/u);
   assert.match(presentation.message, /尚未确认/u);
   assert.doesNotMatch(presentation.message, /已确认/u);
+});
+
+test("Agent action success creates a stable non-authoritative timeline result event", () => {
+  const event = agentActionTimelineEvent(generationCard, {
+    status: "已执行",
+    message: "操作已由服务端执行。策略草稿已生成，任务版本更新至 4。",
+    receiptId: "command_receipt_1",
+    resultingRevision: 4,
+    occurredAt: "2026-08-20T00:00:00.000Z",
+    replayed: false,
+  });
+  assert.deepEqual(event, {
+    schemaVersion: 1,
+    eventId: "action_result_command_receipt_1",
+    type: "action_result",
+    videoTaskId: "task_1",
+    action: "generate_strategy",
+    receiptId: "command_receipt_1",
+    resultingRevision: 4,
+    occurredAt: "2026-08-20T00:00:00.000Z",
+    replayed: false,
+    title: "策略草稿已生成",
+    status: "执行成功",
+    message: "操作已由服务端执行。策略草稿已生成，任务版本更新至 4。",
+  });
+  assert.throws(
+    () => agentActionTimelineEvent(generationCard, { ...event, receiptId: "../forged" }),
+    (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+  );
+});
+
+test("Agent action execution returns the validated timeline event with the command result", async () => {
+  const response = {
+    receipt: {
+      schemaVersion: 1,
+      id: "command_receipt_timeline_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      videoTaskId: "task_1",
+      actorAccountId: "account_creator_a",
+      requestId: "agent_action_timeline_1",
+      payloadHash: "b".repeat(64),
+      action: "generate_strategy",
+      expectedTaskRevision: 3,
+      resultingTaskRevision: 4,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_timeline_1" },
+      occurredAt: "2026-08-20T01:00:00.000Z",
+    },
+    replayed: false,
+    videoTask: { id: "task_1", tenantId: "tenant_1", batchProjectId: "project_1", revision: 4 },
+  };
+  const execution = await executeAgentActionCommand(
+    generationCard,
+    {
+      projectId: "project_1",
+      videoTaskId: "task_1",
+      accountId: "account_creator_a",
+    },
+    "agent_action_timeline_1",
+    false,
+    async () => response,
+  );
+  assert.equal(execution.kind, "success");
+  if (execution.kind !== "success") return;
+  assert.equal(execution.timelineEvent.eventId, "action_result_command_receipt_timeline_1");
+  assert.equal(execution.timelineEvent.type, "action_result");
+  assert.equal(execution.timelineEvent.resultingRevision, 4);
+  assert.match(execution.timelineEvent.message, /策略草稿已生成/u);
 });
 
 test("Agent action command responses reject mismatched receipts without inviting a duplicate", () => {
@@ -311,6 +381,7 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(commandWiring, /if \(activeAgentActionExecution === execution\)/u);
   assert.match(commandWiring, /response\.videoTask\.revision < context\.revision/u);
   assert.match(commandWiring, /executeAgentActionCommand/u);
+  assert.match(commandWiring, /appendActionResultTimelineEvent\(card, commandExecution\.timelineEvent\)/u);
   assert.match(commandWiring, /card\.dataset\.executionBlocked === "true"/u);
   assert.match(commandWiring, /card\.dataset\.executed === "true"/u);
   assert.doesNotMatch(commandWiring, /\/v1\/works\//u);

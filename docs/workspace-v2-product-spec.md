@@ -282,9 +282,9 @@
 
 ### 12.3 当前持久化边界
 
-- 当前开发与验收环境只使用本地文件 Store；资产、Agent 会话和交付成品不得要求数据库可用。
-- 领域层和 API 继续通过可替换的 Store / Provider 端口访问持久化数据，不把本地目录结构泄漏到共享 Schema、状态机或 Agent 工具。
-- PostgreSQL 等数据库适配器仅作为后续接入接口保留，当前不作为启动、测试或功能验收前置条件；重新启用前需另行确认迁移、运行和发布方案。
+- 用户已撤销此前的数据库回滚决定。Workspace V2 权威管理状态、Workspace Session、账号额度与运行锁、批次项目/项目资产池、项目临时资产和视频任务使用 PostgreSQL Store；生产环境只允许 `PERSISTENCE_BACKEND=postgres`。
+- `PERSISTENCE_BACKEND=local` 仅保留给隔离测试和旧链路兼容，不得作为生产降级或 PostgreSQL 迁移失败后的回退。领域层和 API 继续通过可替换 Store / Provider 端口访问持久化数据，不向共享 Schema、状态机或 Agent 工具泄漏存储实现。
+- 旧 `.data/works` 只可作为 WS-307 显式迁移输入；Agent transcript 暂时保持隔离的本地对话恢复存储，不是任务、审批、预算、素材或交付成品的业务权威来源。
 
 ### 12.4 现有数据迁移
 

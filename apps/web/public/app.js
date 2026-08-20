@@ -11,7 +11,7 @@ import {
   createStableAgentActionRequestId,
   executeAgentActionCommand,
   extractAgentActionCard,
-} from "./agent-panel.js?build=ws502-v1";
+} from "./agent-panel.js?build=ws502-v1-ag405-v1";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -1136,6 +1136,43 @@ async function refreshAgentContextAfterCommand(sessionId, videoTaskId, expectedS
   } catch {}
 }
 
+function appendActionResultTimelineEvent(card, timelineEvent) {
+  const turnRoot = card.closest(".agent-turn");
+  if (!turnRoot || !timelineEvent || timelineEvent.type !== "action_result") return;
+  const duplicate = Array.from(turnRoot.querySelectorAll(".agent-action-result-event")).some(function (event) {
+    return event.dataset.eventId === timelineEvent.eventId;
+  });
+  if (duplicate) return;
+  const content = appendTimelineEvent({ root: turnRoot }, "action-result-event");
+  const event = document.createElement("section");
+  event.className = "agent-action-result-event";
+  event.dataset.eventId = timelineEvent.eventId;
+  event.dataset.receiptId = timelineEvent.receiptId;
+  event.dataset.videoTaskId = timelineEvent.videoTaskId;
+  event.dataset.resultingRevision = String(timelineEvent.resultingRevision);
+  event.setAttribute("role", "status");
+  event.setAttribute("aria-live", "polite");
+  const header = document.createElement("div");
+  header.className = "agent-action-result-header";
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("span");
+  eyebrow.textContent = "操作结果";
+  const title = document.createElement("strong");
+  title.textContent = timelineEvent.title;
+  copy.append(eyebrow, title);
+  const status = document.createElement("span");
+  status.className = "agent-action-result-status";
+  status.textContent = timelineEvent.status;
+  header.append(copy, status);
+  const message = document.createElement("p");
+  message.textContent = timelineEvent.message;
+  const authority = document.createElement("p");
+  authority.className = "agent-action-result-authority";
+  authority.textContent = "任务版本 " + timelineEvent.resultingRevision + " · 业务状态以工作区最新数据为准";
+  event.append(header, message, authority);
+  content.appendChild(event);
+}
+
 async function executeActionProposal(card, proposal) {
   if (
     state.busy
@@ -1214,6 +1251,7 @@ async function executeActionProposal(card, proposal) {
     card.dataset.commandReplayed = String(presentation.replayed);
     card.dataset.executed = "true";
     card.classList.add("completed");
+    appendActionResultTimelineEvent(card, commandExecution.timelineEvent);
     void refreshAgentContextAfterCommand(
       context.sessionId,
       context.videoTaskId,

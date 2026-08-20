@@ -228,6 +228,7 @@ export function agentActionSuccessPresentation(proposal, requestId, projectId, a
       message: replayPrefix + "策略草稿已生成，任务版本更新至 " + receipt.resultingTaskRevision + "。",
       receiptId: receipt.id,
       resultingRevision: videoTask.revision,
+      occurredAt: receipt.occurredAt,
       replayed: response.replayed,
     };
   }
@@ -236,7 +237,46 @@ export function agentActionSuccessPresentation(proposal, requestId, projectId, a
     message: replayPrefix + "人工确认请求已提交，当前阶段尚未确认；任务版本更新至 " + receipt.resultingTaskRevision + "。",
     receiptId: receipt.id,
     resultingRevision: videoTask.revision,
+    occurredAt: receipt.occurredAt,
     replayed: response.replayed,
+  };
+}
+
+export function agentActionTimelineEvent(proposal, presentation) {
+  const parsedCard = parseAgentActionCard(proposal);
+  if (
+    !parsedCard
+    || !hasExactKeys(presentation, [
+      "status",
+      "message",
+      "receiptId",
+      "resultingRevision",
+      "occurredAt",
+      "replayed",
+    ])
+    || typeof presentation.status !== "string"
+    || typeof presentation.message !== "string"
+    || !isIdentifier(presentation.receiptId)
+    || !Number.isSafeInteger(presentation.resultingRevision)
+    || presentation.resultingRevision < parsedCard.expectedRevision + 1
+    || !isIsoDateTime(presentation.occurredAt)
+    || typeof presentation.replayed !== "boolean"
+  ) {
+    throw uncertainCommandResponse();
+  }
+  return {
+    schemaVersion: 1,
+    eventId: `action_result_${presentation.receiptId}`,
+    type: "action_result",
+    videoTaskId: parsedCard.videoTaskId,
+    action: parsedCard.action,
+    receiptId: presentation.receiptId,
+    resultingRevision: presentation.resultingRevision,
+    occurredAt: presentation.occurredAt,
+    replayed: presentation.replayed,
+    title: parsedCard.action === "generate_strategy" ? "策略草稿已生成" : "人工确认请求已提交",
+    status: presentation.replayed ? "结果已恢复" : "执行成功",
+    message: presentation.message,
   };
 }
 
@@ -443,17 +483,19 @@ export async function executeAgentActionCommand(
       context.videoTaskId,
       agentActionRequestBody(proposal, stableRequestId),
     );
+    const presentation = agentActionSuccessPresentation(
+      proposal,
+      stableRequestId,
+      context.projectId,
+      context.accountId,
+      response,
+    );
     return {
       kind: "success",
       requestId: stableRequestId,
       response,
-      presentation: agentActionSuccessPresentation(
-        proposal,
-        stableRequestId,
-        context.projectId,
-        context.accountId,
-        response,
-      ),
+      presentation,
+      timelineEvent: agentActionTimelineEvent(proposal, presentation),
     };
   } catch (error) {
     return {

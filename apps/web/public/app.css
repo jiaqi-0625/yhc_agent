@@ -438,6 +438,7 @@ input::placeholder, textarea::placeholder { color: color-mix(in oklch, var(--mut
 .timeline-dot { position: absolute; top: 5px; left: -13px; width: 7px; height: 7px; border: 2px solid var(--card); border-radius: 50%; background: var(--muted-foreground); box-sizing: content-box; }
 .timeline-event.active .timeline-dot, .timeline-event.tool-event:not(.failed) .timeline-dot { background: #68d391; }
 .timeline-event.action-event .timeline-dot { background: var(--primary); }
+.timeline-event.action-result-event .timeline-dot { background: #22a06b; }
 .timeline-event.failed .timeline-dot { background: var(--destructive); }
 .timeline-content { min-width: 0; }
 .thinking-details > summary { cursor: pointer; list-style: none; }
@@ -473,6 +474,14 @@ input::placeholder, textarea::placeholder { color: color-mix(in oklch, var(--mut
 .agent-action-card.completed .agent-action-status { color: #168456; background: color-mix(in oklch, #22a06b 15%, var(--card)); }
 .agent-action-card.stale { border-style: dashed; opacity: .72; }
 .agent-action-card.failed { border-color: color-mix(in oklch, var(--destructive) 50%, var(--border)); }
+.agent-action-result-event { display: grid; gap: 7px; padding: 11px 12px; border: 1px solid color-mix(in oklch, #22a06b 48%, var(--border)); border-radius: 8px; background: color-mix(in oklch, #22a06b 7%, var(--card)); }
+.agent-action-result-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.agent-action-result-header > div { display: grid; gap: 2px; min-width: 0; }
+.agent-action-result-header span:first-child { color: var(--muted-foreground); font-size: 9px; }
+.agent-action-result-header strong { color: var(--foreground); font-size: 12px; }
+.agent-action-result-status { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; color: #168456; background: color-mix(in oklch, #22a06b 15%, var(--card)); font-size: 9px; }
+.agent-action-result-event > p { margin: 0; color: var(--foreground); font-size: 11px; line-height: 1.55; }
+.agent-action-result-event .agent-action-result-authority { color: var(--muted-foreground); font-size: 10px; }
 .timeline-answer { color: var(--card-foreground); font-size: 13px; line-height: 1.7; overflow-wrap: anywhere; }
 .timeline-failure { padding: 9px 11px; border: 1px solid color-mix(in oklch, var(--destructive) 45%, var(--border)); border-radius: 6px; color: var(--destructive); background: color-mix(in oklch, var(--destructive) 7%, var(--card)); font-size: 12px; line-height: 1.55; }
 .markdown-body { white-space: normal; }
