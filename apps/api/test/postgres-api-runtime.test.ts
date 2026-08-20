@@ -80,7 +80,14 @@ test("production rejects local persistence and unknown backends", () => {
     () => resolvePersistenceBackend({ PERSISTENCE_BACKEND: "sqlite" }),
     /PERSISTENCE_BACKEND/u,
   );
-  assert.equal(resolvePersistenceBackend({ NODE_ENV: "production" }), "postgres");
+  assert.throws(
+    () => resolvePersistenceBackend({ NODE_ENV: "production" }),
+    /Production requires PERSISTENCE_BACKEND=postgres/u,
+  );
+  assert.equal(
+    resolvePersistenceBackend({ NODE_ENV: "production", PERSISTENCE_BACKEND: "postgres" }),
+    "postgres",
+  );
   assert.equal(resolvePersistenceBackend({ NODE_ENV: "development", PERSISTENCE_BACKEND: "local" }), "local");
 });
 

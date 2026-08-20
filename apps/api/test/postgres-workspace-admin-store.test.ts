@@ -102,15 +102,17 @@ test("postgres workspace administration rejects cross-tenant JSON and returns de
     /invalid tenant scope/u,
   );
 
-  const seeded = new PostgresWorkspaceAdminStore(
+  const empty = new PostgresWorkspaceAdminStore(
     new FakePostgres(
+      { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
     ),
   );
-  const first = await seeded.load("tenant_firefly");
+  const first = await empty.load("tenant_firefly");
   first.brands.push({} as never);
-  assert.deepEqual(await seeded.load("tenant_firefly"), emptyState("tenant_firefly"));
+  assert.deepEqual(await empty.load("tenant_firefly"), emptyState("tenant_firefly"));
+  assert.deepEqual(await empty.listForAccount("tenant_firefly", "account_admin"), []);
 });
 
 test("postgres workspace administration rolls back updater failures before any write", async () => {

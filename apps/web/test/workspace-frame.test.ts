@@ -136,3 +136,11 @@ test("workspace frame blocks task and overview switches while Agent interaction 
   assert.match(source, /writeRoute\("replace"\)/u);
   assert.match(source, /refreshSelectionControls/u);
 });
+
+test("workspace frame canonicalizes stale URL selections without keeping an orphan task", async () => {
+  const source = await readFile(new URL("../public/workspace-frame.js", import.meta.url), "utf8");
+  assert.match(source, /historyMode: "replace"/u);
+  assert.match(source, /if \(isProjectLibraryLoading\(\)\) return false/u);
+  assert.match(source, /close\(\{ historyMode: "replace" \}\)/u);
+  assert.doesNotMatch(source, /module: route\.module \|\| undefined,\s*\n\s*synchronize: false/u);
+});

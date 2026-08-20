@@ -20,7 +20,7 @@
     "migrate:workspace-v2": "tsx apps/api/src/legacy-work-migration-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test \"packages/**/test/*.test.ts\" \"apps/**/test/*.test.ts\"",
-    "test:postgres": "tsx --test apps/api/test/postgres-integration.test.ts",
+    "test:postgres": "node scripts/require-postgres-test-env.mjs && tsx --test apps/api/test/postgres-integration.test.ts",
     "security:check": "node scripts/security-check.mjs",
     "audit:prod": "npm audit --registry=https://registry.npmjs.org --omit=dev --audit-level=high",
     "check": "npm run typecheck && npm test && npm run security:check"

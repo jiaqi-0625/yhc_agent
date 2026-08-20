@@ -1,5 +1,7 @@
 # ADR-001：Workspace V2 使用 PostgreSQL 持久化
 
+> 当前状态：已接受并执行。用户已撤销此前的回滚决定；按[产品规格第 12.3 节](../workspace-v2-product-spec.md#123-当前持久化边界)，PostgreSQL 继续作为 Workspace V2 生产权威持久化系统，本地文件 Store 仅用于隔离测试和旧链路兼容。
+
 - 状态：已接受
 - 日期：2026-08-19
 - 决策人：产品负责人（用户确认）

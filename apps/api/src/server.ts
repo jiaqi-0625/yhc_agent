@@ -787,7 +787,7 @@ type ApiEnvironment = Readonly<Record<string, string | undefined>>;
 export function resolvePersistenceBackend(
   environment: ApiEnvironment = process.env,
 ): PersistenceBackend {
-  const configured = environment.PERSISTENCE_BACKEND ?? "postgres";
+  const configured = environment.PERSISTENCE_BACKEND ?? "local";
   if (configured !== "local" && configured !== "postgres") {
     throw new Error("PERSISTENCE_BACKEND must be either local or postgres.");
   }
@@ -879,6 +879,9 @@ export async function startConfiguredApiServer(
       undefined,
       undefined,
       migrationStateDirectory,
+      undefined,
+      undefined,
+      true,
     );
   }
 

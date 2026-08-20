@@ -45,16 +45,8 @@ import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
-import {
-  DEFAULT_ADMIN_BRANDS,
-  DEFAULT_ADMIN_VEHICLES,
-  DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
-  WorkspaceAdminRuntime,
-} from "./workspace-admin-runtime.ts";
-import {
-  DEVELOPMENT_ACCESS_GRANTS,
-  WorkspaceSessionRuntime,
-} from "./workspace-session-runtime.ts";
+import { WorkspaceAdminRuntime } from "./workspace-admin-runtime.ts";
+import { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 import {
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
@@ -183,12 +175,7 @@ export async function createPostgresApiRuntime(
     };
     await readiness();
 
-    const administrationStore = new PostgresWorkspaceAdminStore(database, {
-      brands: DEFAULT_ADMIN_BRANDS,
-      vehicleVersions: DEFAULT_ADMIN_VEHICLES,
-      vehicleAssetAssociations: DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
-      accessGrants: DEVELOPMENT_ACCESS_GRANTS,
-    });
+    const administrationStore = new PostgresWorkspaceAdminStore(database);
     const sessionStore = new PostgresWorkspaceSessionStore(database);
     const budgetStore = new PostgresAccountBudgetStore(database);
     const projectStore = new PostgresBatchProjectStore(database);

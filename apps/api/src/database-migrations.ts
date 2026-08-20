@@ -25,7 +25,19 @@ interface RequiredTableRow {
   present: boolean;
 }
 
+interface RequiredColumnRow {
+  table_name: string;
+  column_name: string;
+  present: boolean;
+}
+
 interface RequiredConstraintRow {
+  table_name: string;
+  constraint_name: string;
+  present: boolean;
+}
+
+interface RequiredCheckRow {
   table_name: string;
   constraint_name: string;
   present: boolean;
@@ -35,6 +47,13 @@ interface RequiredIndexRow {
   table_name: string;
   index_name: string;
   present: boolean;
+}
+
+interface WorkspaceV2ColumnRequirement {
+  readonly tableName: string;
+  readonly columnName: string;
+  readonly formattedType: string;
+  readonly notNull: boolean;
 }
 
 interface WorkspaceV2ConstraintRequirement {
@@ -65,6 +84,113 @@ const workspaceV2RequiredTables = Object.freeze([
   "temporary_asset_project_states",
   "account_run_lock_states",
 ]);
+
+function requiredWorkspaceV2Column(
+  tableName: string,
+  columnName: string,
+  formattedType: string,
+  notNull = true,
+): WorkspaceV2ColumnRequirement {
+  return Object.freeze({ tableName, columnName, formattedType, notNull });
+}
+
+interface WorkspaceV2CheckRequirement {
+  readonly tableName: string;
+  readonly constraintName: string;
+  readonly definition: string;
+}
+
+const varchar128 = "character varying(128)";
+const timestamptz = "timestamp with time zone";
+const workspaceV2RequiredColumns: readonly WorkspaceV2ColumnRequirement[] = Object.freeze([
+  requiredWorkspaceV2Column("workspace_admin_states", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("workspace_admin_states", "revision", "bigint"),
+  requiredWorkspaceV2Column("workspace_admin_states", "state", "jsonb"),
+  requiredWorkspaceV2Column("workspace_admin_states", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("workspace_sessions", "session_id_hash", "character(64)"),
+  requiredWorkspaceV2Column("workspace_sessions", "account_id", varchar128),
+  requiredWorkspaceV2Column("workspace_sessions", "created_at", timestamptz),
+  requiredWorkspaceV2Column("workspace_sessions", "expires_at", timestamptz),
+  requiredWorkspaceV2Column("workspace_sessions", "signed_out_at", timestamptz, false),
+  requiredWorkspaceV2Column("workspace_sessions", "state", "jsonb"),
+  requiredWorkspaceV2Column("workspace_sessions", "revision", "bigint"),
+  requiredWorkspaceV2Column("workspace_sessions", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("account_budget_states", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("account_budget_states", "account_id", varchar128),
+  requiredWorkspaceV2Column("account_budget_states", "revision", "bigint"),
+  requiredWorkspaceV2Column("account_budget_states", "state", "jsonb"),
+  requiredWorkspaceV2Column("account_budget_states", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("batch_project_aggregates", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("batch_project_aggregates", "project_id", varchar128),
+  requiredWorkspaceV2Column("batch_project_aggregates", "revision", "bigint"),
+  requiredWorkspaceV2Column(
+    "batch_project_aggregates",
+    "normalized_name",
+    "character varying(240)",
+  ),
+  requiredWorkspaceV2Column("batch_project_aggregates", "creation_actor_account_id", varchar128),
+  requiredWorkspaceV2Column("batch_project_aggregates", "creation_request_id", varchar128),
+  requiredWorkspaceV2Column("batch_project_aggregates", "creation_payload_hash", varchar128),
+  requiredWorkspaceV2Column("batch_project_aggregates", "aggregate", "jsonb"),
+  requiredWorkspaceV2Column("batch_project_aggregates", "created_at", timestamptz),
+  requiredWorkspaceV2Column("batch_project_aggregates", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("video_task_aggregates", "task_id", varchar128),
+  requiredWorkspaceV2Column("video_task_aggregates", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("video_task_aggregates", "project_id", varchar128),
+  requiredWorkspaceV2Column("video_task_aggregates", "revision", "bigint"),
+  requiredWorkspaceV2Column(
+    "video_task_aggregates",
+    "normalized_name",
+    "character varying(160)",
+  ),
+  requiredWorkspaceV2Column(
+    "video_task_aggregates",
+    "creation_actor_account_id",
+    varchar128,
+    false,
+  ),
+  requiredWorkspaceV2Column(
+    "video_task_aggregates",
+    "creation_request_id",
+    varchar128,
+    false,
+  ),
+  requiredWorkspaceV2Column(
+    "video_task_aggregates",
+    "creation_payload_hash",
+    varchar128,
+    false,
+  ),
+  requiredWorkspaceV2Column("video_task_aggregates", "aggregate", "jsonb"),
+  requiredWorkspaceV2Column("video_task_aggregates", "created_at", timestamptz),
+  requiredWorkspaceV2Column("video_task_aggregates", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("temporary_asset_project_states", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("temporary_asset_project_states", "batch_project_id", varchar128),
+  requiredWorkspaceV2Column("temporary_asset_project_states", "revision", "bigint"),
+  requiredWorkspaceV2Column("temporary_asset_project_states", "envelope", "jsonb"),
+  requiredWorkspaceV2Column("temporary_asset_project_states", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("account_run_lock_states", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("account_run_lock_states", "account_id", varchar128),
+  requiredWorkspaceV2Column("account_run_lock_states", "lock_id", varchar128),
+  requiredWorkspaceV2Column("account_run_lock_states", "batch_project_id", varchar128),
+  requiredWorkspaceV2Column("account_run_lock_states", "video_task_id", varchar128),
+  requiredWorkspaceV2Column(
+    "account_run_lock_states",
+    "operation",
+    "character varying(32)",
+  ),
+  requiredWorkspaceV2Column("account_run_lock_states", "acquired_at", timestamptz),
+  requiredWorkspaceV2Column("account_run_lock_states", "revision", "bigint"),
+  requiredWorkspaceV2Column("account_run_lock_states", "envelope", "jsonb"),
+  requiredWorkspaceV2Column("account_run_lock_states", "updated_at", timestamptz),
+]);
+
 const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[] = Object.freeze(([
   { tableName: "workspace_admin_states", constraintName: "workspace_admin_states_pkey", constraintType: "p", columns: ["tenant_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "workspace_sessions", constraintName: "workspace_sessions_pkey", constraintType: "p", columns: ["session_id_hash"], referencedTableName: null, referencedColumns: null },
@@ -89,6 +215,148 @@ const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[
     ? null
     : Object.freeze(requirement.referencedColumns),
 })));
+
+function requiredWorkspaceV2Check(
+  tableName: string,
+  constraintName: string,
+  definition: string,
+): WorkspaceV2CheckRequirement {
+  return Object.freeze({
+    tableName,
+    constraintName,
+    definition,
+  });
+}
+
+function checkDefinition(...expressionParts: readonly string[]): string {
+  return "CHECK (" + expressionParts.join(" ") + ")";
+}
+
+const identifierCheckDefinition = (columnName: string): string =>
+  checkDefinition(columnName + "::text ~ '^[A-Za-z0-9_-]{1,128}$'::text");
+const revisionCheckDefinition = checkDefinition("revision >= 1");
+const workspaceV2RequiredChecks: readonly WorkspaceV2CheckRequirement[] = Object.freeze([
+  requiredWorkspaceV2Check("workspace_admin_states", "workspace_admin_states_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("workspace_admin_states", "workspace_admin_states_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check(
+    "workspace_admin_states",
+    "workspace_admin_states_check",
+    checkDefinition(
+      "(jsonb_typeof(state) = 'object'::text) IS TRUE",
+      "AND ((state ->> 'tenantId'::text) = tenant_id::text) IS TRUE",
+    ),
+  ),
+
+  requiredWorkspaceV2Check("workspace_sessions", "workspace_sessions_session_id_hash_check", checkDefinition("session_id_hash ~ '^[0-9a-f]{64}$'::text")),
+  requiredWorkspaceV2Check("workspace_sessions", "workspace_sessions_account_id_check", identifierCheckDefinition("account_id")),
+  requiredWorkspaceV2Check("workspace_sessions", "workspace_sessions_check", checkDefinition("expires_at > created_at")),
+  requiredWorkspaceV2Check("workspace_sessions", "workspace_sessions_check1", checkDefinition("signed_out_at IS NULL OR signed_out_at >= created_at")),
+  requiredWorkspaceV2Check(
+    "workspace_sessions",
+    "workspace_sessions_check2",
+    checkDefinition(
+      "(jsonb_typeof(state) = 'object'::text) IS TRUE",
+      "AND ((state ->> 'sessionIdHash'::text) = session_id_hash::text) IS TRUE",
+      "AND ((state ->> 'accountId'::text) = account_id::text) IS TRUE",
+      "AND (((state ->> 'createdAt'::text)::timestamp with time zone) = created_at) IS TRUE",
+      "AND (((state ->> 'expiresAt'::text)::timestamp with time zone) = expires_at) IS TRUE",
+      "AND (signed_out_at IS NULL AND NOT state ? 'signedOutAt'::text",
+      "OR signed_out_at IS NOT NULL AND (((state ->> 'signedOutAt'::text)::timestamp with time zone) = signed_out_at) IS TRUE)",
+    ),
+  ),
+  requiredWorkspaceV2Check("workspace_sessions", "workspace_sessions_revision_check", revisionCheckDefinition),
+
+  requiredWorkspaceV2Check("account_budget_states", "account_budget_states_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("account_budget_states", "account_budget_states_account_id_check", identifierCheckDefinition("account_id")),
+  requiredWorkspaceV2Check("account_budget_states", "account_budget_states_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check(
+    "account_budget_states",
+    "account_budget_states_check",
+    checkDefinition(
+      "(jsonb_typeof(state) = 'object'::text) IS TRUE",
+      "AND ((state ->> 'tenantId'::text) = tenant_id::text) IS TRUE",
+      "AND ((state ->> 'accountId'::text) = account_id::text) IS TRUE",
+    ),
+  ),
+
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_project_id_check", identifierCheckDefinition("project_id")),
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_creation_actor_account_id_check", identifierCheckDefinition("creation_actor_account_id")),
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_creation_request_id_check", identifierCheckDefinition("creation_request_id")),
+  requiredWorkspaceV2Check("batch_project_aggregates", "batch_project_aggregates_creation_payload_hash_check", checkDefinition("length(creation_payload_hash::text) >= 1")),
+  requiredWorkspaceV2Check(
+    "batch_project_aggregates",
+    "batch_project_aggregates_check",
+    checkDefinition(
+      "(jsonb_typeof(aggregate) = 'object'::text) IS TRUE",
+      "AND ((aggregate #>> '{project,tenantId}'::text[]) = tenant_id::text) IS TRUE",
+      "AND ((aggregate #>> '{project,id}'::text[]) = project_id::text) IS TRUE",
+      "AND ((aggregate ->> 'actorAccountId'::text) = creation_actor_account_id::text) IS TRUE",
+      "AND ((aggregate ->> 'requestId'::text) = creation_request_id::text) IS TRUE",
+      "AND ((aggregate ->> 'payloadHash'::text) = creation_payload_hash::text) IS TRUE",
+    ),
+  ),
+
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_task_id_check", identifierCheckDefinition("task_id")),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_project_id_check", identifierCheckDefinition("project_id")),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_creation_actor_account_id_check", checkDefinition("creation_actor_account_id IS NULL OR creation_actor_account_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text")),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_creation_request_id_check", checkDefinition("creation_request_id IS NULL OR creation_request_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text")),
+  requiredWorkspaceV2Check("video_task_aggregates", "video_task_aggregates_creation_payload_hash_check", checkDefinition("creation_payload_hash IS NULL OR length(creation_payload_hash::text) >= 1")),
+  requiredWorkspaceV2Check(
+    "video_task_aggregates",
+    "video_task_aggregates_check",
+    checkDefinition(
+      "(jsonb_typeof(aggregate) = 'object'::text) IS TRUE",
+      "AND ((aggregate #>> '{videoTask,id}'::text[]) = task_id::text) IS TRUE",
+      "AND ((aggregate #>> '{videoTask,tenantId}'::text[]) = tenant_id::text) IS TRUE",
+      "AND ((aggregate #>> '{videoTask,batchProjectId}'::text[]) = project_id::text) IS TRUE",
+    ),
+  ),
+  requiredWorkspaceV2Check(
+    "video_task_aggregates",
+    "video_task_aggregates_check1",
+    checkDefinition("creation_actor_account_id IS NULL AND creation_request_id IS NULL AND creation_payload_hash IS NULL OR creation_actor_account_id IS NOT NULL AND creation_request_id IS NOT NULL AND creation_payload_hash IS NOT NULL"),
+  ),
+
+  requiredWorkspaceV2Check("temporary_asset_project_states", "temporary_asset_project_states_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("temporary_asset_project_states", "temporary_asset_project_states_batch_project_id_check", identifierCheckDefinition("batch_project_id")),
+  requiredWorkspaceV2Check("temporary_asset_project_states", "temporary_asset_project_states_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check(
+    "temporary_asset_project_states",
+    "temporary_asset_project_states_check",
+    checkDefinition(
+      "(jsonb_typeof(envelope) = 'object'::text) IS TRUE",
+      "AND ((envelope ->> 'batchProjectId'::text) = batch_project_id::text) IS TRUE",
+      "AND (jsonb_typeof(envelope -> 'assets'::text) = 'array'::text) IS TRUE",
+      `AND (jsonb_array_length(envelope -> 'assets'::text) = jsonb_array_length(jsonb_path_query_array(envelope, '$."assets"[*]?(@."tenantId" == $"tenantId" && @."batchProjectId" == $"batchProjectId")'::jsonpath, jsonb_build_object('tenantId', to_jsonb(tenant_id), 'batchProjectId', to_jsonb(batch_project_id))))) IS TRUE`,
+    ),
+  ),
+
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_tenant_id_check", identifierCheckDefinition("tenant_id")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_account_id_check", identifierCheckDefinition("account_id")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_lock_id_check", identifierCheckDefinition("lock_id")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_batch_project_id_check", identifierCheckDefinition("batch_project_id")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_video_task_id_check", identifierCheckDefinition("video_task_id")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_operation_check", checkDefinition("operation::text = ANY (ARRAY['video_generation'::character varying, 'automatic_editing'::character varying]::text[])")),
+  requiredWorkspaceV2Check("account_run_lock_states", "account_run_lock_states_revision_check", revisionCheckDefinition),
+  requiredWorkspaceV2Check(
+    "account_run_lock_states",
+    "account_run_lock_states_check",
+    checkDefinition(
+      "(jsonb_typeof(envelope) = 'object'::text) IS TRUE",
+      "AND ((envelope ->> 'tenantId'::text) = tenant_id::text) IS TRUE",
+      "AND ((envelope ->> 'accountId'::text) = account_id::text) IS TRUE",
+      "AND ((envelope ->> 'id'::text) = lock_id::text) IS TRUE",
+      "AND ((envelope ->> 'batchProjectId'::text) = batch_project_id::text) IS TRUE",
+      "AND ((envelope ->> 'videoTaskId'::text) = video_task_id::text) IS TRUE",
+      "AND ((envelope ->> 'operation'::text) = operation::text) IS TRUE",
+      "AND (((envelope ->> 'acquiredAt'::text)::timestamp with time zone) = acquired_at) IS TRUE",
+    ),
+  ),
+]);
 const workspaceV2RequiredIndexes: readonly WorkspaceV2IndexRequirement[] = Object.freeze([
   Object.freeze({
     tableName: "video_task_aggregates",
@@ -271,6 +539,52 @@ async function verifyWorkspaceV2SchemaObjects(
     }
   }
 
+  const columnRows = await queryWorkspaceV2Catalog<RequiredColumnRow>(
+    database,
+    `/* workspace_v2_required_columns */
+     SELECT required.table_name,
+            required.column_name,
+            attribute.attnum IS NOT NULL
+              AND pg_catalog.format_type(attribute.atttypid, attribute.atttypmod)
+                = required.formatted_type
+              AND attribute.attnotnull = required.not_null AS present
+     FROM unnest($1::text[], $2::text[], $3::text[], $4::boolean[])
+       AS required(table_name, column_name, formatted_type, not_null)
+     LEFT JOIN pg_catalog.pg_namespace AS namespace
+       ON namespace.nspname = $5
+     LEFT JOIN pg_catalog.pg_class AS relation
+       ON relation.relnamespace = namespace.oid
+      AND relation.relname = required.table_name
+      AND relation.relkind IN ('r', 'p')
+     LEFT JOIN pg_catalog.pg_attribute AS attribute
+       ON attribute.attrelid = relation.oid
+      AND attribute.attname = required.column_name
+      AND attribute.attnum > 0
+      AND NOT attribute.attisdropped
+     ORDER BY required.table_name, required.column_name`,
+    [
+      workspaceV2RequiredColumns.map(({ tableName }) => tableName),
+      workspaceV2RequiredColumns.map(({ columnName }) => columnName),
+      workspaceV2RequiredColumns.map(({ formattedType }) => formattedType),
+      workspaceV2RequiredColumns.map(({ notNull }) => notNull),
+      "public",
+    ],
+  );
+
+  const presentColumns = new Map(
+    columnRows.map((row) => [
+      `${row.table_name}\u0000${row.column_name}`,
+      row.present,
+    ] as const),
+  );
+  for (const { tableName, columnName } of workspaceV2RequiredColumns) {
+    if (presentColumns.get(`${tableName}\u0000${columnName}`) !== true) {
+      throw new DatabaseMigrationError(
+        `Workspace V2 schema has a missing or invalid required column ${columnName} on table ${tableName}.`,
+      );
+    }
+  }
+
   const constraintRows = await queryWorkspaceV2Catalog<RequiredConstraintRow>(
     database,
     `/* workspace_v2_required_constraints */
@@ -348,6 +662,50 @@ async function verifyWorkspaceV2SchemaObjects(
     if (presentConstraints.get(`${tableName}\u0000${constraintName}`) !== true) {
       throw new DatabaseMigrationError(
         `Workspace V2 schema has a missing or invalid required constraint ${constraintName} on table ${tableName}.`,
+      );
+    }
+  }
+
+  const checkRows = await queryWorkspaceV2Catalog<RequiredCheckRow>(
+    database,
+    `/* workspace_v2_required_checks */
+     SELECT required.table_name,
+            required.constraint_name,
+            constraint_record.oid IS NOT NULL
+              AND constraint_record.convalidated
+              AND constraint_record.contype = 'c'
+              AND pg_catalog.pg_get_constraintdef(constraint_record.oid, true)
+                = required.definition AS present
+     FROM unnest($1::text[], $2::text[], $3::text[])
+       AS required(table_name, constraint_name, definition)
+     LEFT JOIN pg_catalog.pg_namespace AS namespace
+       ON namespace.nspname = $4
+     LEFT JOIN pg_catalog.pg_class AS relation
+       ON relation.relnamespace = namespace.oid
+      AND relation.relname = required.table_name
+      AND relation.relkind IN ('r', 'p')
+     LEFT JOIN pg_catalog.pg_constraint AS constraint_record
+       ON constraint_record.conrelid = relation.oid
+      AND constraint_record.conname = required.constraint_name
+     ORDER BY required.table_name, required.constraint_name`,
+    [
+      workspaceV2RequiredChecks.map(({ tableName }) => tableName),
+      workspaceV2RequiredChecks.map(({ constraintName }) => constraintName),
+      workspaceV2RequiredChecks.map(({ definition }) => definition),
+      "public",
+    ],
+  );
+
+  const presentChecks = new Map(
+    checkRows.map((row) => [
+      `${row.table_name}\u0000${row.constraint_name}`,
+      row.present,
+    ] as const),
+  );
+  for (const { tableName, constraintName } of workspaceV2RequiredChecks) {
+    if (presentChecks.get(`${tableName}\u0000${constraintName}`) !== true) {
+      throw new DatabaseMigrationError(
+        `Workspace V2 schema has a missing or invalid required check ${constraintName} on table ${tableName}.`,
       );
     }
   }

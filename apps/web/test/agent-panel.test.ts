@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -69,6 +69,26 @@ test("Agent quota presentation rejects another account or inconsistent balances"
     accountId: "account_creator_a",
     balance: { ...budget.balance, availableAmountMinor: 39_999 },
   }, "account_creator_a"), /当前账号不一致/u);
+});
+
+test("Agent task-not-found errors recover with a scoped workspace message", () => {
+  const expected = "当前视频任务暂时无法由智能助手读取，已返回项目概览。请刷新项目库后重试；若任务仍存在，请检查工作区与助手是否使用同一数据源。";
+  assert.equal(unavailableAgentTaskMessage({
+    status: 404,
+    code: "AIC-DATA-WORK_NOT_FOUND",
+  }), expected);
+  assert.equal(unavailableAgentTaskMessage({
+    status: 404,
+    code: "AIC-AGENT-VIDEO-TASK_NOT_FOUND",
+  }), expected);
+  assert.equal(unavailableAgentTaskMessage({
+    status: 404,
+    code: "AIC-API-NOT_FOUND",
+  }), undefined);
+  assert.equal(unavailableAgentTaskMessage({
+    status: 409,
+    code: "AIC-AGENT-VIDEO-TASK_NOT_FOUND",
+  }), undefined);
 });
 
 test("Agent action cards require the exact frozen structure before rendering", () => {

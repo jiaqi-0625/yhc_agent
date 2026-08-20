@@ -9,7 +9,7 @@ import type {
 import type { PostgresDatabaseConfig } from "./database-config.ts";
 
 export interface PostgresPoolClient extends PostgresQueryable {
-  release(): void;
+  release(discard?: boolean): void;
 }
 export interface PostgresPool extends PostgresQueryable {
   connect(): Promise<PostgresPoolClient>;
@@ -204,10 +204,12 @@ export class PostgresDatabase implements PostgresTransactionProvider {
     let rootResult: Result | undefined;
     let rootFailed = false;
     let rootError: unknown;
+    let discardClient = false;
     try {
       try {
         await client.query("BEGIN", []);
       } catch (error) {
+        discardClient = true;
         throw persistenceError("begin", error);
       }
       let result: Result | undefined;
@@ -225,6 +227,7 @@ export class PostgresDatabase implements PostgresTransactionProvider {
         try {
           await client.query("ROLLBACK", []);
         } catch (rollbackError) {
+          discardClient = true;
           throw combinedPersistenceError(
             "rollback",
             failure,
@@ -237,6 +240,7 @@ export class PostgresDatabase implements PostgresTransactionProvider {
       try {
         await client.query("COMMIT", []);
       } catch (commitError) {
+        discardClient = true;
         const wrappedCommitError = persistenceError("commit", commitError);
         try {
           await client.query("ROLLBACK", []);
@@ -257,7 +261,8 @@ export class PostgresDatabase implements PostgresTransactionProvider {
 
     context.active = false;
     try {
-      client.release();
+      if (discardClient) client.release(true);
+      else client.release();
     } catch (releaseError) {
       const wrappedReleaseError = persistenceError("release", releaseError);
       if (rootFailed) {

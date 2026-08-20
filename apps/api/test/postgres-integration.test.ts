@@ -37,6 +37,12 @@ import { PostgresVideoTaskProductionStore } from "../src/postgres-video-task-sto
 import { PostgresWorkspaceAdminStore } from "../src/postgres-workspace-admin-store.ts";
 import { PostgresWorkspaceSessionStore } from "../src/postgres-workspace-session-store.ts";
 import { startConfiguredApiServer } from "../src/server.ts";
+import {
+  DEFAULT_ADMIN_BRANDS,
+  DEFAULT_ADMIN_VEHICLES,
+  DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
+} from "../src/workspace-admin-runtime.ts";
+import { DEVELOPMENT_ACCESS_GRANTS } from "../src/workspace-session-runtime.ts";
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const allowSchemaReset = process.env.POSTGRES_TEST_ALLOW_SCHEMA_RESET;
@@ -293,7 +299,23 @@ test(
       }
     });
 
-    await context.test("readiness rejects drift in a critical constraint or partial index", async () => {
+    await context.test("readiness rejects drift in a critical column, constraint, check, or partial index", async () => {
+      await firstDatabase.query(
+        "ALTER TABLE workspace_sessions ALTER COLUMN state DROP NOT NULL",
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /required column state on table workspace_sessions/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          "ALTER TABLE workspace_sessions ALTER COLUMN state SET NOT NULL",
+          [],
+        );
+      }
+
       await firstDatabase.query(
         `ALTER TABLE video_task_aggregates
            DROP CONSTRAINT video_task_aggregates_task_id_key`,
@@ -308,6 +330,99 @@ test(
         await firstDatabase.query(
           `ALTER TABLE video_task_aggregates
              ADD CONSTRAINT video_task_aggregates_task_id_key UNIQUE (task_id)`,
+          [],
+        );
+      }
+
+      await firstDatabase.query(
+        `ALTER TABLE account_run_lock_states
+           DROP CONSTRAINT account_run_lock_states_operation_check,
+           ADD CONSTRAINT account_run_lock_states_operation_check
+             CHECK (operation IN ('video_generation', 'automatic_editing') OR TRUE)`,
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /account_run_lock_states_operation_check/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          `ALTER TABLE account_run_lock_states
+             DROP CONSTRAINT account_run_lock_states_operation_check,
+             ADD CONSTRAINT account_run_lock_states_operation_check
+               CHECK (operation IN ('video_generation', 'automatic_editing'))`,
+          [],
+        );
+      }
+
+      await firstDatabase.query(
+        `ALTER TABLE workspace_admin_states
+           DROP CONSTRAINT workspace_admin_states_check,
+           ADD CONSTRAINT workspace_admin_states_check
+             CHECK (
+               (jsonb_typeof(state) = 'object') IS TRUE
+               AND (state ->> 'tenantid' = tenant_id) IS TRUE
+             )`,
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /workspace_admin_states_check/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          `ALTER TABLE workspace_admin_states
+             DROP CONSTRAINT workspace_admin_states_check,
+             ADD CONSTRAINT workspace_admin_states_check
+               CHECK (
+                 (jsonb_typeof(state) = 'object') IS TRUE
+                 AND (state ->> 'tenantId' = tenant_id) IS TRUE
+               )`,
+          [],
+        );
+      }
+
+      await firstDatabase.query(
+        `ALTER TABLE video_task_aggregates
+           DROP CONSTRAINT video_task_aggregates_check1,
+           ADD CONSTRAINT video_task_aggregates_check1
+             CHECK (
+               creation_actor_account_id IS NULL
+               AND (
+                 creation_request_id IS NULL
+                 AND creation_payload_hash IS NULL
+                 OR creation_actor_account_id IS NOT NULL
+               )
+               AND creation_request_id IS NOT NULL
+               AND creation_payload_hash IS NOT NULL
+             )`,
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /video_task_aggregates_check1/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          `ALTER TABLE video_task_aggregates
+             DROP CONSTRAINT video_task_aggregates_check1,
+             ADD CONSTRAINT video_task_aggregates_check1
+               CHECK (
+                 (
+                   creation_actor_account_id IS NULL
+                   AND creation_request_id IS NULL
+                   AND creation_payload_hash IS NULL
+                 )
+                 OR
+                 (
+                   creation_actor_account_id IS NOT NULL
+                   AND creation_request_id IS NOT NULL
+                   AND creation_payload_hash IS NOT NULL
+                 )
+               )`,
           [],
         );
       }
@@ -354,8 +469,16 @@ test(
         assetPool(mainProject),
         projectMetadata,
       );
+      const replayCandidate = project(
+        "project_integration_retry_candidate",
+        mainProject.name,
+      );
       assert.deepEqual(
-        await secondProjects.create(mainProject, assetPool(mainProject), projectMetadata),
+        await secondProjects.create(
+          replayCandidate,
+          assetPool(replayCandidate),
+          projectMetadata,
+        ),
         createdProject,
       );
       await assert.rejects(
@@ -749,6 +872,18 @@ test(
             NODE_ENV: "test",
           }),
           { database: apiDatabase, migrations },
+        );
+        await new PostgresWorkspaceAdminStore(apiDatabase).transact(
+          "tenant_firefly",
+          (current) => ({
+            ...current,
+            brands: structuredClone([...DEFAULT_ADMIN_BRANDS]),
+            vehicleVersions: structuredClone([...DEFAULT_ADMIN_VEHICLES]),
+            vehicleAssetAssociations: structuredClone([
+              ...DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
+            ]),
+            accessGrants: structuredClone([...DEVELOPMENT_ACCESS_GRANTS]),
+          }),
         );
         const business = new TrackingLocalBusinessRuntime();
         let server: Awaited<ReturnType<typeof startConfiguredApiServer>> | undefined;

@@ -55,13 +55,18 @@ function requiredDatabaseUrl(environment: DatabaseEnvironment): string {
   if (parsed.hash.length > 0) {
     throw new DatabaseConfigError("DATABASE_URL must not contain a fragment.");
   }
-  const hasConnectionStringTlsSetting = [...parsed.searchParams.keys()].some((parameter) => {
-    const normalized = parameter.toLowerCase();
-    return normalized === "uselibpqcompat" || normalized.startsWith("ssl");
-  });
+  const normalizedConnectionStringSettings = [...parsed.searchParams.keys()].map((parameter) =>
+    parameter.toLowerCase());
+  const hasConnectionStringTlsSetting = normalizedConnectionStringSettings.some((parameter) =>
+    parameter === "uselibpqcompat" || parameter.startsWith("ssl"));
   if (hasConnectionStringTlsSetting) {
     throw new DatabaseConfigError(
       "DATABASE_URL must not override the separately configured database TLS settings.",
+    );
+  }
+  if (normalizedConnectionStringSettings.length > 0) {
+    throw new DatabaseConfigError(
+      "DATABASE_URL query parameters are not allowed; use the separately validated database settings.",
     );
   }
   return value;

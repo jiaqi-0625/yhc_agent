@@ -18,6 +18,7 @@ interface QueryCall {
 
 class FakeClient implements PostgresPoolClient {
   readonly calls: QueryCall[] = [];
+  readonly releaseArguments: Array<boolean | undefined> = [];
   releaseCount = 0;
   failOn = new Map<string, Error>();
 
@@ -33,8 +34,9 @@ class FakeClient implements PostgresPoolClient {
     return { rows: [], rowCount: 0 };
   }
 
-  release(): void {
+  release(discard?: boolean): void {
     this.releaseCount += 1;
+    this.releaseArguments.push(discard);
   }
 }
 
@@ -113,6 +115,7 @@ test("PostgresDatabase uses one checked-out client and commits a successful tran
     { sql: "COMMIT", parameters: [] },
   ]);
   assert.equal(pool.client.releaseCount, 1);
+  assert.deepEqual(pool.client.releaseArguments, [undefined]);
 });
 test("PostgresDatabase rolls back and releases the client when an operation fails", async () => {
   const pool = new FakePool();
@@ -129,6 +132,7 @@ test("PostgresDatabase rolls back and releases the client when an operation fail
 
   assert.deepEqual(pool.client.calls.map((call) => call.sql), ["BEGIN", "UPDATE records SET value = $1", "ROLLBACK"]);
   assert.equal(pool.client.releaseCount, 1);
+  assert.deepEqual(pool.client.releaseArguments, [undefined]);
 });
 
 test("PostgresDatabase reuses one client and one boundary for nested transactions", async () => {
@@ -360,6 +364,52 @@ test("PostgresDatabase releases the client when BEGIN fails", async () => {
   );
   assert.deepEqual(pool.client.calls.map((call) => call.sql), ["BEGIN"]);
   assert.equal(pool.client.releaseCount, 1);
+  assert.deepEqual(pool.client.releaseArguments, [true]);
+});
+
+test("PostgresDatabase discards the client when COMMIT fails even after a successful rollback", async () => {
+  const pool = new FakePool();
+  const commitFailure = new Error("commit connection failure");
+  pool.client.failOn.set("COMMIT", commitFailure);
+  const database = new PostgresDatabase(pool);
+
+  await assert.rejects(
+    database.transaction(async () => "not committed"),
+    (error: unknown) =>
+      error instanceof PostgresPersistenceError
+      && error.operation === "commit"
+      && error.cause === commitFailure,
+  );
+  assert.deepEqual(pool.client.calls.map((call) => call.sql), ["BEGIN", "COMMIT", "ROLLBACK"]);
+  assert.deepEqual(pool.client.releaseArguments, [true]);
+});
+
+test("PostgresDatabase discards the client when ROLLBACK fails", async () => {
+  const pool = new FakePool();
+  const operationFailure = new Error("business operation failed");
+  const rollbackFailure = new Error("rollback connection failure");
+  pool.client.failOn.set("ROLLBACK", rollbackFailure);
+  const database = new PostgresDatabase(pool);
+
+  await assert.rejects(
+    database.transaction(async () => {
+      throw operationFailure;
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof PostgresPersistenceError);
+      assert.equal(error.operation, "rollback");
+      assert.ok(error.cause instanceof AggregateError);
+      assert.equal(error.cause.errors.length, 2);
+      assert.equal(error.cause.errors[0], operationFailure);
+      const wrappedRollbackFailure = error.cause.errors[1];
+      assert.ok(wrappedRollbackFailure instanceof PostgresPersistenceError);
+      assert.equal(wrappedRollbackFailure.operation, "rollback");
+      assert.equal(wrappedRollbackFailure.cause, rollbackFailure);
+      return true;
+    },
+  );
+  assert.deepEqual(pool.client.calls.map((call) => call.sql), ["BEGIN", "ROLLBACK"]);
+  assert.deepEqual(pool.client.releaseArguments, [true]);
 });
 
 test("PostgresPersistenceError preserves SQLSTATE and hides driver details", async () => {

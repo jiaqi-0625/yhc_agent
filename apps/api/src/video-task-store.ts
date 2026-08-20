@@ -854,7 +854,7 @@ function assertImmutablePrefix<T>(
   }
 }
 
-function validateTransition(
+export function validateVideoTaskTransition(
   current: Readonly<VideoTaskProductionRecord>,
   next: Readonly<VideoTaskProductionRecord>,
 ): void {
@@ -1772,7 +1772,7 @@ export class LocalVideoTaskProductionStore implements VideoTaskCreationStore {
       ) {
         throw new Error("A video task transaction cannot change the aggregate scope.");
       }
-      if (current !== undefined) validateTransition(current.record, next);
+      if (current !== undefined) validateVideoTaskTransition(current.record, next);
       if (fileLock === undefined) {
         await this.#write(next, current?.creation, false);
       } else {
