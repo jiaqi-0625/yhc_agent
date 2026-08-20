@@ -38,6 +38,25 @@ export const workspaceApi = {
     );
   },
   getProjectLibrary: function () { return api("/v1/workspace/project-library"); },
+  getAssetMatching: function (projectId, videoTaskId) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/asset-matching",
+    );
+  },
+  lockAssetSelection: function (projectId, videoTaskId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/asset-matching",
+      jsonOptions("POST", input),
+    );
+  },
+  uploadTemporaryAsset: function (projectId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) + "/temporary-assets",
+      jsonOptions("POST", input),
+    );
+  },
   listWorks: function () { return api("/v1/works"); },
   getWork: function (workId) { return api("/v1/works/" + encodeURIComponent(workId)); },
   createWork: function (input) { return api("/v1/works", jsonOptions("POST", input)); },

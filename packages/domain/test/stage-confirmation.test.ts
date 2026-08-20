@@ -100,7 +100,6 @@ function command(stage: VideoTaskStage = "strategy"): ConfirmStageCommand {
     },
     dependencies: [
       { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-      { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
     ],
     comment: "人工验收通过",
   };
@@ -121,9 +120,9 @@ function recordWithConfirmedDirectUpstream(
   stage: Exclude<VideoTaskStage, "strategy"> = "asset_matching",
 ): VideoTaskProductionRecord {
   const upstreamStages: Record<Exclude<VideoTaskStage, "strategy">, VideoTaskStage> = {
-    asset_matching: "strategy",
-    script: "asset_matching",
-    storyboard: "script",
+    script: "strategy",
+    asset_matching: "script",
+    storyboard: "asset_matching",
     video_preview: "storyboard",
     delivery: "video_preview",
   };
@@ -175,7 +174,7 @@ test("human confirmation atomically creates a linked immutable version and advan
   const result = confirmVideoTaskStage(source, input, context());
 
   assert.equal(result.videoTask.revision, 4);
-  assert.equal(result.videoTask.currentStage, "asset_matching");
+  assert.equal(result.videoTask.currentStage, "script");
   assert.equal(result.videoTask.stageStatus, "in_progress");
   assert.equal(result.videoTask.updatedBy, "account_owner");
   assert.equal(result.stageArtifactVersions[0]?.version, 1);
@@ -191,7 +190,6 @@ test("human confirmation atomically creates a linked immutable version and advan
   assert.equal(result.stageArtifactVersions[0]?.content.artifactId, "artifact_strategy");
   assert.deepEqual(result.stageArtifactVersions[0]?.dependencies, [
     { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-    { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
   ]);
   assert.equal(source.stageArtifactVersions.length, 0);
   assert.equal(source.stageConfirmations.length, 0);
@@ -216,8 +214,8 @@ test("artifact version numbers are append-only within each stage", () => {
 test("all six stages use the same human confirmation gate and delivery completes the task", () => {
   const stages: VideoTaskStage[] = [
     "strategy",
-    "asset_matching",
     "script",
+    "asset_matching",
     "storyboard",
     "video_preview",
     "delivery",
@@ -246,12 +244,11 @@ test("all six stages use the same human confirmation gate and delivery completes
 test("derived confirmation dependencies have a fixed snapshot-first order", () => {
   assert.deepEqual(deriveStageConfirmationDependencies(record("strategy"), "strategy"), [
     { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-    { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
   ]);
 
   const nonStrategyStages: Exclude<VideoTaskStage, "strategy">[] = [
-    "asset_matching",
     "script",
+    "asset_matching",
     "storyboard",
     "video_preview",
     "delivery",
@@ -262,7 +259,9 @@ test("derived confirmation dependencies have a fixed snapshot-first order", () =
     assert.ok(upstreamArtifact);
     assert.deepEqual(deriveStageConfirmationDependencies(source, stage), [
       { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-      { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
+      ...(stage === "script"
+        ? []
+        : [{ kind: "asset_snapshot" as const, assetSnapshotId: "asset_snapshot_1" }]),
       {
         kind: "stage_artifact",
         stage: upstreamArtifact.stage,
@@ -280,10 +279,10 @@ test("derivation rejects missing locked vehicle or asset snapshots", () => {
     StageConfirmationDeniedError,
   );
 
-  const missingAsset = record();
+  const missingAsset = recordWithConfirmedDirectUpstream("asset_matching");
   missingAsset.taskAssetSnapshots = [];
   assert.throws(
-    () => deriveStageConfirmationDependencies(missingAsset, "strategy"),
+    () => deriveStageConfirmationDependencies(missingAsset, "asset_matching"),
     StageConfirmationDeniedError,
   );
 });
@@ -309,7 +308,7 @@ test("non-strategy derivation requires the current valid direct upstream", () =>
       { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
       {
         kind: "stage_artifact",
-        stage: "strategy",
+        stage: "script",
         artifactVersionId: migratedArtifact.id,
       },
     ],
@@ -343,7 +342,7 @@ test("non-strategy derivation requires the current valid direct upstream", () =>
   );
 
   const danglingUpstream = recordWithConfirmedDirectUpstream();
-  danglingUpstream.activeStageArtifactVersionIds.strategy = "strategy_missing";
+  danglingUpstream.activeStageArtifactVersionIds.script = "script_missing";
   assert.throws(
     () => deriveStageConfirmationDependencies(danglingUpstream, "asset_matching"),
     StageConfirmationDeniedError,
@@ -357,13 +356,13 @@ test("confirmation rejects omitted, extra, reordered, or replaced dependencies",
     expectedDependencies.slice(0, -1),
     [
       ...expectedDependencies,
-      { kind: "stage_artifact" as const, stage: "strategy" as const, artifactVersionId: "extra_v1" },
+      { kind: "stage_artifact" as const, stage: "script" as const, artifactVersionId: "extra_v1" },
     ],
     [expectedDependencies[1]!, expectedDependencies[0]!, expectedDependencies[2]!],
     [
       expectedDependencies[0]!,
       expectedDependencies[1]!,
-      { kind: "stage_artifact" as const, stage: "strategy" as const, artifactVersionId: "replacement_v1" },
+      { kind: "stage_artifact" as const, stage: "script" as const, artifactVersionId: "replacement_v1" },
     ],
   ];
 

@@ -371,6 +371,12 @@ export function createWorkspaceFrame(options) {
     renderTasks();
     renderOverview();
     renderModules();
+    options.onSelectionChange?.({
+      project: summary,
+      task,
+      activeView,
+      activeModule,
+    });
   }
 
   function revealWorkspace() {
@@ -466,7 +472,8 @@ export function createWorkspaceFrame(options) {
   });
   elements.projectAssets.addEventListener("click", function () {
     if (!selection) return;
-    selection = { project: selection.project, task: null };
+    const resolved = resolveWorkspaceSelection([selection.project], selection.project.project.id);
+    selection = { project: selection.project, task: resolved?.task || null };
     activeView = "module";
     activeModule = "assets";
     render();

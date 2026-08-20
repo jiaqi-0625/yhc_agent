@@ -13,6 +13,7 @@ import {
   StageConfirmationDeniedError,
   StageRollbackDeniedError,
   TaskTakeoverDeniedError,
+  TemporaryAssetError,
   VideoTaskAssignmentDeniedError,
   VideoTaskCreationError,
   WorkspaceAccessDeniedError,
@@ -26,6 +27,8 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import { ProjectAssetRuntimeError } from "./project-asset-runtime.ts";
+import { TemporaryAssetRuntimeError } from "./temporary-asset-runtime.ts";
 
 const maximumBodyBytes = 64 * 1024;
 
@@ -54,12 +57,19 @@ export function sendEvent(response: ServerResponse, event: string, data: unknown
 }
 
 export async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  return readJsonWithLimit(request, maximumBodyBytes);
+}
+
+export async function readJsonWithLimit(
+  request: IncomingMessage,
+  maximumBytes: number,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > maximumBodyBytes) throw new Error("Request body exceeds 64 KiB.");
+    if (bytes > maximumBytes) throw new Error("Request body exceeds the allowed size.");
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -131,6 +141,9 @@ export function sendRequestError(response: ServerResponse, error: unknown): void
       normalized instanceof VideoTaskCreationError ||
       normalized instanceof VideoTaskAssignmentDeniedError ||
       normalized instanceof TaskTakeoverDeniedError ||
+      normalized instanceof TemporaryAssetError ||
+      normalized instanceof TemporaryAssetRuntimeError ||
+      normalized instanceof ProjectAssetRuntimeError ||
       normalized instanceof LocalAgentRunError ||
       normalized instanceof LocalAgentCredentialsError ||
       normalized instanceof CompanyAssetCatalogAccessError ||

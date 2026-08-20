@@ -54,9 +54,9 @@ function completedRecord(): VideoTaskProductionRecord {
   const versions = [
     artifact("strategy_v1", "strategy", 1),
     artifact("strategy_v2", "strategy", 2),
-    artifact("asset_v1", "asset_matching", 1, "strategy_v2", "strategy"),
-    artifact("script_v1", "script", 1, "asset_v1", "asset_matching"),
-    artifact("storyboard_v1", "storyboard", 1, "script_v1", "script"),
+    artifact("script_v1", "script", 1, "strategy_v2", "strategy"),
+    artifact("asset_v1", "asset_matching", 1, "script_v1", "script"),
+    artifact("storyboard_v1", "storyboard", 1, "asset_v1", "asset_matching"),
     artifact("preview_v1", "video_preview", 1, "storyboard_v1", "storyboard"),
     artifact("delivery_v1", "delivery", 1, "preview_v1", "video_preview"),
     artifact("script_unrelated", "script", 2, "strategy_v1", "strategy"),
@@ -182,7 +182,7 @@ test("rollback selects the historical version and recursively invalidates every 
 
   assert.equal(result.videoTask.revision, 13);
   assert.equal(result.videoTask.status, "active");
-  assert.equal(result.videoTask.currentStage, "asset_matching");
+  assert.equal(result.videoTask.currentStage, "script");
   assert.equal(result.videoTask.stageStatus, "in_progress");
   assert.equal(result.activeStageArtifactVersionIds.strategy, "strategy_v1");
   assert.equal(result.activeStageArtifactVersionIds.asset_matching, undefined);
@@ -192,7 +192,7 @@ test("rollback selects the historical version and recursively invalidates every 
   assert.equal(result.activeStageArtifactVersionIds.delivery, undefined);
   assert.deepEqual(
     result.stageArtifactInvalidations.map((item) => item.artifactVersionId),
-    ["asset_v1", "script_v1", "storyboard_v1", "preview_v1", "delivery_v1"],
+    ["script_v1", "asset_v1", "storyboard_v1", "preview_v1", "delivery_v1"],
   );
   assert.deepEqual(result.stageArtifactInvalidations[0]?.cause, {
     kind: "rollback",
@@ -362,15 +362,15 @@ test("new confirmations cannot reuse an invalidated or unselected stage artifact
 test("regenerated downstream work can be confirmed only against the selected rollback target", () => {
   const rolledBack = rollbackVideoTaskStage(completedRecord(), request(), context());
   rolledBack.videoTask.stageStatus = "awaiting_confirmation";
-  const dependencies = deriveStageConfirmationDependencies(rolledBack, "asset_matching");
+  const dependencies = deriveStageConfirmationDependencies(rolledBack, "script");
   const result = confirmVideoTaskStage(
     rolledBack,
     {
       expectedTaskRevision: rolledBack.videoTask.revision,
-      stage: "asset_matching",
+      stage: "script",
       artifact: {
-        artifactId: "asset_regenerated",
-        schemaName: "asset_matching_artifact",
+        artifactId: "script_regenerated",
+        schemaName: "script_artifact",
         schemaVersion: 1,
         contentHashSha256: "e".repeat(64),
       },
@@ -385,9 +385,9 @@ test("regenerated downstream work can be confirmed only against the selected rol
     },
   );
 
-  assert.equal(result.videoTask.currentStage, "script");
-  assert.equal(result.activeStageArtifactVersionIds.asset_matching, "artifact_version_regenerated");
-  assert.equal(result.stageArtifactVersions.at(-1)?.version, 2);
+  assert.equal(result.videoTask.currentStage, "asset_matching");
+  assert.equal(result.activeStageArtifactVersionIds.script, "artifact_version_regenerated");
+  assert.equal(result.stageArtifactVersions.at(-1)?.version, 3);
   assert.equal(result.stageRollbacks.length, 1);
   assert.equal(result.stageArtifactInvalidations.length, 5);
 });

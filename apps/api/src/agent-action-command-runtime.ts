@@ -370,9 +370,6 @@ export class AgentActionCommandRuntime {
         };
           switch (input.card.action) {
           case "generate_strategy": {
-            if (current.videoTask.assetSnapshotId === undefined) {
-              await this.#assertTemporaryReferencesUsable(aggregate, occurredAt);
-            }
             const vehicle = current.videoTask.vehicleSnapshotId === undefined
               ? this.#vehicle(state, project)
               : undefined;

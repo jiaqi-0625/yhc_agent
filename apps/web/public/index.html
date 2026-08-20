@@ -6,8 +6,9 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=workspace-details-ws405-v1" />
-    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-details-ws405-v1" />
+    <link rel="stylesheet" href="/app.css?build=asset-matching-ws406-v1" />
+    <link rel="stylesheet" href="/workspace-frame.css?build=asset-matching-ws406-v1" />
+    <link rel="stylesheet" href="/asset-matching.css?build=asset-matching-ws406-v1" />
     <link rel="stylesheet" href="/agent-panel.css?build=workspace-details-ws405-v1" />
   </head>
   <body>
@@ -275,8 +276,35 @@
                 <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-grid" /></svg><strong>策划工作区</strong><span>暂无内容</span></div></div>
               </section>
               <section class="workspace-module-panel" data-workspace-frame-panel="assets" hidden>
-                <header class="workspace-module-heading"><h2>资产</h2></header>
-                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg><strong>资产工作区</strong><span>暂无内容</span></div></div>
+                <div id="asset-matching-panel" class="asset-matching-panel" aria-live="polite">
+                  <header class="asset-matching-header">
+                    <div><h2>资产匹配</h2><p id="asset-matching-gate">请选择视频任务</p></div>
+                    <div class="asset-matching-actions">
+                      <button id="asset-upload-open" class="button secondary" type="button" disabled><svg class="icon" aria-hidden="true"><use href="#i-plus" /></svg>上传素材</button>
+                      <button id="asset-selection-confirm" class="button primary" type="button" disabled>确认选择</button>
+                    </div>
+                  </header>
+                  <div class="asset-matching-path" aria-label="制作流程">
+                    <span>策略</span><span>脚本</span><span class="active">资产匹配</span><span>分镜</span><span>预览</span><span>交付</span>
+                  </div>
+                  <div id="asset-matching-notice" class="asset-matching-notice neutral">
+                    <svg class="icon" aria-hidden="true"><use href="#i-spark" /></svg>
+                    <span>确认策略和脚本后开始选材</span>
+                  </div>
+                  <div class="asset-matching-toolbar">
+                    <div id="asset-category-tabs" class="asset-category-tabs" role="tablist" aria-label="素材分类">
+                      <button class="active" type="button" role="tab" aria-selected="true" data-asset-category="all">全部</button>
+                      <button type="button" role="tab" aria-selected="false" data-asset-category="vehicle">车型</button>
+                      <button type="button" role="tab" aria-selected="false" data-asset-category="person">人物</button>
+                      <button type="button" role="tab" aria-selected="false" data-asset-category="scene">场景</button>
+                    </div>
+                    <span id="asset-selection-count">0 项已选</span>
+                  </div>
+                  <div id="asset-matching-error" class="asset-matching-error" role="alert" hidden></div>
+                  <div id="asset-matching-grid" class="asset-matching-grid">
+                    <div class="asset-matching-empty"><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg><span>选择任务后查看素材</span></div>
+                  </div>
+                </div>
               </section>
               <section class="workspace-module-panel" data-workspace-frame-panel="storyboard" hidden>
                 <header class="workspace-module-heading"><h2>分镜</h2></header>
@@ -548,6 +576,21 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/app.js?build=workspace-details-ws405-v1"></script>
+    <dialog id="asset-upload-dialog" class="asset-upload-dialog" aria-labelledby="asset-upload-title">
+      <form id="asset-upload-form" method="dialog">
+        <header><div><h2 id="asset-upload-title">上传临时素材</h2><p>仅用于当前项目</p></div><button id="asset-upload-close" class="icon-button subtle" type="button" aria-label="关闭">×</button></header>
+        <label class="asset-upload-file" for="asset-upload-file"><svg class="icon" aria-hidden="true"><use href="#i-image" /></svg><strong id="asset-upload-file-label">选择图片</strong><span>JPG、PNG、WebP，最大 8MB</span><input id="asset-upload-file" type="file" accept="image/jpeg,image/png,image/webp" required /></label>
+        <div class="asset-upload-fields">
+          <label><span>分类</span><select id="asset-upload-category"><option value="person">人物</option><option value="scene" selected>场景</option><option value="visual_style">风格</option></select></label>
+          <label><span>素材描述</span><input id="asset-upload-description" maxlength="2000" placeholder="如：夜间城市高架，蓝紫色灯光" required /></label>
+          <label><span>来源说明</span><input id="asset-upload-rights" maxlength="2000" placeholder="如：品牌自有拍摄素材" required /></label>
+          <label class="asset-upload-checkbox"><input id="asset-upload-confirm-rights" type="checkbox" required /><span>已确认本项目使用权</span></label>
+        </div>
+        <p id="asset-upload-error" class="asset-matching-error" role="alert" hidden></p>
+        <footer><button id="asset-upload-cancel" class="button secondary" type="button">取消</button><button id="asset-upload-submit" class="button primary" type="submit">上传并校验</button></footer>
+      </form>
+    </dialog>
+
+    <script type="module" src="/app.js?build=asset-matching-ws406-v1"></script>
   </body>
 </html>

@@ -27,7 +27,7 @@ test("policy allows the task-bound asset snapshot reader but not a catalog searc
   assert.equal(evaluateToolPolicy({ toolName: "search_company_assets", status: "created", scope }).allowed, false);
 });
 
-test("policy exposes stage suggestion reads only in script, storyboard, and delivery workflow states", () => {
+test("policy exposes stage suggestion reads in script, asset matching, storyboard, and delivery states", () => {
   for (const status of ["strategy_approved", "script_draft", "storyboard_draft", "export_ready"] as const) {
     assert.deepEqual(
       evaluateToolPolicy({ toolName: "get_current_stage_suggestion_context", status, scope }),

@@ -1,0 +1,74 @@
+.asset-matching-panel { display: grid; min-height: 100%; align-content: start; gap: 14px; }
+.asset-matching-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.asset-matching-header h2 { margin: 0; font-size: 15px; }
+.asset-matching-header p { margin: 5px 0 0; color: var(--muted-foreground); font-size: 10px; }
+.asset-matching-actions { display: flex; gap: 8px; }
+.asset-matching-actions .button { min-height: 32px; padding: 0 11px; font-size: 10px; }
+.asset-matching-path { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 5px; }
+.asset-matching-path span { position: relative; overflow: hidden; padding: 7px 5px; color: var(--muted-foreground); font-size: 9px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.asset-matching-path span::after { position: absolute; right: -4px; bottom: 0; left: -4px; height: 2px; border-radius: 999px; background: var(--border); content: ""; }
+.asset-matching-path span.active { color: var(--primary); font-weight: 650; }
+.asset-matching-path span.active::after { background: var(--primary); }
+.asset-matching-notice { display: flex; min-height: 40px; align-items: center; gap: 9px; padding: 9px 11px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 2px); background: var(--muted); color: var(--muted-foreground); font-size: 10px; }
+.asset-matching-notice.ready { border-color: color-mix(in oklch, var(--primary) 28%, var(--border)); color: var(--accent-foreground); background: color-mix(in oklch, var(--accent) 72%, var(--card)); }
+.asset-matching-notice.locked { border-color: color-mix(in oklch, var(--success) 30%, var(--border)); color: var(--success); background: color-mix(in oklch, var(--success) 7%, var(--card)); }
+.asset-matching-toolbar { display: flex; min-height: 34px; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--border); }
+.asset-matching-toolbar > span { color: var(--muted-foreground); font-size: 9px; }
+.asset-category-tabs { display: flex; align-self: stretch; gap: 16px; }
+.asset-category-tabs button { position: relative; padding: 0; border: 0; color: var(--muted-foreground); background: transparent; font-size: 10px; cursor: pointer; }
+.asset-category-tabs button.active { color: var(--foreground); font-weight: 650; }
+.asset-category-tabs button.active::after { position: absolute; right: 0; bottom: -1px; left: 0; height: 2px; border-radius: 999px; background: var(--primary); content: ""; }
+.asset-matching-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding-bottom: 16px; }
+.asset-card { position: relative; display: grid; grid-template-columns: 78px minmax(0, 1fr); min-height: 104px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--card); cursor: pointer; transition: border-color .14s ease, box-shadow .14s ease; }
+.asset-card:hover { border-color: color-mix(in oklch, var(--primary) 26%, var(--border)); }
+.asset-card.selected { border-color: color-mix(in oklch, var(--primary) 58%, var(--border)); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 16%, transparent); }
+.asset-card.locked { cursor: default; }
+.asset-card-preview { display: grid; min-height: 104px; place-items: center; color: color-mix(in oklch, var(--primary) 72%, var(--foreground)); background: linear-gradient(145deg, color-mix(in oklch, var(--accent) 70%, var(--card)), var(--muted)); }
+.asset-card-preview.person { color: oklch(0.62 .14 20); background: linear-gradient(145deg, oklch(.93 .025 25), var(--muted)); }
+.asset-card-preview.scene { color: oklch(0.54 .11 160); background: linear-gradient(145deg, oklch(.93 .03 160), var(--muted)); }
+html:not([data-theme="light"]) .asset-card-preview.person,
+html:not([data-theme="light"]) .asset-card-preview.scene { background: linear-gradient(145deg, var(--secondary), var(--muted)); }
+.asset-card-preview .icon { width: 24px; height: 24px; }
+.asset-card-body { display: grid; min-width: 0; align-content: start; gap: 5px; padding: 10px 34px 10px 10px; }
+.asset-card-title { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.asset-card-title strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.asset-card-title span { flex: 0 0 auto; padding: 2px 5px; border-radius: 999px; color: var(--primary); background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 8px; }
+.asset-card-description { display: -webkit-box; margin: 0; overflow: hidden; color: var(--muted-foreground); font-size: 9px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.asset-card-tags { display: flex; min-width: 0; gap: 4px; overflow: hidden; }
+.asset-card-tags span { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; color: var(--muted-foreground); background: var(--muted); font-size: 8px; }
+.asset-card-check { position: absolute; top: 9px; right: 9px; display: grid; width: 17px; height: 17px; place-items: center; border: 1px solid var(--border); border-radius: 50%; color: transparent; background: var(--card); font-size: 11px; }
+.asset-card.selected .asset-card-check { border-color: var(--primary); color: var(--primary-foreground); background: var(--primary); }
+.asset-card-lock { display: inline-flex; align-items: center; gap: 3px; color: var(--muted-foreground); font-size: 8px; }
+.asset-matching-empty { display: grid; min-height: 220px; grid-column: 1 / -1; place-items: center; align-content: center; gap: 8px; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted-foreground); background: var(--card); font-size: 10px; }
+.asset-matching-empty .icon { width: 22px; height: 22px; }
+.asset-matching-error { margin: 0; padding: 8px 10px; border: 1px solid color-mix(in oklch, var(--destructive) 34%, var(--border)); border-radius: calc(var(--radius) - 3px); color: var(--destructive); background: color-mix(in oklch, var(--destructive) 7%, var(--card)); font-size: 9px; }
+
+.asset-upload-dialog { width: min(470px, calc(100vw - 40px)); padding: 0; border: 1px solid var(--border); border-radius: var(--radius); color: var(--foreground); background: var(--popover); box-shadow: 0 24px 70px color-mix(in oklch, black 28%, transparent); }
+.asset-upload-dialog::backdrop { background: color-mix(in oklch, black 48%, transparent); backdrop-filter: blur(2px); }
+.asset-upload-dialog form { display: grid; gap: 15px; padding: 18px; }
+.asset-upload-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.asset-upload-dialog h2 { margin: 0; font-size: 15px; }
+.asset-upload-dialog header p { margin: 4px 0 0; color: var(--muted-foreground); font-size: 9px; }
+.asset-upload-dialog header .icon-button { border: 0; font-size: 20px; }
+.asset-upload-file { display: grid; min-height: 112px; place-items: center; align-content: center; gap: 5px; border: 1px dashed var(--border); border-radius: var(--radius); background: var(--muted); cursor: pointer; }
+.asset-upload-file:hover { border-color: color-mix(in oklch, var(--primary) 44%, var(--border)); }
+.asset-upload-file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.asset-upload-file .icon { width: 22px; height: 22px; color: var(--primary); }
+.asset-upload-file strong { font-size: 10px; }
+.asset-upload-file span { color: var(--muted-foreground); font-size: 9px; }
+.asset-upload-fields { display: grid; gap: 11px; }
+.asset-upload-fields label:not(.asset-upload-checkbox) { display: grid; gap: 5px; }
+.asset-upload-fields label > span { color: var(--muted-foreground); font-size: 9px; }
+.asset-upload-fields input:not([type="checkbox"]), .asset-upload-fields select { width: 100%; min-height: 34px; padding: 0 9px; border: 1px solid var(--border); border-radius: calc(var(--radius) - 3px); color: var(--foreground); background: var(--input); font-size: 10px; }
+.asset-upload-checkbox { display: flex; align-items: center; gap: 7px; }
+.asset-upload-checkbox input { accent-color: var(--primary); }
+.asset-upload-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.asset-upload-dialog footer .button { min-height: 34px; padding: 0 12px; font-size: 10px; }
+
+@media (min-width: 1280px) and (max-width: 1439px) {
+  .asset-matching-grid { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .asset-card { transition: none; }
+}

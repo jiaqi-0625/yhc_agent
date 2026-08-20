@@ -118,10 +118,10 @@ test("task-bound assembly adds the immutable asset snapshot reader only for the 
   ]);
   assert.match(agent.state.systemPrompt, /本地上传必须提示人工复核原始来源说明与使用权声明/u);
   assert.match(agent.state.systemPrompt, /精确版本和推荐理由/u);
-  assert.match(agent.state.systemPrompt, /车型素材只能作为不可替换的锁定素材/u);
+  assert.match(agent.state.systemPrompt, /车型素材不可跨车型替换/u);
   assert.match(
     agent.state.tools.find((tool) => tool.name === "get_task_asset_snapshot")?.description ?? "",
-    /逐项来源风险和人物\/场景推荐/u,
+    /资产匹配确认时锁定.*逐项来源风险/u,
   );
   assert.throws(
     () => createAdvertisingAgent({
@@ -156,7 +156,7 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
     "validate_vehicle_claims",
     "get_current_stage_suggestion_context",
   ]);
-  assert.match(agent.state.systemPrompt, /脚本、分镜或交付阶段建议前/u);
+  assert.match(agent.state.systemPrompt, /脚本、资产匹配、分镜或交付阶段建议前/u);
   assert.match(agent.state.systemPrompt, /已确认上游产物精确版本/u);
   assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);
   assert.throws(

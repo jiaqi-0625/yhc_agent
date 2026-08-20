@@ -122,7 +122,7 @@ function record(): VideoTaskProductionRecord {
       name: "资产锁定测试任务",
       ownerAccountId: "account_owner",
       status: "active",
-      currentStage: "strategy",
+      currentStage: "asset_matching",
       stageStatus: "in_progress",
       revision: 5,
       vehicleSnapshotId: "vehicle_snapshot_1",
@@ -407,7 +407,7 @@ test("lockVideoTaskAssetSnapshot rejects already locked, invalid workflow, and m
 
   const invalidWorkflowRecords = [record(), record(), record()];
   invalidWorkflowRecords[0]!.videoTask.status = "completed";
-  invalidWorkflowRecords[1]!.videoTask.currentStage = "asset_matching";
+  invalidWorkflowRecords[1]!.videoTask.currentStage = "script";
   invalidWorkflowRecords[2]!.videoTask.stageStatus = "awaiting_confirmation";
   for (const invalid of invalidWorkflowRecords) {
     assert.throws(
@@ -439,5 +439,32 @@ test("lockVideoTaskAssetSnapshot revalidates pool contents before locking", () =
         context(),
       ),
     assetPoolError("AIC-ASSET-POOL_VEHICLE_MISMATCH"),
+  );
+});
+
+test("asset matching locks the exact human selection and rejects catalog outsiders", () => {
+  const sourcePool = pool();
+  const selected = [sourcePool.assets[0]!, sourcePool.assets[1]!];
+  const result = lockVideoTaskAssetSnapshot(
+    record(),
+    project,
+    sourcePool,
+    5,
+    context(),
+    selected,
+  );
+  assert.deepEqual(result.taskAssetSnapshots[0]?.assets, selected);
+  assert.notStrictEqual(result.taskAssetSnapshots[0]?.assets, selected);
+
+  assert.throws(
+    () => lockVideoTaskAssetSnapshot(
+      record(),
+      project,
+      sourcePool,
+      5,
+      context(),
+      [sourcePool.assets[0]!, { ...reusableAsset(), assetId: "asset_outside_pool" }],
+    ),
+    assetPoolError("AIC-ASSET-POOL_SCOPE_INVALID"),
   );
 });
