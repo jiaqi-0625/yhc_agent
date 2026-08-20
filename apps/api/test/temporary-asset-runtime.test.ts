@@ -90,7 +90,7 @@ function task(videoTaskId: string): VideoTaskProductionRecord {
       name: videoTaskId,
       ownerAccountId: session.actorAccountId,
       status: "active",
-      currentStage: "strategy",
+      currentStage: "asset_matching",
       stageStatus: "in_progress",
       revision: 1,
       vehicleSnapshotId: "vehicle_snapshot_e5_v1",

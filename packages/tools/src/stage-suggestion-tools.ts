@@ -7,15 +7,22 @@ import type {
 } from "@firefly/schemas";
 import { Type } from "typebox";
 
+import type {
+  CompanyAssetCatalogItem,
+  CompanyAssetProvider,
+  CompanyAssetProviderScope,
+} from "./company-asset-provider.ts";
+
 const GetCurrentStageSuggestionContextRequestSchema = Type.Object({}, { additionalProperties: false });
 
-const supportedStages = ["script", "storyboard", "delivery"] as const;
+const supportedStages = ["script", "asset_matching", "storyboard", "delivery"] as const;
 type SupportedSuggestionStage = (typeof supportedStages)[number];
 
 const requiredUpstreamStages: Readonly<Record<SupportedSuggestionStage, readonly VideoTaskStage[]>> = {
-  script: ["strategy", "asset_matching"],
-  storyboard: ["strategy", "asset_matching", "script"],
-  delivery: ["strategy", "asset_matching", "script", "storyboard", "video_preview"],
+  script: ["strategy"],
+  asset_matching: ["strategy", "script"],
+  storyboard: ["strategy", "script", "asset_matching"],
+  delivery: ["strategy", "script", "asset_matching", "storyboard", "video_preview"],
 };
 
 export interface StageSuggestionContextView {
@@ -27,6 +34,15 @@ export interface StageSuggestionContextView {
   readonly stageStatus: "in_progress" | "awaiting_confirmation";
   readonly productionBrief: TaskContext["productionBrief"];
   readonly confirmedUpstreamArtifacts: readonly StageArtifactVersion[];
+  readonly assetMatchingContext?: {
+    readonly companyCandidates: readonly CompanyAssetCatalogItem[];
+    readonly selectionPolicy: {
+      readonly vehicleAssetsLocked: true;
+      readonly personSceneHumanReplaceable: true;
+      readonly humanSelectionHasPriority: true;
+      readonly preserveExactAssetVersions: true;
+    };
+  };
   readonly suggestionBoundary: {
     readonly suggestionOnly: true;
     readonly mayPersistArtifact: false;
@@ -51,6 +67,8 @@ export interface CreateScopedStageSuggestionContextReaderOptions {
   readonly taskContext: TaskContext;
   readonly tenantId: string;
   readonly store: StageSuggestionRecordStore;
+  readonly companyAssetProvider: CompanyAssetProvider;
+  readonly companyAssetScope: CompanyAssetProviderScope;
 }
 
 export class StageSuggestionContextAccessError extends Error {
@@ -69,8 +87,14 @@ function isSupportedStage(stage: VideoTaskStage): stage is SupportedSuggestionSt
 function guidanceFor(stage: SupportedSuggestionStage): readonly string[] {
   if (stage === "script") {
     return [
-      "脚本建议必须沿用已确认的营销策略与资产匹配结果，并适配任务受众、主题和时长。",
-      "涉及车型事实时仍需基于锁定车型快照校验；涉及素材时仍需保留锁定版本和来源风险提示。",
+      "脚本建议必须沿用已确认的营销策略，并适配任务受众、主题和时长。",
+      "脚本阶段只使用锁定车型事实，不提前选取人物或场景素材。",
+    ];
+  }
+  if (stage === "asset_matching") {
+    return [
+      "仅基于已确认的营销策略、脚本和项目资产描述词推荐素材。",
+      "车型素材不可替换；人物和场景可由人工调整，人工结果不得被后续推荐静默覆盖。",
     ];
   }
   if (stage === "storyboard") {
@@ -122,6 +146,14 @@ export function createScopedStageSuggestionContextReader(
   options: Readonly<CreateScopedStageSuggestionContextReaderOptions>,
 ): StageSuggestionContextReader {
   const videoTaskId = options.taskContext.videoTask.id;
+  if (
+    options.companyAssetScope.tenantId !== options.tenantId ||
+    options.companyAssetScope.actorAccountId.length === 0 ||
+    !options.companyAssetScope.allowedBrandIds.includes(options.taskContext.brand.id) ||
+    !options.companyAssetScope.allowedVehicleIds.includes(options.taskContext.vehicle.id)
+  ) {
+    throw new StageSuggestionContextAccessError();
+  }
   return {
     videoTaskId,
     async read(signal?: AbortSignal): Promise<StageSuggestionContextView> {
@@ -161,6 +193,27 @@ export function createScopedStageSuggestionContextReader(
           );
         }
       }
+      const assetMatchingContext = stage === "asset_matching"
+        ? {
+            companyCandidates: (await options.companyAssetProvider.searchAssets(
+              {
+                categories: ["person", "scene"],
+                brandId: options.taskContext.brand.id,
+                vehicleId: options.taskContext.vehicle.id,
+                limit: 100,
+              },
+              options.companyAssetScope,
+              signal === undefined ? undefined : { signal },
+            )).items.map((item) => structuredClone(item)),
+            selectionPolicy: {
+              vehicleAssetsLocked: true as const,
+              personSceneHumanReplaceable: true as const,
+              humanSelectionHasPriority: true as const,
+              preserveExactAssetVersions: true as const,
+            },
+          }
+        : undefined;
+      signal?.throwIfAborted();
       return {
         schemaVersion: 1,
         kind: "stage_suggestion_context",
@@ -175,6 +228,7 @@ export function createScopedStageSuggestionContextReader(
           platformTags: [...record.videoTask.platformTags],
         },
         confirmedUpstreamArtifacts,
+        ...(assetMatchingContext === undefined ? {} : { assetMatchingContext }),
         suggestionBoundary: {
           suggestionOnly: true,
           mayPersistArtifact: false,
@@ -193,7 +247,7 @@ export function createStageSuggestionTools(reader: StageSuggestionContextReader)
   const getCurrentStageSuggestionContext: AgentTool<typeof GetCurrentStageSuggestionContextRequestSchema> = {
     name: "get_current_stage_suggestion_context",
     label: "读取当前阶段建议依据",
-    description: "只在当前脚本、分镜或交付阶段读取仍有效的已确认上游产物精确版本；仅用于提出建议，不生成、不持久化、不确认阶段，也不发布广告。",
+    description: "读取当前阶段仍有效的已确认上游产物精确版本；资产匹配阶段同时返回带描述词的精确版本人物/场景候选。仅用于提出建议，不生成、不持久化、不确认阶段，也不发布广告。",
     parameters: GetCurrentStageSuggestionContextRequestSchema,
     async execute(_toolCallId, _params, signal) {
       const details = await reader.read(signal);

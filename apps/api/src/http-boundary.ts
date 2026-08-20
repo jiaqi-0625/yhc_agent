@@ -13,6 +13,7 @@ import {
   StageConfirmationDeniedError,
   StageRollbackDeniedError,
   TaskTakeoverDeniedError,
+  TemporaryAssetError,
   VideoTaskAssignmentDeniedError,
   VideoTaskCreationError,
   WorkspaceAccessDeniedError,
@@ -26,6 +27,8 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import { ProjectAssetRuntimeError } from "./project-asset-runtime.ts";
+import { TemporaryAssetRuntimeError } from "./temporary-asset-runtime.ts";
 import {
   PostgresDatabaseClosedError,
   PostgresPersistenceError,
@@ -59,12 +62,19 @@ export function sendEvent(response: ServerResponse, event: string, data: unknown
 }
 
 export async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
+  return readJsonWithLimit(request, maximumBodyBytes);
+}
+
+export async function readJsonWithLimit(
+  request: IncomingMessage,
+  maximumBytes: number,
+): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     bytes += buffer.length;
-    if (bytes > maximumBodyBytes) throw new Error("Request body exceeds 64 KiB.");
+    if (bytes > maximumBytes) throw new Error("Request body exceeds the allowed size.");
     chunks.push(buffer);
   }
   if (chunks.length === 0) return {};
@@ -179,6 +189,9 @@ export function requestErrorBody(error: Error): RequestErrorBody {
       error instanceof VideoTaskCreationError ||
       error instanceof VideoTaskAssignmentDeniedError ||
       error instanceof TaskTakeoverDeniedError ||
+      error instanceof TemporaryAssetError ||
+      error instanceof TemporaryAssetRuntimeError ||
+      error instanceof ProjectAssetRuntimeError ||
       error instanceof LocalAgentRunError ||
       error instanceof LocalAgentCredentialsError ||
       error instanceof CompanyAssetCatalogAccessError ||

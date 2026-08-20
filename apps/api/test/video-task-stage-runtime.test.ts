@@ -314,7 +314,7 @@ test("generate, approval request, explicit confirmation, and stage reads form on
 
   assert.equal(confirmed.replayed, false);
   assert.equal(confirmed.videoTask.revision, 4);
-  assert.equal(confirmed.videoTask.currentStage, "asset_matching");
+  assert.equal(confirmed.videoTask.currentStage, "script");
   assert.equal(confirmed.videoTask.stageStatus, "in_progress");
   assert.equal(confirmed.confirmation.source, "human_action");
   assert.equal(confirmed.confirmation.actorAccountId, value.creator.actorAccountId);
@@ -322,7 +322,7 @@ test("generate, approval request, explicit confirmation, and stage reads form on
   assert.equal(confirmed.artifactVersion.content.schemaName, "video_task_strategy_draft");
   assert.deepEqual(
     confirmed.artifactVersion.dependencies.map((dependency) => dependency.kind),
-    ["vehicle_snapshot", "asset_snapshot"],
+    ["vehicle_snapshot"],
   );
 
   const versions = await value.stages.getStageVersions(
@@ -415,12 +415,11 @@ test("migrated strategy awaiting confirmation resumes without a fabricated reque
   assert.equal(confirmed.artifactVersion.provenance.kind, "human_confirmation");
   assert.deepEqual(confirmed.artifactVersion.dependencies, [
     { kind: "vehicle_snapshot", vehicleSnapshotId: migratedDraft.vehicleSnapshotId },
-    { kind: "asset_snapshot", assetSnapshotId: migratedRecord.videoTask.assetSnapshotId },
   ]);
   assert.equal(confirmed.receipt.action, "confirm_stage");
   assert.equal(confirmed.receipt.expectedTaskRevision, migratedRecord.videoTask.revision);
   assert.equal(confirmed.receipt.resultingTaskRevision, migratedRecord.videoTask.revision + 1);
-  assert.equal(confirmed.videoTask.currentStage, "asset_matching");
+  assert.equal(confirmed.videoTask.currentStage, "script");
   assert.equal(confirmed.videoTask.stageStatus, "in_progress");
 
   const persisted = await migrated.tasks.load(migrated.taskId);

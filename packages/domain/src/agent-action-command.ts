@@ -5,13 +5,11 @@ import type {
   ProjectAssetPool,
   StageConfirmationRequest,
   StrategyItem,
-  TaskAssetSnapshot,
   VehicleSnapshot,
   VideoTaskStrategyDraft,
 } from "@firefly/schemas";
 
 import type { VideoTaskProductionRecord } from "./stage-confirmation.ts";
-import { assertProjectAssetPoolAssets } from "./asset-pool.ts";
 import { preserveLockedStrategyItems, validateStrategy } from "./strategy.ts";
 import { assertRevision, nextVideoTaskWorkflowState } from "./workflow.ts";
 
@@ -158,26 +156,8 @@ function assertProjectInputs(
       "The project, asset pool, and vehicle snapshot do not share the task scope.",
     );
   }
-  if (record.videoTask.assetSnapshotId === undefined) {
-    if (
-      pool.tenantId !== project.tenantId ||
-      pool.batchProjectId !== project.id ||
-      pool.vehicleId !== project.vehicleId
-    ) {
-      throw new AgentActionCommandError(
-        "AIC-AGENT-COMMAND-SNAPSHOT_INVALID",
-        "The project asset pool does not share the task scope.",
-      );
-    }
-    try {
-      assertProjectAssetPoolAssets(project, pool.assets);
-    } catch {
-      throw new AgentActionCommandError(
-        "AIC-AGENT-COMMAND-SNAPSHOT_INVALID",
-        "The project asset pool does not contain a valid vehicle-scoped asset set.",
-      );
-    }
-  }
+  // Asset candidates intentionally stay mutable until the later asset-matching stage.
+  // Strategy generation therefore validates only project and locked vehicle facts.
 }
 
 function projectVehicleFacts(
@@ -260,33 +240,6 @@ export function generateVideoTaskStrategy(
     );
   }
 
-  let assetSnapshotId = record.videoTask.assetSnapshotId;
-  let taskAssetSnapshots = structuredClone(record.taskAssetSnapshots);
-  if (assetSnapshotId === undefined) {
-    const snapshot: TaskAssetSnapshot = {
-      id: context.createId("task_asset_snapshot"),
-      tenantId: record.videoTask.tenantId,
-      batchProjectId: project.id,
-      videoTaskId: record.videoTask.id,
-      version: Math.max(0, ...record.taskAssetSnapshots.map((item) => item.version)) + 1,
-      sourceProjectAssetPoolRevision: pool.revision,
-      vehicleSnapshotId: lockedVehicleSnapshot.id,
-      assets: structuredClone(pool.assets),
-      createdAt: context.occurredAt,
-      createdBy: context.actorAccountId,
-    };
-    assetSnapshotId = snapshot.id;
-    taskAssetSnapshots = [...taskAssetSnapshots, snapshot];
-  } else {
-    const current = record.taskAssetSnapshots.find((item) => item.id === assetSnapshotId);
-    if (!current || current.vehicleSnapshotId !== lockedVehicleSnapshot.id) {
-      throw new AgentActionCommandError(
-        "AIC-AGENT-COMMAND-SNAPSHOT_INVALID",
-        "The task asset snapshot is missing or belongs to another vehicle snapshot.",
-      );
-    }
-  }
-
   const generatedItems = projectVehicleFacts(lockedVehicleSnapshot, context.createId);
   const previousDraft = record.strategyDrafts.find(
     (item) => item.id === record.activeStrategyDraftId,
@@ -350,7 +303,6 @@ export function generateVideoTaskStrategy(
       currentStage: workflow.currentStage,
       stageStatus: workflow.stageStatus,
       vehicleSnapshotId: lockedVehicleSnapshot.id,
-      assetSnapshotId,
       revision: record.videoTask.revision + 1,
       updatedAt: context.occurredAt,
       updatedBy: context.actorAccountId,
@@ -358,7 +310,7 @@ export function generateVideoTaskStrategy(
     taskVehicleSnapshots: record.videoTask.vehicleSnapshotId === undefined
       ? [...structuredClone(record.taskVehicleSnapshots), structuredClone(lockedVehicleSnapshot)]
       : structuredClone(record.taskVehicleSnapshots),
-    taskAssetSnapshots,
+    taskAssetSnapshots: structuredClone(record.taskAssetSnapshots),
     strategyDrafts: [...structuredClone(record.strategyDrafts), draft],
     activeStrategyDraftId: draft.id,
     commandReceipts: [...structuredClone(record.commandReceipts), commandReceipt],

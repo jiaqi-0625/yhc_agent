@@ -1,4 +1,5 @@
 import { agentApi } from "./agent-api.js";
+import { createAssetMatchingPanel } from "./asset-matching.js";
 import {
   agentActionAvailability,
   agentActionFailurePresentation,
@@ -63,6 +64,7 @@ let navigationBrandsRequest = 0;
 let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
 let workspaceFrame = null;
+let assetMatchingPanel = null;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -174,6 +176,26 @@ const elements = {
   workspaceFrameAgentRevision: document.querySelector("#workspace-frame-agent-revision"),
   workspaceFrameAgentComposer: document.querySelector("#workspace-frame-agent-composer"),
   workspaceFrameAgentSend: document.querySelector("#workspace-frame-agent-send"),
+  assetMatchingGate: document.querySelector("#asset-matching-gate"),
+  assetMatchingNotice: document.querySelector("#asset-matching-notice"),
+  assetMatchingGrid: document.querySelector("#asset-matching-grid"),
+  assetMatchingError: document.querySelector("#asset-matching-error"),
+  assetSelectionCount: document.querySelector("#asset-selection-count"),
+  assetSelectionConfirm: document.querySelector("#asset-selection-confirm"),
+  assetUploadOpen: document.querySelector("#asset-upload-open"),
+  assetCategoryTabs: Array.from(document.querySelectorAll("[data-asset-category]")),
+  assetUploadDialog: document.querySelector("#asset-upload-dialog"),
+  assetUploadForm: document.querySelector("#asset-upload-form"),
+  assetUploadClose: document.querySelector("#asset-upload-close"),
+  assetUploadCancel: document.querySelector("#asset-upload-cancel"),
+  assetUploadSubmit: document.querySelector("#asset-upload-submit"),
+  assetUploadFile: document.querySelector("#asset-upload-file"),
+  assetUploadFileLabel: document.querySelector("#asset-upload-file-label"),
+  assetUploadCategory: document.querySelector("#asset-upload-category"),
+  assetUploadDescription: document.querySelector("#asset-upload-description"),
+  assetUploadRights: document.querySelector("#asset-upload-rights"),
+  assetUploadConfirmRights: document.querySelector("#asset-upload-confirm-rights"),
+  assetUploadError: document.querySelector("#asset-upload-error"),
 };
 
 const projectLibraryElements = {
@@ -1895,6 +1917,44 @@ bindAgentPanel({
   setBusy,
 });
 
+assetMatchingPanel = createAssetMatchingPanel({
+  elements: {
+    gate: elements.assetMatchingGate,
+    notice: elements.assetMatchingNotice,
+    grid: elements.assetMatchingGrid,
+    error: elements.assetMatchingError,
+    count: elements.assetSelectionCount,
+    confirm: elements.assetSelectionConfirm,
+    uploadOpen: elements.assetUploadOpen,
+    tabs: elements.assetCategoryTabs,
+    dialog: elements.assetUploadDialog,
+    uploadForm: elements.assetUploadForm,
+    uploadClose: elements.assetUploadClose,
+    uploadCancel: elements.assetUploadCancel,
+    uploadSubmit: elements.assetUploadSubmit,
+    file: elements.assetUploadFile,
+    fileLabel: elements.assetUploadFileLabel,
+    uploadCategory: elements.assetUploadCategory,
+    uploadDescription: elements.assetUploadDescription,
+    uploadRights: elements.assetUploadRights,
+    uploadRightsConfirmed: elements.assetUploadConfirmRights,
+    uploadError: elements.assetUploadError,
+  },
+  api: workspaceApi,
+  onTaskUpdated: function (updatedTask) {
+    for (const summary of state.projectLibrary) {
+      const task = summary.tasks.find(function (candidate) { return candidate.id === updatedTask.id; });
+      if (!task) continue;
+      task.revision = updatedTask.revision;
+      task.currentStage = updatedTask.currentStage;
+      task.stageStatus = updatedTask.stageStatus;
+      task.status = updatedTask.status;
+      task.updatedAt = updatedTask.updatedAt;
+      break;
+    }
+  },
+});
+
 workspaceFrame = createWorkspaceFrame({
   elements: {
     view: elements.projectWorkspaceView,
@@ -1927,6 +1987,13 @@ workspaceFrame = createWorkspaceFrame({
   },
   getProjects: function () { return state.projectLibrary; },
   onBack: function () { renderProjectLibraryPage(); },
+  onSelectionChange: function (selection) {
+    assetMatchingPanel.setContext(
+      selection.project?.project?.id,
+      selection.task,
+      selection.activeView === "module" && selection.activeModule === "assets",
+    );
+  },
 });
 
 bindProjectLibrary(projectLibraryOptions());

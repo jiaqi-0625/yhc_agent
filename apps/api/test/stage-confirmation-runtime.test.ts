@@ -142,7 +142,6 @@ const command: ConfirmStageCommand = {
   },
   dependencies: [
     { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-    { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
   ],
 };
 

@@ -183,10 +183,10 @@ test("unified commands generate and request approval atomically with server-free
   assert.equal(generated.receipt.result.kind, "strategy_generated");
   const aggregate = await tasks.load(taskId);
   assert.equal(aggregate?.taskVehicleSnapshots.length, 1);
-  assert.equal(aggregate?.taskAssetSnapshots.length, 1);
+  assert.equal(aggregate?.taskAssetSnapshots.length, 0);
   assert.equal(aggregate?.strategyDrafts.length, 1);
   assert.equal(aggregate?.commandReceipts.length, 1);
-  assert.equal(aggregate?.taskAssetSnapshots[0]?.assets[0]?.assetId, assetPool.assets[0]?.assetId);
+  assert.equal(aggregate?.videoTask.assetSnapshotId, undefined);
 
   const replay = await commandRuntime.execute(project.id, taskId, {
     requestId: "command_generate_strategy",
@@ -436,7 +436,7 @@ test("locked vehicle facts survive catalog archival and successful commands repl
   assert.equal(replayed.videoTask.ownerAccountId, "account_creator_b");
 });
 
-test("project authorization precedes task lookup and unusable temporary assets cannot be locked", async () => {
+test("strategy ignores mutable temporary candidates while project authorization precedes task lookup", async () => {
   const { administration, creator, projects, taskId, tasks } = await fixture();
   const temporaryAssets = new LocalTemporaryAssetStore(".data/test-ws305-temporary", false);
   const checksumSha256 = "c".repeat(64);
@@ -486,15 +486,11 @@ test("project authorization precedes task lookup and unusable temporary assets c
     temporaryAssets,
   );
 
-  await assert.rejects(
-    runtime.execute(project.id, taskId, {
+  const generated = await runtime.execute(project.id, taskId, {
       requestId: "command_expired_asset",
       card: generateCard(taskId),
-    }, creator),
-    (error: unknown) =>
-      error instanceof BusinessRuntimeError &&
-      error.code === "AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID",
-  );
+    }, creator);
+  assert.equal(generated.videoTask.assetSnapshotId, undefined);
   await temporaryAssets.transactProject(project.id, (current) => current.map((asset) => ({
     ...asset,
     revision: asset.revision + 1,
@@ -505,15 +501,7 @@ test("project authorization precedes task lookup and unusable temporary assets c
     }],
     expiresAt: "2026-08-20T14:30:00.000Z",
   })));
-  await assert.rejects(
-    runtime.execute(project.id, taskId, {
-      requestId: "command_review_asset",
-      card: generateCard(taskId),
-    }, creator),
-    (error: unknown) =>
-      error instanceof BusinessRuntimeError &&
-      error.code === "AIC-AGENT-COMMAND-ASSET_SNAPSHOT_INVALID",
-  );
+  assert.equal((await tasks.load(taskId))?.taskAssetSnapshots.length, 0);
   await assert.rejects(
     runtime.execute(project.id, "task_guessed", {
       requestId: "command_guess_task",
@@ -523,7 +511,7 @@ test("project authorization precedes task lookup and unusable temporary assets c
   );
 });
 
-test("a locked task regenerates from its asset snapshot after the current pool asset expires", async () => {
+test("strategy regeneration remains independent from the mutable project asset pool", async () => {
   const { administration, commandRuntime, creator, projects, taskId, tasks } = await fixture();
   await commandRuntime.execute(project.id, taskId, {
     requestId: "command_lock_asset_snapshot",
@@ -589,8 +577,7 @@ test("a locked task regenerates from its asset snapshot after the current pool a
   assert.equal(regenerated.videoTask.revision, 3);
   assert.equal(regenerated.receipt.result.kind, "strategy_generated");
   const persisted = await tasks.load(taskId);
-  assert.equal(persisted?.taskAssetSnapshots.length, 1);
-  assert.equal(persisted?.taskAssetSnapshots[0]?.assets.length, 1);
+  assert.equal(persisted?.taskAssetSnapshots.length, 0);
   assert.equal(persisted?.strategyDrafts.length, 2);
 });
 

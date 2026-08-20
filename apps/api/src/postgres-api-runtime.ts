@@ -1,8 +1,17 @@
-import { MockCompanyAssetProvider } from "@firefly/tools";
+import {
+  createScopedStageSuggestionContextReader,
+  createScopedTaskAssetSnapshotReader,
+  MockCompanyAssetProvider,
+  type StageSuggestionContextReader,
+  type TaskAssetSnapshotReader,
+} from "@firefly/tools";
+import type { AgentSessionScope } from "@firefly/agent";
+import type { TaskContext } from "@firefly/schemas";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
 import { AgentActionCommandRuntime } from "./agent-action-command-runtime.ts";
+import { AssetMatchingRuntime } from "./asset-matching-runtime.ts";
 import {
   BatchProjectAssetPoolStoreAdapter,
 } from "./batch-project-store.ts";
@@ -120,6 +129,7 @@ export interface PostgresApiRuntime {
   readonly agentActionCommands: AgentActionCommandRuntime;
   readonly projectAssets: ProjectAssetRuntime;
   readonly temporaryAssets: TemporaryAssetRuntime;
+  readonly assetMatching: AssetMatchingRuntime;
   readonly accountRunLocks: AccountRunLockRuntime;
   readonly assetCoordinator: PostgresProjectAssetCoordinator;
   readonly taskContexts: WorkspaceTaskContextResolver;
@@ -131,6 +141,14 @@ export interface PostgresApiRuntime {
     taskContext: Parameters<typeof createWorkspaceTaskVehicleService>[1],
     sessionScope: Parameters<typeof createWorkspaceTaskVehicleService>[2],
   ) => ReturnType<typeof createWorkspaceTaskVehicleService>;
+  readonly resolveTaskAssetReader: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => TaskAssetSnapshotReader | undefined;
+  readonly resolveStageSuggestionReader: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => StageSuggestionContextReader | undefined;
   readiness(): Promise<void>;
   close(): Promise<void>;
 }
@@ -230,6 +248,14 @@ export async function createPostgresApiRuntime(
       temporaryAssetStore,
       assetCoordinator,
     );
+    const assetMatching = new AssetMatchingRuntime(
+      administrationStore,
+      projectStore,
+      videoTaskStore,
+      companyAssets,
+      projectAssets,
+      temporaryAssets,
+    );
     const agentActionCommands = new AgentActionCommandRuntime(
       administrationStore,
       projectStore,
@@ -252,6 +278,7 @@ export async function createPostgresApiRuntime(
       agentActionCommands,
       projectAssets,
       temporaryAssets,
+      assetMatching,
       accountRunLocks,
       assetCoordinator,
       taskContexts,
@@ -267,6 +294,41 @@ export async function createPostgresApiRuntime(
         taskContext: Parameters<typeof createWorkspaceTaskVehicleService>[1],
         sessionScope: Parameters<typeof createWorkspaceTaskVehicleService>[2],
       ) => createWorkspaceTaskVehicleService(videoTaskStore, taskContext, sessionScope),
+      resolveTaskAssetReader: (
+        taskContext: Readonly<TaskContext>,
+        sessionScope: Readonly<AgentSessionScope>,
+      ) => taskContext.videoTask.assetSnapshotId === undefined
+        ? undefined
+        : createScopedTaskAssetSnapshotReader({
+            taskContext,
+            store: videoTaskStore,
+            provider: companyAssets,
+            providerScope: {
+              tenantId: sessionScope.tenantId,
+              actorAccountId: sessionScope.actorId,
+              allowedBrandIds: [taskContext.brand.id],
+              allowedVehicleIds: [taskContext.vehicle.id],
+            },
+          }),
+      resolveStageSuggestionReader: (
+        taskContext: Readonly<TaskContext>,
+        sessionScope: Readonly<AgentSessionScope>,
+      ) => ["script", "asset_matching", "storyboard", "delivery"].includes(
+          taskContext.videoTask.currentStage,
+        )
+        ? createScopedStageSuggestionContextReader({
+            taskContext,
+            tenantId: sessionScope.tenantId,
+            store: videoTaskStore,
+            companyAssetProvider: companyAssets,
+            companyAssetScope: {
+              tenantId: sessionScope.tenantId,
+              actorAccountId: sessionScope.actorId,
+              allowedBrandIds: [taskContext.brand.id],
+              allowedVehicleIds: [taskContext.vehicle.id],
+            },
+          })
+        : undefined,
       readiness,
       close: () => database.close(),
     });

@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import {
   assertCanOperateVideoTask,
+  assertCanManageBatchProjectAssets,
+  assertProjectAssetPoolAssets,
   assertCanViewBatchProject,
   createProjectAssetPool,
   lockVideoTaskAssetSnapshot,
@@ -10,7 +12,7 @@ import {
   type VideoTaskProductionRecord,
   type WorkspaceSessionScope,
 } from "@firefly/domain";
-import type { BatchProject, ProjectAssetPool } from "@firefly/schemas";
+import type { AssetReference, BatchProject, ProjectAssetPool } from "@firefly/schemas";
 import type {
   CompanyAssetProvider,
   CompanyAssetProviderScope,
@@ -249,6 +251,46 @@ export class ProjectAssetRuntime {
     );
   }
 
+  async addCatalogAssets(
+    project: Readonly<BatchProject>,
+    selectedReferences: readonly CompanyAssetReference[],
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<ProjectAssetPool> {
+    return this.coordinator.runExclusive(project.id, async () => {
+      assertCanManageBatchProjectAssets(session, project);
+      const normalized = await this.#normalizeSelectedReferences(
+        selectedReferences,
+        project,
+        session,
+      );
+      return this.poolStore.transact(project.id, (current) => {
+        if (current === undefined || current.id !== project.assetPoolId) {
+          throw new ProjectAssetRuntimeError(
+            "AIC-ASSET-POOL-NOT-FOUND",
+            `Batch project '${project.id}' does not have its linked asset pool.`,
+          );
+        }
+        const existing = new Set(current.assets.map((asset) =>
+          asset.source === "company_catalog"
+            ? referenceIdentity(asset)
+            : `${asset.source}:${asset.batchProjectId}:${asset.assetId}`
+        ));
+        const additions = normalized.filter((asset) => !existing.has(referenceIdentity(asset)));
+        if (additions.length === 0) return structuredClone(current);
+        const assets = [...structuredClone(current.assets), ...structuredClone(additions)];
+        assertProjectAssetPoolAssets(project, assets);
+        const occurredAt = this.now();
+        return {
+          ...structuredClone(current),
+          revision: current.revision + 1,
+          assets,
+          updatedAt: occurredAt,
+          updatedBy: session.actorAccountId,
+        };
+      });
+    });
+  }
+
   async #assertTemporaryReferencesUsable(
     pool: Readonly<ProjectAssetPool>,
     project: Readonly<BatchProject>,
@@ -296,6 +338,7 @@ export class ProjectAssetRuntime {
     expectedTaskRevision: number,
     project: Readonly<BatchProject>,
     session: Readonly<WorkspaceSessionScope>,
+    selectedAssets?: readonly AssetReference[],
   ): Promise<VideoTaskProductionRecord> {
     return this.coordinator.runExclusive(project.id, async () => {
       const pool = await this.#getCurrentPoolUncoordinated(project, session);
@@ -315,6 +358,7 @@ export class ProjectAssetRuntime {
           pool,
           expectedTaskRevision,
           this.#mutationContext(session, occurredAt),
+          selectedAssets,
         );
       });
     });

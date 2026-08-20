@@ -176,6 +176,7 @@ export function lockVideoTaskAssetSnapshot(
   pool: Readonly<ProjectAssetPool>,
   expectedTaskRevision: number,
   context: Readonly<AssetPoolMutationContext>,
+  selectedAssets: readonly AssetReference[] = pool.assets,
 ): VideoTaskProductionRecord {
   assertRevision(expectedTaskRevision, record.videoTask.revision);
   const task = record.videoTask;
@@ -206,12 +207,12 @@ export function lockVideoTaskAssetSnapshot(
   }
   if (
     task.status !== "active" ||
-    task.currentStage !== "strategy" ||
+    task.currentStage !== "asset_matching" ||
     task.stageStatus !== "in_progress"
   ) {
     throw new AssetPoolError(
       "AIC-ASSET-SNAPSHOT_STAGE_INVALID",
-      "Task assets must be locked when strategy work starts.",
+      "Task assets may only be locked after strategy and script confirmation, during asset matching.",
     );
   }
   if (task.vehicleSnapshotId === undefined) {
@@ -221,6 +222,14 @@ export function lockVideoTaskAssetSnapshot(
     );
   }
   assertProjectAssetPoolAssets(project, pool.assets);
+  assertProjectAssetPoolAssets(project, selectedAssets);
+  const poolReferences = new Set(pool.assets.map(referenceIdentity));
+  if (selectedAssets.some((asset) => !poolReferences.has(referenceIdentity(asset)))) {
+    throw new AssetPoolError(
+      "AIC-ASSET-POOL_SCOPE_INVALID",
+      "A task asset selection must use exact references from the current project asset pool.",
+    );
+  }
   const version =
     Math.max(0, ...record.taskAssetSnapshots.map((snapshot) => snapshot.version)) + 1;
   const snapshot: TaskAssetSnapshot = {
@@ -231,7 +240,7 @@ export function lockVideoTaskAssetSnapshot(
     version,
     sourceProjectAssetPoolRevision: pool.revision,
     vehicleSnapshotId: task.vehicleSnapshotId,
-    assets: structuredClone(pool.assets),
+    assets: structuredClone([...selectedAssets]),
     createdAt: context.occurredAt,
     createdBy: context.actorAccountId,
   };

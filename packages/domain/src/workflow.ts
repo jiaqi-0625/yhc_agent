@@ -7,8 +7,8 @@ import type {
 
 export const videoTaskStageOrder = [
   "strategy",
-  "asset_matching",
   "script",
+  "asset_matching",
   "storyboard",
   "video_preview",
   "delivery",

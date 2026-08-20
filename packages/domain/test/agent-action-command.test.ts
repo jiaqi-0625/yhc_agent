@@ -121,7 +121,7 @@ function context(
   };
 }
 
-test("strategy generation atomically locks snapshots, projects facts, and records a free receipt", () => {
+test("strategy generation locks only vehicle facts and records a free receipt", () => {
   const source = sourceRecord();
   const commandContext = context("request_generate", "a".repeat(64));
   const result = generateVideoTaskStrategy(source, {
@@ -134,7 +134,8 @@ test("strategy generation atomically locks snapshots, projects facts, and record
   assert.equal(result.schemaVersion, 6);
   assert.equal(result.videoTask.revision, 2);
   assert.equal(result.taskVehicleSnapshots.length, 1);
-  assert.equal(result.taskAssetSnapshots.length, 1);
+  assert.equal(result.taskAssetSnapshots.length, 0);
+  assert.equal(result.videoTask.assetSnapshotId, undefined);
   assert.equal(result.strategyDrafts.length, 1);
   assert.equal(result.strategyDrafts[0]?.items[0]?.statement, "CLTC 续航 550 公里");
   assert.equal(result.strategyDrafts[0]?.validation.valid, true);

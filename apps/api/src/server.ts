@@ -2,7 +2,11 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { fileURLToPath } from "node:url";
 
 import { loadLocalAgentConfig, LocalAgentRuntime } from "@firefly/agent";
-import { MockCompanyAssetProvider } from "@firefly/tools";
+import {
+  createScopedStageSuggestionContextReader,
+  createScopedTaskAssetSnapshotReader,
+  MockCompanyAssetProvider,
+} from "@firefly/tools";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { LocalAccountBudgetStore } from "./account-budget-store.ts";
@@ -11,12 +15,14 @@ import {
   matchAgentActionCommandPath,
 } from "./agent-action-command-routes.ts";
 import { AgentActionCommandRuntime } from "./agent-action-command-runtime.ts";
+import { handleAssetMatchingRoute, matchesAssetRoute } from "./asset-matching-routes.ts";
+import { AssetMatchingRuntime } from "./asset-matching-runtime.ts";
 import {
   handleAgentRoute,
   type AgentIdentityResolver,
   type AgentTaskContextResolver,
 } from "./agent-routes.ts";
-import { LocalBatchProjectStore } from "./batch-project-store.ts";
+import { BatchProjectAssetPoolStoreAdapter, LocalBatchProjectStore } from "./batch-project-store.ts";
 import {
   createBusinessAgentRuntime,
   isMigrationSafeAgentRuntime,
@@ -34,6 +40,7 @@ import {
   ProjectLibraryPath,
 } from "./project-library-routes.ts";
 import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
+import { ProjectAssetRuntime } from "./project-asset-runtime.ts";
 import { handleProjectCreationRoute } from "./project-creation-routes.ts";
 import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { handleVideoTaskRoute } from "./video-task-routes.ts";
@@ -45,6 +52,7 @@ import {
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
 import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
 import { LocalTemporaryAssetStore } from "./temporary-asset-store.ts";
+import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { sendWebAsset } from "./web-assets.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
@@ -129,6 +137,7 @@ async function handleRequest(
   projectLibrary: ProjectLibraryRuntime | undefined,
   legacyWritesDisabled: boolean,
   readiness: ApiReadinessProbe,
+  assetMatching: AssetMatchingRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -313,6 +322,20 @@ async function handleRequest(
     )
   ) return;
   if (
+    assetMatching === undefined &&
+    matchesAssetRoute(url.pathname)
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-ASSET-MATCHING-RUNTIME_NOT_CONFIGURED",
+      "Asset matching APIs must be injected with the custom workspace session runtime.",
+      503,
+    );
+  }
+  if (
+    assetMatching !== undefined &&
+    await handleAssetMatchingRoute(request, response, url, assetMatching, workspaceSessions)
+  ) return;
+  if (
     await handleWorkspaceRoute(
       request,
       response,
@@ -359,6 +382,7 @@ export function createApiServer(
   legacyWritesDisabled = false,
   resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
   readiness: ApiReadinessProbe = alwaysReady,
+  assetMatching: AssetMatchingRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -441,6 +465,30 @@ export function createApiServer(
     adminStore,
     batchProjectStore!,
     videoTaskStore!,
+  ));
+  const assetPoolStore = batchProjectStore === undefined
+    ? undefined
+    : new BatchProjectAssetPoolStoreAdapter(batchProjectStore);
+  const localTemporaryAssets = adminStore === undefined
+    ? undefined
+    : new TemporaryAssetRuntime(temporaryAssetStore!, assetPoolStore!);
+  const localProjectAssets = adminStore === undefined
+    ? undefined
+    : new ProjectAssetRuntime(
+        companyAssetProvider,
+        assetPoolStore!,
+        videoTaskStore!,
+        undefined,
+        undefined,
+        temporaryAssetStore!,
+      );
+  const activeAssetMatching = assetMatching ?? (adminStore === undefined ? undefined : new AssetMatchingRuntime(
+    adminStore,
+    batchProjectStore!,
+    videoTaskStore!,
+    companyAssetProvider,
+    localProjectAssets!,
+    localTemporaryAssets!,
   ));
   const activeAgentActionCommands = agentActionCommands ?? (
     adminStore === undefined
@@ -526,10 +574,46 @@ export function createApiServer(
                 }
               : (taskContext, sessionScope) =>
                   createWorkspaceTaskVehicleService(
-                    videoTaskStore,
-                    taskContext,
-                    sessionScope,
+                   videoTaskStore,
+                   taskContext,
+                   sessionScope,
                   ),
+            resolveTaskAssetReader: videoTaskStore === undefined
+              ? () => undefined
+              : (taskContext, sessionScope) => taskContext.videoTask.assetSnapshotId === undefined
+                ? undefined
+                : createScopedTaskAssetSnapshotReader({
+                    taskContext,
+                    store: videoTaskStore,
+                    provider: companyAssetProvider,
+                    providerScope: {
+                      tenantId: sessionScope.tenantId,
+                      actorAccountId: sessionScope.actorId,
+                      allowedBrandIds: [taskContext.brand.id],
+                      allowedVehicleIds: [taskContext.vehicle.id],
+                    },
+                  }),
+            resolveStageSuggestionReader: videoTaskStore === undefined
+              ? () => undefined
+              : (taskContext, sessionScope) => [
+                    "script",
+                    "asset_matching",
+                    "storyboard",
+                    "delivery",
+                  ].includes(taskContext.videoTask.currentStage)
+                ? createScopedStageSuggestionContextReader({
+                    taskContext,
+                    tenantId: sessionScope.tenantId,
+                    store: videoTaskStore,
+                    companyAssetProvider,
+                    companyAssetScope: {
+                      tenantId: sessionScope.tenantId,
+                      actorAccountId: sessionScope.actorId,
+                      allowedBrandIds: [taskContext.brand.id],
+                      allowedVehicleIds: [taskContext.vehicle.id],
+                    },
+                  })
+                : undefined,
           }
         : {}),
     },
@@ -555,6 +639,7 @@ export function createApiServer(
       activeProjectLibrary,
       legacyWritesDisabled,
       readiness,
+      activeAssetMatching,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -580,6 +665,7 @@ export async function startApiServer(
   resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
   readiness: ApiReadinessProbe = alwaysReady,
   forceLegacyWritesDisabled = false,
+  assetMatching: AssetMatchingRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -602,6 +688,7 @@ export async function startApiServer(
       legacyWritesDisabled,
       resolveAgentTaskContext,
       readiness,
+      assetMatching,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -735,6 +822,8 @@ export async function startConfiguredApiServer(
         disableLegacyStrategyTools: true,
         resolveWorkStatus: postgres.resolveWorkStatus,
         resolveVehicleService: postgres.resolveVehicleService,
+        resolveTaskAssetReader: postgres.resolveTaskAssetReader,
+        resolveStageSuggestionReader: postgres.resolveStageSuggestionReader,
       },
     );
     const resolvePostgresTaskContext: AgentTaskContextResolver = async (request, videoTaskId) => {
@@ -768,6 +857,7 @@ export async function startConfiguredApiServer(
       resolvePostgresTaskContext,
       postgres.readiness,
       true,
+      postgres.assetMatching,
     );
     attachPostgresLifecycle(
       server,

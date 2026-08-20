@@ -102,20 +102,24 @@ export function deriveStageConfirmationDependencies(
       snapshot.videoTaskId === videoTask.id &&
       snapshot.vehicleSnapshotId === vehicleSnapshotId,
   );
-  if (
-    vehicleSnapshotId === undefined ||
-    assetSnapshotId === undefined ||
-    vehicleSnapshot === undefined ||
-    assetSnapshot === undefined
-  ) {
+  const requiresAssetSnapshot = videoTaskStageOrder.indexOf(stage) >=
+    videoTaskStageOrder.indexOf("asset_matching");
+  if (vehicleSnapshotId === undefined || vehicleSnapshot === undefined) {
     throw new StageConfirmationDeniedError(
-      "A stage confirmation requires the task's exact locked vehicle and asset snapshots.",
+      "A stage confirmation requires the task's exact locked vehicle snapshot.",
+    );
+  }
+  if (requiresAssetSnapshot && (assetSnapshotId === undefined || assetSnapshot === undefined)) {
+    throw new StageConfirmationDeniedError(
+      "Asset matching and downstream confirmation require the task's exact locked asset snapshot.",
     );
   }
 
   const dependencies: StageArtifactDependency[] = [
     { kind: "vehicle_snapshot", vehicleSnapshotId },
-    { kind: "asset_snapshot", assetSnapshotId },
+    ...(requiresAssetSnapshot && assetSnapshotId !== undefined
+      ? [{ kind: "asset_snapshot" as const, assetSnapshotId }]
+      : []),
   ];
   if (stage === "strategy") return dependencies;
 
