@@ -3,7 +3,11 @@ import test from "node:test";
 import { AgentActionCardSchema } from "@firefly/schemas";
 import { Value } from "typebox/value";
 
-import { createStrategyTools, type StrategyWorkflowPort } from "../src/index.ts";
+import {
+  createStrategyProposalTools,
+  createStrategyTools,
+  type StrategyWorkflowPort,
+} from "../src/index.ts";
 import { agentActionCardFixtures, taskContextFixture } from "../../schemas/test/fixtures/workspace-v2.ts";
 
 test("dialog fixtures consume the shared workspace v2 Agent contracts", () => {
@@ -63,4 +67,44 @@ test("strategy Agent tools return versioned proposals without mutating workflow 
   assert.equal(approvalResult.details.action, "request_strategy_approval");
   assert.equal(approvalResult.details.expectedRevision, 3);
   assert.equal(mutationCalls, 0);
+});
+
+test("V2 strategy proposal tools need only the server-bound task revision", async () => {
+  let revisionReads = 0;
+  const tools = createStrategyProposalTools({
+    videoTaskId: "video_task_v2_strategy_001",
+    async currentRevision() {
+      revisionReads += 1;
+      return 7;
+    },
+  });
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    "propose_strategy_generation",
+    "propose_strategy_approval",
+  ]);
+  assert.equal(tools.some((tool) => tool.name === "validate_strategy"), false);
+
+  const generation = await tools[0].execute("call_v2_generate", {
+    audience: "周末亲子家庭",
+    theme: "城市周末短途出行",
+  });
+  assert.deepEqual(generation.details, {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId: "video_task_v2_strategy_001",
+    action: "generate_strategy",
+    label: "生成卖点策略草稿",
+    summary: "面向“周末亲子家庭”生成“城市周末短途出行”策略，点击后才会写入作品。",
+    expectedRevision: 7,
+    cost: { kind: "free" },
+    payload: {
+      schemaVersion: 1,
+      audience: "周末亲子家庭",
+      theme: "城市周末短途出行",
+    },
+  });
+  const approval = await tools[1].execute("call_v2_approval", {});
+  assert.equal(approval.details.action, "request_strategy_approval");
+  assert.equal(approval.details.expectedRevision, 7);
+  assert.equal(revisionReads, 2);
 });

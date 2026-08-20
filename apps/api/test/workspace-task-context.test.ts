@@ -380,7 +380,7 @@ test("V2 Agent context hides missing and cross-tenant task identities", async ()
   );
 });
 
-test("completed migration routes use the injected V2 context and omit V1 strategy tools", async (context) => {
+test("completed migration routes use V2 context strategy proposals without V1 strategy tools", async (context) => {
   const { administration, locked, resolver, tasks } = await fixture();
   const workspaceSessions = new WorkspaceSessionRuntime(
     new LocalWorkspaceSessionStore(".data/test-ws307-context-sessions", false),
@@ -445,7 +445,14 @@ test("completed migration routes use the injected V2 context and omit V1 strateg
   assert.deepEqual(body.session.toolNames, [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
+    "propose_strategy_generation",
+    "propose_strategy_approval",
   ]);
+  assert.equal(body.session.toolNames.includes("validate_strategy"), false);
+  assert.doesNotMatch(
+    body.session.toolNames.join(","),
+    /approve_strategy|generate_strategy|request_strategy_approval/u,
+  );
 
   const advanced = structuredClone(locked);
   advanced.videoTask.revision = 3;

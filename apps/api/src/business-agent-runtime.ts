@@ -115,7 +115,12 @@ export function createBusinessAgentRuntime(
           : () => options.resolveWorkStatus!(context.taskContext, context.sessionScope),
         vehicleService: vehicleService ?? business.vehicleService,
         ...(options.disableLegacyStrategyTools
-          ? {}
+          ? {
+              strategyProposal: {
+                videoTaskId: context.taskContext.videoTask.id,
+                currentRevision: () => context.taskContext.videoTask.revision,
+              },
+            }
           : { strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id) }),
         ...(taskAssetReader === undefined ? {} : { taskAssetReader }),
         ...(stageSuggestionReader === undefined ? {} : { stageSuggestionReader }),

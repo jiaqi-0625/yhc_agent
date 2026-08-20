@@ -119,6 +119,79 @@ test("business assembly adds strategy tools without exposing an approval decisio
   );
 });
 
+test("V2 task-bound assembly adds only strategy proposal tools from the server context", async () => {
+  const taskContext = taskContextWithoutAssetSnapshot();
+  let revisionReads = 0;
+  const strategyProposal = {
+    videoTaskId: taskContext.videoTask.id,
+    async currentRevision() {
+      revisionReads += 1;
+      return taskContext.videoTask.revision;
+    },
+  };
+  const agent = createAdvertisingAgent({
+    model,
+    streamFn,
+    scope,
+    taskContext,
+    getWorkStatus: () => "strategy_draft",
+    vehicleService: new InMemoryVehicleService([]),
+    strategyProposal,
+  });
+  const toolNames = agent.state.tools.map((tool) => tool.name);
+  assert.deepEqual(toolNames, [
+    "get_vehicle_snapshot",
+    "validate_vehicle_claims",
+    "propose_strategy_generation",
+    "propose_strategy_approval",
+  ]);
+  assert.equal(toolNames.includes("validate_strategy"), false);
+  assert.doesNotMatch(toolNames.join(","), /approve_strategy|generate_strategy|request_strategy_approval/u);
+
+  const generation = agent.state.tools.find((tool) => tool.name === "propose_strategy_generation");
+  assert.ok(generation);
+  const result = await generation.execute("call_v2_generation", {
+    audience: "年轻家庭",
+    theme: "周末近郊出行",
+  });
+  assert.equal(result.details.videoTaskId, taskContext.videoTask.id);
+  assert.equal(result.details.expectedRevision, taskContext.videoTask.revision);
+  assert.equal(result.details.action, "generate_strategy");
+  assert.equal(revisionReads, 1);
+
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "strategy_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      strategyProposal: { ...strategyProposal, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "strategy_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      strategyProposal,
+      strategyService: {
+        videoTaskId: taskContext.videoTask.id,
+        async currentRevision() { return taskContext.videoTask.revision; },
+        async generate() { throw new Error("not called"); },
+        async validate() { return { valid: true, issues: [] }; },
+        async requestApproval() { throw new Error("not called"); },
+      },
+    }),
+    /cannot both be registered/u,
+  );
+});
+
 test("task-bound assembly adds the immutable asset snapshot reader only for the matching task", () => {
   const taskContext = taskContextWithAssetSnapshot();
   const reader = {
@@ -242,12 +315,9 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
 
 test("every dynamically assembled production tool is allowlisted and no approval decision tool is registered", () => {
   const taskContext = taskContextWithAssetSnapshot();
-  const strategyService = {
+  const strategyProposal = {
     videoTaskId: taskContext.videoTask.id,
     async currentRevision() { return taskContext.videoTask.revision; },
-    async generate() { throw new Error("not called"); },
-    async validate() { return { valid: true, issues: [] }; },
-    async requestApproval() { throw new Error("not called"); },
   };
   const agent = createAdvertisingAgent({
     model,
@@ -256,7 +326,7 @@ test("every dynamically assembled production tool is allowlisted and no approval
     taskContext,
     getWorkStatus: () => "strategy_draft",
     vehicleService: new InMemoryVehicleService([]),
-    strategyService,
+    strategyProposal,
     taskAssetReader: {
       videoTaskId: taskContext.videoTask.id,
       assetSnapshotId: TASK_ASSET_SNAPSHOT_ID,

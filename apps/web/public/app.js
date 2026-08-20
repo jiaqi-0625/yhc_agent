@@ -13,6 +13,7 @@ import {
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import {
+  applyProjectLibraryTaskUpdate,
   bindProjectLibrary,
   normalizeProjectLibrary,
   renderProjectLibrary,
@@ -1087,6 +1088,13 @@ function applyAgentCommandRevision(response, expectedContext) {
     },
   };
   renderTaskContext(state.taskContext);
+  const updatedProjectId = applyProjectLibraryTaskUpdate(state.projectLibrary, response.videoTask);
+  if (updatedProjectId && workspaceFrame) {
+    workspaceFrame.open(updatedProjectId, response.videoTask.id, {
+      historyMode: "replace",
+      focus: false,
+    });
+  }
   refreshActionProposalAvailability();
 }
 

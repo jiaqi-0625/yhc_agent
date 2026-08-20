@@ -11,10 +11,12 @@ import { evaluateToolPolicy, type SessionScope } from "@firefly/domain";
 import type { TaskContext, WorkStatus } from "@firefly/schemas";
 import {
   createStageSuggestionTools,
+  createStrategyProposalTools,
   createStrategyTools,
   createTaskAssetTools,
   createVehicleTools,
   type StageSuggestionContextReader,
+  type StrategyProposalPort,
   type StrategyWorkflowPort,
   type TaskAssetSnapshotReader,
   type VehicleServicePort,
@@ -45,6 +47,7 @@ export interface CreateAdvertisingAgentOptions {
   taskContext?: TaskContext;
   getWorkStatus: () => WorkStatus | Promise<WorkStatus>;
   vehicleService: VehicleServicePort;
+  strategyProposal?: StrategyProposalPort;
   strategyService?: StrategyWorkflowPort;
   taskAssetReader?: TaskAssetSnapshotReader;
   stageSuggestionReader?: StageSuggestionContextReader;
@@ -85,6 +88,16 @@ function redactContent(
 
 export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
   if (
+    options.strategyProposal !== undefined &&
+    (options.taskContext === undefined ||
+      options.taskContext.videoTask.id !== options.strategyProposal.videoTaskId)
+  ) {
+    throw new Error("Strategy proposal scope does not match the server-resolved task context.");
+  }
+  if (options.strategyProposal !== undefined && options.strategyService !== undefined) {
+    throw new Error("Strategy proposal and legacy strategy service cannot both be registered.");
+  }
+  if (
     options.taskAssetReader !== undefined &&
     (options.taskContext === undefined ||
       options.taskContext.videoTask.id !== options.taskAssetReader.videoTaskId ||
@@ -109,7 +122,11 @@ export function createAdvertisingAgent(options: CreateAdvertisingAgentOptions) {
     ...vehicleTools,
     ...(options.taskAssetReader === undefined ? [] : createTaskAssetTools(options.taskAssetReader)),
     ...(options.stageSuggestionReader === undefined ? [] : createStageSuggestionTools(options.stageSuggestionReader)),
-    ...(options.strategyService === undefined ? [] : createStrategyTools(options.strategyService)),
+    ...(options.strategyService !== undefined
+      ? createStrategyTools(options.strategyService)
+      : options.strategyProposal === undefined
+        ? []
+        : createStrategyProposalTools(options.strategyProposal)),
   ];
 
   const audit = async (event: Omit<AgentAuditEvent, "occurredAt" | "actorId" | "tenantId" | "projectId">) => {
