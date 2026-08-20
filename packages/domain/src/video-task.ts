@@ -139,7 +139,7 @@ export function createVideoTask(
   const timestamp = context.occurredAt;
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: context.taskId,
       tenantId: context.tenantId,
@@ -222,7 +222,7 @@ export function assignVideoTaskOwner(
   };
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: request.targetOwnerAccountId,

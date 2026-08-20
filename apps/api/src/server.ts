@@ -22,7 +22,10 @@ import {
   type AgentIdentityResolver,
   type AgentTaskContextResolver,
 } from "./agent-routes.ts";
-import { BatchProjectAssetPoolStoreAdapter, LocalBatchProjectStore } from "./batch-project-store.ts";
+import {
+  BatchProjectAssetPoolStoreAdapter,
+  LocalBatchProjectStore,
+} from "./batch-project-store.ts";
 import {
   createBusinessAgentRuntime,
   isMigrationSafeAgentRuntime,
@@ -451,11 +454,21 @@ export function createApiServer(
     : new ProjectAssetRuntime(
         companyAssetProvider,
         assetPoolStore!,
-        videoTaskStore!,
-        undefined,
         undefined,
         temporaryAssetStore!,
       );
+  const activeVideoTaskStages = videoTaskStages ?? (
+    adminStore === undefined
+      ? undefined
+      : new VideoTaskStageRuntime(
+          adminStore,
+          batchProjectStore!,
+          videoTaskStore!,
+          undefined,
+          undefined,
+          localProjectAssets,
+        )
+  );
   const activeAssetMatching = assetMatching ?? (adminStore === undefined ? undefined : new AssetMatchingRuntime(
     adminStore,
     batchProjectStore!,
@@ -463,6 +476,7 @@ export function createApiServer(
     companyAssetProvider,
     localProjectAssets!,
     localTemporaryAssets!,
+    activeVideoTaskStages!,
   ));
   const activeAgentActionCommands = agentActionCommands ?? (
     adminStore === undefined
@@ -473,16 +487,6 @@ export function createApiServer(
           videoTaskStore!,
           undefined,
           undefined,
-          temporaryAssetStore!,
-        )
-  );
-  const activeVideoTaskStages = videoTaskStages ?? (
-    adminStore === undefined
-      ? undefined
-      : new VideoTaskStageRuntime(
-          adminStore,
-          batchProjectStore!,
-          videoTaskStore!,
         )
   );
   const workspaceTaskContext = legacyWritesDisabled && adminStore !== undefined

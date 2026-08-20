@@ -4,7 +4,6 @@ import test from "node:test";
 import {
   TemporaryAssetError,
   WorkspaceAccessDeniedError,
-  type VideoTaskProductionRecord,
 } from "@firefly/domain";
 import type { BatchProject, ProjectAssetPool, WorkspaceAccessGrant } from "@firefly/schemas";
 import { MockCompanyAssetProvider } from "@firefly/tools";
@@ -15,7 +14,6 @@ import type { ProjectAssetPoolStore } from "../src/project-asset-pool-store.ts";
 import { ProjectAssetRuntime, ProjectAssetRuntimeError } from "../src/project-asset-runtime.ts";
 import { TemporaryAssetRuntime } from "../src/temporary-asset-runtime.ts";
 import { LocalTemporaryAssetStore } from "../src/temporary-asset-store.ts";
-import { LocalVideoTaskProductionStore } from "../src/video-task-store.ts";
 
 const project: BatchProject = {
   id: "project_launch",
@@ -26,7 +24,7 @@ const project: BatchProject = {
   name: "萤火 E5 9:16 上市",
   batchName: "上市",
   aspectRatio: "9:16",
-  visualStylePresetId: "style_default",
+  visualStylePresetId: "asset_style_firefly_clean",
   assetPoolId: "pool_project_launch",
   status: "active",
   revision: 1,
@@ -72,6 +70,13 @@ function pool(): ProjectAssetPool {
         sourceProvider: "mock_company_assets",
         vehicleId: project.vehicleId,
       },
+      {
+        assetId: project.visualStylePresetId,
+        version: 4,
+        category: "visual_style",
+        source: "company_catalog",
+        sourceProvider: "mock_company_assets",
+      },
     ],
     createdAt: "2026-08-19T00:00:00.000Z",
     createdBy: session.actorAccountId,
@@ -80,52 +85,12 @@ function pool(): ProjectAssetPool {
   };
 }
 
-function task(videoTaskId: string): VideoTaskProductionRecord {
-  return {
-    schemaVersion: 6,
-    videoTask: {
-      id: videoTaskId,
-      tenantId: project.tenantId,
-      batchProjectId: project.id,
-      name: videoTaskId,
-      ownerAccountId: session.actorAccountId,
-      status: "active",
-      currentStage: "asset_matching",
-      stageStatus: "in_progress",
-      revision: 1,
-      vehicleSnapshotId: "vehicle_snapshot_e5_v1",
-      audience: "城市家庭",
-      theme: "通勤",
-      durationSeconds: 30,
-      platformTags: ["douyin"],
-      createdAt: "2026-08-19T00:00:00.000Z",
-      createdBy: session.actorAccountId,
-      updatedAt: "2026-08-19T00:00:00.000Z",
-      updatedBy: session.actorAccountId,
-    },
-    stageArtifactVersions: [],
-    stageConfirmations: [],
-    activeStageArtifactVersionIds: {},
-    stageRollbacks: [],
-    stageArtifactInvalidations: [],
-    ownershipTransfers: [],
-    taskVehicleSnapshots: [],
-    taskAssetSnapshots: [],
-    strategyDrafts: [],
-    stageConfirmationRequests: [],
-    commandReceipts: [],
-    stageMutationReceipts: [],
-  };
-}
-
 function fixture() {
   const temporaryStore = new LocalTemporaryAssetStore(".data/test-temporary-runtime", false);
   const poolStore = new LocalProjectAssetPoolStore(".data/test-temporary-runtime-pools", false);
-  const taskStore = new LocalVideoTaskProductionStore(".data/test-temporary-runtime-tasks", false);
   const coordinator = new LocalProjectAssetCoordinator();
   let currentTime = "2026-08-19T12:00:00.000Z";
   let temporarySequence = 0;
-  let snapshotSequence = 0;
   const temporaryRuntime = new TemporaryAssetRuntime(
     temporaryStore,
     poolStore,
@@ -136,16 +101,13 @@ function fixture() {
   const projectRuntime = new ProjectAssetRuntime(
     new MockCompanyAssetProvider(),
     poolStore,
-    taskStore,
     () => currentTime,
-    () => `snapshot_${++snapshotSequence}`,
     temporaryStore,
     coordinator,
   );
   return {
     temporaryStore,
     poolStore,
-    taskStore,
     temporaryRuntime,
     projectRuntime,
     setTime(value: string) {
@@ -170,7 +132,7 @@ const declaration = {
   rightsConfirmed: true,
 };
 
-test("a valid inspected upload enters the project pool and a task locks its exact reference", async () => {
+test("a valid inspected upload enters the project pool and coordinated selection resolves it exactly", async () => {
   const state = fixture();
   await state.poolStore.transact(project.id, () => pool());
   const declarationWithForgedFileFacts = {
@@ -208,7 +170,7 @@ test("a valid inspected upload enters the project pool and a task locks its exac
     session,
   );
   assert.equal(updatedPool.revision, 2);
-  assert.deepEqual(updatedPool.assets[1], {
+  assert.deepEqual(updatedPool.assets[2], {
     assetId: registered.id,
     version: 1,
     category: "scene",
@@ -217,15 +179,15 @@ test("a valid inspected upload enters the project pool and a task locks its exac
     checksumSha256: inspection.checksumSha256,
   });
 
-  await state.taskStore.save(task("task_local_asset"));
-  const locked = await state.projectRuntime.lockTaskSnapshot(
-    "task_local_asset",
-    1,
+  const selected = await state.projectRuntime.withTaskAssetSelection(
     project,
+    2,
+    [updatedPool.assets[2]!],
     session,
+    (resolveSelection) => resolveSelection(),
   );
-  assert.equal(locked.taskAssetSnapshots[0]?.assets[1]?.source, "local_upload");
-  assert.equal(locked.taskAssetSnapshots[0]?.assets[1]?.assetId, registered.id);
+  assert.equal(selected.assets[2]?.source, "local_upload");
+  assert.equal(selected.assets[2]?.assetId, registered.id);
 });
 
 test("unconfirmed rights stay in review until a new explicit declaration is validated", async () => {
@@ -332,10 +294,10 @@ test("a pool save failure keeps the validated temporary asset available for retr
   assert.equal(persisted?.validationStatus, "valid");
   assert.equal(persisted?.revision, 2);
   assert.equal(originalPool.revision, 1);
-  assert.equal(originalPool.assets.length, 1);
+  assert.equal(originalPool.assets.length, 2);
 });
 
-test("expired local metadata blocks task snapshot locking without partial task writes", async () => {
+test("expired local metadata blocks coordinated task selection", async () => {
   const state = fixture();
   await state.poolStore.transact(project.id, () => pool());
   const registered = await state.temporaryRuntime.registerTemporaryAsset(
@@ -346,17 +308,18 @@ test("expired local metadata blocks task snapshot locking without partial task w
   );
   await state.temporaryRuntime.validateTemporaryAsset(project, registered.id, 1, session);
   await state.temporaryRuntime.addToProjectPool(project, registered.id, 2, 1, session);
-  await state.taskStore.save(task("task_expired_asset"));
   state.setTime("2026-08-19T13:00:00.000Z");
 
   await assert.rejects(
-    state.projectRuntime.lockTaskSnapshot("task_expired_asset", 1, project, session),
+    state.projectRuntime.withTaskAssetSelection(
+      project,
+      2,
+      [(await state.poolStore.load(project.id))!.assets[2]!],
+      session,
+      (resolveSelection) => resolveSelection(),
+    ),
     (error: unknown) =>
       error instanceof ProjectAssetRuntimeError &&
       error.code === "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE",
   );
-  const unchanged = await state.taskStore.load("task_expired_asset");
-  assert.equal(unchanged?.videoTask.revision, 1);
-  assert.equal(unchanged?.videoTask.assetSnapshotId, undefined);
-  assert.deepEqual(unchanged?.taskAssetSnapshots, []);
 });

@@ -94,6 +94,16 @@ export function validateBody<T>(schema: TSchema, body: Record<string, unknown>):
 
 export function errorStatus(error: Error): number {
   if (error instanceof BusinessRuntimeError) return error.statusCode;
+  if (error instanceof ProjectAssetRuntimeError) {
+    switch (error.code) {
+      case "AIC-ASSET-POOL-NOT-FOUND":
+        return 404;
+      case "AIC-ASSET-SELECTION-INVALID":
+        return 400;
+      default:
+        return 409;
+    }
+  }
   if (error instanceof LocalAgentRunError) return error.statusCode;
   if (error instanceof WorkspaceAccessDeniedError) return 403;
   if (error instanceof CompanyAssetCatalogAccessError) return 403;

@@ -13,6 +13,13 @@ export function selectionWithManualPriority(recommendations, manualSelection) {
     : new Set(manualSelection);
 }
 
+function createConfirmationRequestId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return "asset_confirmation_" + globalThis.crypto.randomUUID().replaceAll("-", "");
+  }
+  return "asset_confirmation_" + Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
 function iconUse(symbol) {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.classList.add("icon");
@@ -50,6 +57,7 @@ export function createAssetMatchingPanel(options) {
   let view = null;
   let category = "all";
   let manualSelection = null;
+  let confirmationRequestId = null;
   let busy = false;
   let requestSequence = 0;
 
@@ -84,7 +92,7 @@ export function createAssetMatchingPanel(options) {
           tags: ["临时素材"],
           category: item.category,
           recommended: item.recommended,
-          replacementAllowed: item.category !== "vehicle",
+          replacementAllowed: item.category === "person" || item.category === "scene",
           source: "temporary",
         };
       });
@@ -178,11 +186,11 @@ export function createAssetMatchingPanel(options) {
   function render() {
     const available = Boolean(view);
     elements.uploadOpen.disabled = busy || !available;
-    elements.confirm.disabled = busy || !view?.matchingReady || view?.matchingLocked ||
+    elements.confirm.disabled = busy || !view?.confirmationReady || view?.matchingLocked ||
       selectedReferences().length === 0;
     elements.gate.textContent = view?.gateMessage || (taskId ? "正在读取素材" : "请选择视频任务");
     elements.notice.className = "asset-matching-notice " +
-      (view?.matchingLocked ? "locked" : view?.matchingReady ? "ready" : "neutral");
+      (view?.matchingLocked ? "locked" : view?.confirmationReady ? "ready" : "neutral");
     elements.notice.querySelector("span").textContent = elements.gate.textContent;
     elements.count.textContent = selectedReferences().length + " 项已选";
     elements.tabs.forEach(function (tab) {
@@ -223,15 +231,21 @@ export function createAssetMatchingPanel(options) {
   }
 
   async function confirmSelection() {
-    if (!view?.matchingReady || view.matchingLocked || busy) return;
+    if (!view?.confirmationReady || view.matchingLocked || busy) return;
     busy = true;
     setError("");
     render();
     try {
+      confirmationRequestId ||= createConfirmationRequestId();
       view = await options.api.lockAssetSelection(projectId, taskId, {
+        requestId: confirmationRequestId,
         expectedTaskRevision: view.videoTask.revision,
-        selectedAssets: selectedReferences(),
+        expectedProjectAssetPoolRevision: view.poolRevision,
+        selectedAssets: selectedReferences().filter(function (reference) {
+          return reference.category === "person" || reference.category === "scene";
+        }),
       });
+      confirmationRequestId = null;
       manualSelection = new Set(view.selectedAssets.map(assetReferenceIdentity));
       options.onTaskUpdated?.(view.videoTask);
     } catch (error) {
@@ -324,6 +338,7 @@ export function createAssetMatchingPanel(options) {
       taskId = nextTaskId;
       if (nextKey === contextKey) return;
       contextKey = nextKey;
+      confirmationRequestId = null;
       void load();
     },
     refresh: load,

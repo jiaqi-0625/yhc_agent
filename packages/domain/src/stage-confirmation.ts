@@ -19,7 +19,7 @@ import type {
 import { assertRevision, nextVideoTaskWorkflowState, videoTaskStageOrder } from "./workflow.ts";
 
 export interface VideoTaskProductionRecord {
-  schemaVersion: 6;
+  schemaVersion: 7;
   videoTask: VideoTask;
   stageArtifactVersions: StageArtifactVersion[];
   stageConfirmations: StageConfirmation[];
@@ -89,39 +89,38 @@ export function deriveStageConfirmationDependencies(
 ): StageArtifactDependency[] {
   const { videoTask } = record;
   const vehicleSnapshotId = videoTask.vehicleSnapshotId;
-  const assetSnapshotId = videoTask.assetSnapshotId;
   const vehicleSnapshot = record.taskVehicleSnapshots.find(
     (snapshot) =>
       snapshot.id === vehicleSnapshotId && snapshot.projectId === videoTask.batchProjectId,
   );
-  const assetSnapshot = record.taskAssetSnapshots.find(
-    (snapshot) =>
-      snapshot.id === assetSnapshotId &&
-      snapshot.tenantId === videoTask.tenantId &&
-      snapshot.batchProjectId === videoTask.batchProjectId &&
-      snapshot.videoTaskId === videoTask.id &&
-      snapshot.vehicleSnapshotId === vehicleSnapshotId,
-  );
-  const requiresAssetSnapshot = videoTaskStageOrder.indexOf(stage) >=
-    videoTaskStageOrder.indexOf("asset_matching");
   if (vehicleSnapshotId === undefined || vehicleSnapshot === undefined) {
     throw new StageConfirmationDeniedError(
       "A stage confirmation requires the task's exact locked vehicle snapshot.",
     );
   }
-  if (requiresAssetSnapshot && (assetSnapshotId === undefined || assetSnapshot === undefined)) {
-    throw new StageConfirmationDeniedError(
-      "Asset matching and downstream confirmation require the task's exact locked asset snapshot.",
-    );
-  }
 
   const dependencies: StageArtifactDependency[] = [
     { kind: "vehicle_snapshot", vehicleSnapshotId },
-    ...(requiresAssetSnapshot && assetSnapshotId !== undefined
-      ? [{ kind: "asset_snapshot" as const, assetSnapshotId }]
-      : []),
   ];
   if (stage === "strategy") return dependencies;
+
+  if (stage !== "script") {
+    const assetSnapshotId = videoTask.assetSnapshotId;
+    const assetSnapshot = record.taskAssetSnapshots.find(
+      (snapshot) =>
+        snapshot.id === assetSnapshotId &&
+        snapshot.tenantId === videoTask.tenantId &&
+        snapshot.batchProjectId === videoTask.batchProjectId &&
+        snapshot.videoTaskId === videoTask.id &&
+        snapshot.vehicleSnapshotId === vehicleSnapshotId,
+    );
+    if (assetSnapshotId === undefined || assetSnapshot === undefined) {
+      throw new StageConfirmationDeniedError(
+        "Asset matching and later confirmations require the task's exact locked asset snapshot.",
+      );
+    }
+    dependencies.push({ kind: "asset_snapshot", assetSnapshotId });
+  }
 
   const stageIndex = videoTaskStageOrder.indexOf(stage);
   const upstreamStage = videoTaskStageOrder[stageIndex - 1];
@@ -237,7 +236,7 @@ export function confirmVideoTaskStage(
   );
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(record.videoTask),
       status: workflow.taskStatus,

@@ -48,10 +48,10 @@ const creationContext = {
   taskId: "task_family",
 };
 
-test("createVideoTask derives a clean schema-v6 aggregate from active project and server scope", () => {
+test("createVideoTask derives a clean schema-v7 aggregate from active project and server scope", () => {
   const record = createVideoTask(project, creationInput, creationContext);
 
-  assert.equal(record.schemaVersion, 6);
+  assert.equal(record.schemaVersion, 7);
   assert.deepEqual(record.videoTask, {
     id: "task_family",
     tenantId: "tenant_firefly",

@@ -198,11 +198,11 @@ test("migration deterministically preserves task, snapshot, strategy locks, and 
   const second = strategy(workId, 2, { status: "approved" });
   const rejected = approval(workId, first.id, "rejected", 1);
   const approved = approval(workId, second.id, "approved", 2);
-  const source = record(workId, "strategy_approved", [first, second], [rejected, approved], {
+  const source = record(workId, "script_approved", [first, second], [rejected, approved], {
     work: {
       id: workId,
       projectId: "project_local",
-      status: "strategy_approved",
+      status: "script_approved",
       revision: 17,
       vehicleSnapshotId: snapshotId,
       createdAt: "2026-08-17T01:00:00.000Z",
@@ -259,6 +259,9 @@ test("migration deterministically preserves task, snapshot, strategy locks, and 
   const strategyArtifact = task.stageArtifactVersions.find(
     (artifact) => artifact.stage === "strategy",
   );
+  const scriptArtifact = task.stageArtifactVersions.find(
+    (artifact) => artifact.stage === "script",
+  );
   const assetArtifact = task.stageArtifactVersions.find(
     (artifact) => artifact.stage === "asset_matching",
   );
@@ -273,9 +276,31 @@ test("migration deterministically preserves task, snapshot, strategy locks, and 
   );
   assert.equal(strategyArtifact?.createdBy, "reviewer_local");
   assert.equal(strategyArtifact?.createdAt, approved.occurredAt);
+  assert.deepEqual(strategyArtifact?.dependencies, [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: snapshotId },
+  ]);
+  assert.equal(scriptArtifact?.provenance.kind, "legacy_inferred");
+  assert.deepEqual(scriptArtifact?.dependencies, [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: snapshotId },
+    {
+      kind: "stage_artifact",
+      stage: "strategy",
+      artifactVersionId: strategyArtifact?.id,
+    },
+  ]);
   assert.equal(assetArtifact?.provenance.kind, "legacy_inferred");
   assert.equal(assetArtifact?.createdAt, "2026-08-19T12:00:00.000Z");
+  assert.deepEqual(assetArtifact?.dependencies, [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: snapshotId },
+    { kind: "asset_snapshot", assetSnapshotId: task.videoTask.assetSnapshotId },
+    {
+      kind: "stage_artifact",
+      stage: "script",
+      artifactVersionId: scriptArtifact?.id,
+    },
+  ]);
   assert.equal(task.activeStageArtifactVersionIds.strategy, strategyArtifact?.id);
+  assert.equal(task.activeStageArtifactVersionIds.script, scriptArtifact?.id);
   assert.equal(task.activeStageArtifactVersionIds.asset_matching, assetArtifact?.id);
   assert.deepEqual(task.stageConfirmations, []);
   assert.deepEqual(task.stageConfirmationRequests, []);
@@ -288,7 +313,7 @@ test("migration deterministically preserves task, snapshot, strategy locks, and 
     canonicalizedVehicleSnapshotTimestampCount: 0,
     strategyVersionCount: 2,
     approvalCount: 2,
-    inferredArtifactCount: 1,
+    inferredArtifactCount: 2,
     sourceFingerprintSha256: migrated.summary.sourceFingerprintSha256,
     configurationFingerprintSha256: migrated.summary.configurationFingerprintSha256,
     migrationFingerprintSha256: migrated.summary.migrationFingerprintSha256,
@@ -298,6 +323,32 @@ test("migration deterministically preserves task, snapshot, strategy locks, and 
     migrateLegacyWorkRecords([structuredClone(source)], config()),
     migrated,
   );
+});
+
+test("strategy-approved legacy work waits in script without locking or inferring task assets", () => {
+  const workId = "work_strategy_approved_waiting_script";
+  const sourceStrategy = strategy(workId, 1, { status: "approved" });
+  const migrated = migrateLegacyWorkRecords(
+    [record(
+      workId,
+      "strategy_approved",
+      [sourceStrategy],
+      [approval(workId, sourceStrategy.id, "approved", 1)],
+    )],
+    config(),
+  );
+  const task = migrated.taskRecords[0]!;
+
+  assert.equal(task.videoTask.currentStage, "script");
+  assert.equal(task.videoTask.stageStatus, "in_progress");
+  assert.equal(task.videoTask.assetSnapshotId, undefined);
+  assert.deepEqual(task.taskAssetSnapshots, []);
+  assert.deepEqual(task.stageArtifactVersions.map((artifact) => artifact.stage), ["strategy"]);
+  assert.deepEqual(task.stageArtifactVersions[0]?.dependencies, [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: snapshotId },
+  ]);
+  assert.equal(task.activeStageArtifactVersionIds.script, undefined);
+  assert.equal(task.activeStageArtifactVersionIds.asset_matching, undefined);
 });
 
 test("input order cannot change IDs, hashes, ordering, or the migration fingerprint", () => {
@@ -425,16 +476,30 @@ test("all v1 statuses map explicitly and inferred artifacts form a direct upstre
       assert.equal(task.videoTask.stageStatus, "awaiting_confirmation");
       assert.equal(task.activeStageArtifactVersionIds.storyboard, undefined);
       assert.ok(task.activeStageArtifactVersionIds.script);
+      assert.ok(task.activeStageArtifactVersionIds.asset_matching);
       assert.deepEqual(task.stageConfirmations, []);
     }
   }
+  const strategyApproved = migrated.taskRecords.find(
+    (task) => task.videoTask.id === `work_status_${statuses.indexOf("strategy_approved").toString().padStart(2, "0")}`,
+  );
+  assert.equal(strategyApproved?.videoTask.currentStage, "script");
+  assert.equal(strategyApproved?.videoTask.assetSnapshotId, undefined);
+  assert.deepEqual(strategyApproved?.taskAssetSnapshots, []);
+
+  const scriptApproved = migrated.taskRecords.find(
+    (task) => task.videoTask.id === `work_status_${statuses.indexOf("script_approved").toString().padStart(2, "0")}`,
+  );
+  assert.equal(scriptApproved?.videoTask.currentStage, "asset_matching");
+  assert.ok(scriptApproved?.videoTask.assetSnapshotId);
+  assert.equal(scriptApproved?.taskAssetSnapshots.length, 1);
   const exported = migrated.taskRecords.find(
     (task) => task.videoTask.id === `work_status_${(statuses.length - 1).toString().padStart(2, "0")}`,
   );
   assert.deepEqual(Object.keys(exported?.activeStageArtifactVersionIds ?? {}), [
     "strategy",
-    "asset_matching",
     "script",
+    "asset_matching",
     "storyboard",
     "video_preview",
     "delivery",
@@ -462,7 +527,6 @@ test("explicit task defaults are used only when v1 has no strategy values", () =
     stageStatus: "in_progress",
     revision: 1,
     vehicleSnapshotId: snapshotId,
-    assetSnapshotId: migrated.taskRecords[0]?.videoTask.assetSnapshotId,
     audience: "显式默认受众",
     theme: "显式默认主题",
     durationSeconds: 45,
@@ -474,7 +538,7 @@ test("explicit task defaults are used only when v1 has no strategy values", () =
   });
 });
 
-test("mapped legacy drafts and provenance pass the strict V6 aggregate Store", async () => {
+test("mapped legacy drafts and provenance pass the strict V7 aggregate Store", async () => {
   const workId = "work_store_round_trip";
   const waitingWorkId = "work_store_waiting_confirmation";
   const legacyStrategy = strategy(workId, 1, { status: "approved" });

@@ -37,7 +37,7 @@ const videoTask = {
   name: "阶段 API 验收任务",
   ownerAccountId: "account_creator",
   status: "active",
-  currentStage: "asset_matching",
+  currentStage: "script",
   stageStatus: "in_progress",
   revision: 8,
   vehicleSnapshotId: "vehicle_snapshot_1",
@@ -67,7 +67,6 @@ const artifactVersion = {
   },
   dependencies: [
     { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-    { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
   ],
   provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_v2" },
   createdAt: occurredAt,
@@ -222,6 +221,30 @@ test("stage mutation requests accept only client-owned business fields", () => {
     expectedTaskRevision: 7,
     comment: "确认服务端派生的策略产物引用。",
   } satisfies ConfirmVideoTaskStageRequest;
+  const assetMatchingRequest = {
+    requestId: "request_confirm_asset_matching_v1",
+    expectedTaskRevision: 9,
+    assetSelection: {
+      expectedProjectAssetPoolRevision: 3,
+      selectedAssets: [
+        {
+          assetId: "asset_person_driver",
+          version: 2,
+          source: "company_catalog",
+          sourceProvider: "mock_company_assets",
+          category: "person",
+        },
+        {
+          assetId: "asset_scene_city",
+          version: 1,
+          source: "company_catalog",
+          sourceProvider: "mock_company_assets",
+          category: "scene",
+        },
+      ],
+    },
+    comment: "确认精确人物与场景版本。",
+  } satisfies ConfirmVideoTaskStageRequest;
   const rollbackRequest = {
     requestId: "request_rollback_strategy_v1",
     expectedTaskRevision: 7,
@@ -231,6 +254,7 @@ test("stage mutation requests accept only client-owned business fields", () => {
 
   assert.equal(Value.Check(ConfirmVideoTaskStageRequestSchema, confirmRequest), true);
   assert.equal(Value.Check(ConfirmVideoTaskStageRequestSchema, derivedStrategyRequest), true);
+  assert.equal(Value.Check(ConfirmVideoTaskStageRequestSchema, assetMatchingRequest), true);
   assert.equal(Value.Check(RollbackVideoTaskStageRequestSchema, rollbackRequest), true);
 
   for (const forged of [

@@ -16,7 +16,7 @@ const occurredAt = "2026-08-18T09:30:00.000Z";
 
 function record(stage: VideoTaskStage = "strategy"): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: "task_ws_102",
       tenantId: "tenant_firefly",
@@ -145,7 +145,9 @@ function recordWithConfirmedDirectUpstream(
     },
     dependencies: [
       { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-      { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
+      ...(upstreamStage === "strategy" || upstreamStage === "script"
+        ? []
+        : [{ kind: "asset_snapshot" as const, assetSnapshotId: "asset_snapshot_1" }]),
     ],
     provenance: { kind: "human_confirmation", confirmationId },
     createdAt: "2026-08-18T09:00:00.000Z",
@@ -242,26 +244,38 @@ test("all six stages use the same human confirmation gate and delivery completes
 });
 
 test("derived confirmation dependencies have a fixed snapshot-first order", () => {
-  assert.deepEqual(deriveStageConfirmationDependencies(record("strategy"), "strategy"), [
+  const strategy = record("strategy");
+  delete strategy.videoTask.assetSnapshotId;
+  strategy.taskAssetSnapshots = [];
+  assert.deepEqual(deriveStageConfirmationDependencies(strategy, "strategy"), [
     { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
   ]);
 
-  const nonStrategyStages: Exclude<VideoTaskStage, "strategy">[] = [
-    "script",
+  const script = recordWithConfirmedDirectUpstream("script");
+  delete script.videoTask.assetSnapshotId;
+  script.taskAssetSnapshots = [];
+  assert.deepEqual(deriveStageConfirmationDependencies(script, "script"), [
+    { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
+    {
+      kind: "stage_artifact",
+      stage: "strategy",
+      artifactVersionId: "strategy_confirmed_v1",
+    },
+  ]);
+
+  const snapshotBackedStages: Exclude<VideoTaskStage, "strategy" | "script">[] = [
     "asset_matching",
     "storyboard",
     "video_preview",
     "delivery",
   ];
-  for (const stage of nonStrategyStages) {
+  for (const stage of snapshotBackedStages) {
     const source = recordWithConfirmedDirectUpstream(stage);
     const upstreamArtifact = source.stageArtifactVersions[0];
     assert.ok(upstreamArtifact);
     assert.deepEqual(deriveStageConfirmationDependencies(source, stage), [
       { kind: "vehicle_snapshot", vehicleSnapshotId: "vehicle_snapshot_1" },
-      ...(stage === "script"
-        ? []
-        : [{ kind: "asset_snapshot" as const, assetSnapshotId: "asset_snapshot_1" }]),
+      { kind: "asset_snapshot", assetSnapshotId: "asset_snapshot_1" },
       {
         kind: "stage_artifact",
         stage: upstreamArtifact.stage,
@@ -271,7 +285,7 @@ test("derived confirmation dependencies have a fixed snapshot-first order", () =
   }
 });
 
-test("derivation rejects missing locked vehicle or asset snapshots", () => {
+test("derivation requires the vehicle for every stage but the asset only from asset matching onward", () => {
   const missingVehicle = record();
   missingVehicle.taskVehicleSnapshots = [];
   assert.throws(
@@ -280,16 +294,24 @@ test("derivation rejects missing locked vehicle or asset snapshots", () => {
   );
 
   const missingAsset = recordWithConfirmedDirectUpstream("asset_matching");
+  delete missingAsset.videoTask.assetSnapshotId;
   missingAsset.taskAssetSnapshots = [];
   assert.throws(
     () => deriveStageConfirmationDependencies(missingAsset, "asset_matching"),
     StageConfirmationDeniedError,
   );
+
+  const scriptWithoutAsset = recordWithConfirmedDirectUpstream("script");
+  delete scriptWithoutAsset.videoTask.assetSnapshotId;
+  scriptWithoutAsset.taskAssetSnapshots = [];
+  assert.doesNotThrow(
+    () => deriveStageConfirmationDependencies(scriptWithoutAsset, "script"),
+  );
 });
 
 test("non-strategy derivation requires the current valid direct upstream", () => {
   assert.throws(
-    () => deriveStageConfirmationDependencies(record("asset_matching"), "asset_matching"),
+    () => deriveStageConfirmationDependencies(record("script"), "script"),
     StageConfirmationDeniedError,
   );
 

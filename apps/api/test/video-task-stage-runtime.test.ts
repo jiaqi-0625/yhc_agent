@@ -9,21 +9,32 @@ import {
 } from "@firefly/domain";
 import type {
   AgentActionCard,
+  AssetReference,
   BatchProject,
   ProjectAssetPool,
   StageArtifactDependency,
   StageArtifactVersion,
   StageConfirmation,
+  TaskAssetSnapshot,
+  TemporaryAsset,
 } from "@firefly/schemas";
+import { MockCompanyAssetProvider } from "@firefly/tools";
 
 import { AgentActionCommandRuntime } from "../src/agent-action-command-runtime.ts";
+import { AssetMatchingRuntime } from "../src/asset-matching-runtime.ts";
 import {
+  BatchProjectAssetPoolStoreAdapter,
   LocalBatchProjectStore,
   type BatchProjectAggregate,
   type BatchProjectCreateMetadata,
   type BatchProjectStore,
 } from "../src/batch-project-store.ts";
 import { BusinessRuntimeError } from "../src/business-runtime.ts";
+import {
+  LocalProjectAssetCoordinator,
+  type ProjectAssetCoordinator,
+} from "../src/project-asset-coordinator.ts";
+import { ProjectAssetRuntime, ProjectAssetRuntimeError } from "../src/project-asset-runtime.ts";
 import { VideoTaskRuntime } from "../src/video-task-runtime.ts";
 import { VideoTaskStageRuntime } from "../src/video-task-stage-runtime.ts";
 import {
@@ -35,7 +46,10 @@ import {
   DEFAULT_ADMIN_VEHICLES,
   DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
 } from "../src/workspace-admin-runtime.ts";
-import { LocalWorkspaceAdminStore } from "../src/workspace-admin-store.ts";
+import {
+  LocalWorkspaceAdminStore,
+  type WorkspaceAdminStore,
+} from "../src/workspace-admin-store.ts";
 import {
   DEVELOPMENT_ACCESS_GRANTS,
   DEVELOPMENT_ACCOUNTS,
@@ -69,14 +83,37 @@ const assetPool: ProjectAssetPool = {
   batchProjectId: project.id,
   vehicleId,
   revision: 1,
-  assets: [{
-    assetId: "asset_firefly_demo_e5_hero",
-    version: 1,
-    source: "company_catalog",
-    sourceProvider: "mock_company_assets",
-    category: "vehicle",
-    vehicleId,
-  }],
+  assets: [
+    {
+      assetId: "asset_firefly_demo_e5_hero",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "vehicle",
+      vehicleId,
+    },
+    {
+      assetId: "asset_style_firefly_demo_clean",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "visual_style",
+    },
+    {
+      assetId: "asset_person_young_driver",
+      version: 2,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "person",
+    },
+    {
+      assetId: "asset_scene_city_night",
+      version: 1,
+      source: "company_catalog",
+      sourceProvider: "mock_company_assets",
+      category: "scene",
+    },
+  ],
   createdAt: project.createdAt,
   createdBy: project.createdBy,
   updatedAt: project.updatedAt,
@@ -215,18 +252,25 @@ async function fixture() {
     now,
     (kind) => `${kind}_${++sequence}`,
   );
+  const projectAssets = new ProjectAssetRuntime(
+    new MockCompanyAssetProvider(),
+    new BatchProjectAssetPoolStoreAdapter(projects),
+    now,
+  );
   const stages = new VideoTaskStageRuntime(
     administration,
     projects,
     tasks,
     now,
     (kind) => `${kind}_${++sequence}`,
+    projectAssets,
   );
   return {
     administration,
     commands,
     creator,
     projects,
+    projectAssets,
     stages,
     taskId: created.record.videoTask.id,
     tasks,
@@ -279,8 +323,68 @@ async function prepareStrategyApproval(value: Awaited<ReturnType<typeof fixture>
   }, value.creator);
 }
 
+async function prepareAssetMatchingApproval(value: Awaited<ReturnType<typeof fixture>>) {
+  await prepareStrategyApproval(value);
+  const strategy = await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_confirm_strategy_for_assets",
+    expectedTaskRevision: 3,
+  }, value.creator);
+  const scriptReady = await value.tasks.load(value.taskId);
+  assert.ok(scriptReady);
+  await value.tasks.save({
+    ...structuredClone(scriptReady),
+    videoTask: {
+      ...structuredClone(scriptReady.videoTask),
+      stageStatus: "awaiting_confirmation",
+    },
+  });
+  const script = await value.stages.confirmStage(project.id, value.taskId, "script", {
+    requestId: "request_confirm_script_for_assets",
+    expectedTaskRevision: 4,
+    artifact: {
+      artifactId: "script_draft_for_assets",
+      schemaName: "video_task_script_draft",
+      schemaVersion: 1,
+      contentHashSha256: "a".repeat(64),
+    },
+  }, value.creator);
+  return { strategy, script };
+}
+
+function selectedReusableAssets(): AssetReference[] {
+  return assetPool.assets
+    .filter((asset) => asset.category === "person" || asset.category === "scene")
+    .map((asset) => structuredClone(asset));
+}
+
 function hasBusinessCode(code: string): (error: unknown) => boolean {
   return (error) => error instanceof BusinessRuntimeError && error.code === code;
+}
+
+function deferredBarrier() {
+  let release!: () => void;
+  const promise = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { promise, release };
+}
+
+function completesWithin<T>(promise: Promise<T>, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error(`${label} did not complete within the bounded test timeout.`));
+    }, 2_000);
+    promise.then(
+      (value) => {
+        clearTimeout(timeout);
+        resolve(value);
+      },
+      (error: unknown) => {
+        clearTimeout(timeout);
+        reject(error);
+      },
+    );
+  });
 }
 
 test("generate, approval request, explicit confirmation, and stage reads form one audited chain", async () => {
@@ -349,6 +453,422 @@ test("generate, approval request, explicit confirmation, and stage reads form on
     await value.stages.getStageAudit(project.id, value.taskId, value.creator),
     { videoTask: confirmed.videoTask, rollbacks: [], invalidations: [] },
   );
+});
+
+test("asset matching confirmation atomically locks the exact server-composed snapshot once", async () => {
+  const value = await fixture();
+  const upstream = await prepareAssetMatchingApproval(value);
+  const editable = await value.tasks.load(value.taskId);
+  assert.equal(editable?.videoTask.currentStage, "asset_matching");
+  assert.equal(editable?.videoTask.stageStatus, "in_progress");
+  assert.equal(editable?.videoTask.revision, 5);
+  const input = {
+    requestId: "request_confirm_asset_matching",
+    expectedTaskRevision: 5,
+    assetSelection: {
+      expectedProjectAssetPoolRevision: 1,
+      selectedAssets: selectedReusableAssets(),
+    },
+    comment: "人工确认人物与场景选材。",
+  };
+
+  const confirmed = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    input,
+    value.creator,
+  );
+
+  assert.equal(confirmed.replayed, false);
+  assert.equal(confirmed.videoTask.revision, 6);
+  assert.equal(confirmed.videoTask.currentStage, "storyboard");
+  assert.equal(confirmed.videoTask.stageStatus, "in_progress");
+  assert.equal(confirmed.receipt.expectedTaskRevision, 5);
+  assert.equal(confirmed.receipt.resultingTaskRevision, 6);
+  assert.equal(confirmed.artifactVersion.content.schemaName, "task_asset_snapshot");
+  assert.match(confirmed.artifactVersion.content.contentHashSha256, /^[a-f0-9]{64}$/u);
+  assert.deepEqual(
+    confirmed.artifactVersion.dependencies.map((dependency) => dependency.kind),
+    ["vehicle_snapshot", "asset_snapshot", "stage_artifact"],
+  );
+  assert.deepEqual(confirmed.artifactVersion.dependencies.at(-1), {
+    kind: "stage_artifact",
+    stage: "script",
+    artifactVersionId: upstream.script.artifactVersion.id,
+  });
+
+  const persisted = await value.tasks.load(value.taskId);
+  assert.ok(persisted);
+  assert.equal(persisted.taskAssetSnapshots.length, 1);
+  assert.equal(persisted.stageArtifactVersions.length, 3);
+  assert.equal(persisted.stageConfirmations.length, 3);
+  assert.equal(persisted.stageMutationReceipts.length, 3);
+  const snapshot = persisted.taskAssetSnapshots[0]!;
+  assert.equal(persisted.videoTask.assetSnapshotId, snapshot.id);
+  assert.equal(confirmed.artifactVersion.content.artifactId, snapshot.id);
+  assert.equal(confirmed.artifactVersion.dependencies[1]?.kind, "asset_snapshot");
+  assert.deepEqual(
+    snapshot.assets.map(({ assetId, version, category }) => ({ assetId, version, category })),
+    [
+      { assetId: "asset_firefly_demo_e5_hero", version: 1, category: "vehicle" },
+      { assetId: "asset_style_firefly_demo_clean", version: 1, category: "visual_style" },
+      { assetId: "asset_person_young_driver", version: 2, category: "person" },
+      { assetId: "asset_scene_city_night", version: 1, category: "scene" },
+    ],
+  );
+
+  await value.projects.transactAssetPool(tenantId, project.id, (current) => ({
+    ...structuredClone(current),
+    revision: current.revision + 1,
+    updatedAt: "2026-08-19T16:45:00.000Z",
+  }));
+  const replay = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    input,
+    value.creator,
+  );
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.receipt, confirmed.receipt);
+  assert.deepEqual(await value.tasks.load(value.taskId), persisted);
+});
+
+test("a persisted awaiting asset selection remains confirmable through the canonical transaction", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+  const editable = await value.tasks.load(value.taskId);
+  assert.ok(editable);
+  await value.tasks.save({
+    ...structuredClone(editable),
+    videoTask: {
+      ...structuredClone(editable.videoTask),
+      stageStatus: "awaiting_confirmation",
+    },
+  });
+
+  const confirmed = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    {
+      requestId: "request_confirm_submitted_asset_matching",
+      expectedTaskRevision: 5,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 1,
+        selectedAssets: selectedReusableAssets(),
+      },
+    },
+    value.creator,
+  );
+
+  assert.equal(confirmed.videoTask.revision, 6);
+  assert.equal(confirmed.videoTask.currentStage, "storyboard");
+  assert.equal(confirmed.confirmation.stage, "asset_matching");
+  assert.equal(confirmed.receipt.resultingTaskRevision, 6);
+});
+
+test("an old-order active asset pointer stays historical and can be replaced after canonical script", async () => {
+  const value = await fixture();
+  const upstream = await prepareAssetMatchingApproval(value);
+  const current = await value.tasks.load(value.taskId);
+  assert.ok(current?.videoTask.vehicleSnapshotId);
+  const staleSnapshot: TaskAssetSnapshot = {
+    id: "task_asset_snapshot_old_order_target",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: value.taskId,
+    version: 1,
+    sourceProjectAssetPoolRevision: assetPool.revision,
+    vehicleSnapshotId: current.videoTask.vehicleSnapshotId,
+    assets: structuredClone(assetPool.assets),
+    createdAt: "2026-08-19T16:20:00.000Z",
+    createdBy: value.creator.actorAccountId,
+  };
+  const staleConfirmationId = "confirmation_old_order_asset_target";
+  const staleArtifact: StageArtifactVersion = {
+    id: "artifact_old_order_asset_target",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: value.taskId,
+    stage: "asset_matching",
+    version: 1,
+    content: {
+      artifactId: staleSnapshot.id,
+      schemaName: "task_asset_snapshot",
+      schemaVersion: 1,
+      contentHashSha256: "c".repeat(64),
+    },
+    dependencies: [
+      { kind: "vehicle_snapshot", vehicleSnapshotId: current.videoTask.vehicleSnapshotId },
+      { kind: "asset_snapshot", assetSnapshotId: staleSnapshot.id },
+      {
+        kind: "stage_artifact",
+        stage: "strategy",
+        artifactVersionId: upstream.strategy.artifactVersion.id,
+      },
+    ],
+    provenance: { kind: "human_confirmation", confirmationId: staleConfirmationId },
+    createdAt: "2026-08-19T16:20:00.000Z",
+    createdBy: value.creator.actorAccountId,
+  };
+  const staleConfirmation: StageConfirmation = {
+    id: staleConfirmationId,
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: value.taskId,
+    stage: "asset_matching",
+    artifactVersionId: staleArtifact.id,
+    decision: "confirmed",
+    source: "human_action",
+    expectedTaskRevision: 4,
+    actorAccountId: value.creator.actorAccountId,
+    occurredAt: staleArtifact.createdAt,
+  };
+  await value.tasks.save({
+    ...structuredClone(current),
+    videoTask: {
+      ...structuredClone(current.videoTask),
+      assetSnapshotId: staleSnapshot.id,
+    },
+    taskAssetSnapshots: [...structuredClone(current.taskAssetSnapshots), staleSnapshot],
+    stageArtifactVersions: [...structuredClone(current.stageArtifactVersions), staleArtifact],
+    stageConfirmations: [...structuredClone(current.stageConfirmations), staleConfirmation],
+    activeStageArtifactVersionIds: {
+      ...structuredClone(current.activeStageArtifactVersionIds),
+      asset_matching: staleArtifact.id,
+    },
+  });
+
+  const matching = new AssetMatchingRuntime(
+    value.administration,
+    value.projects,
+    value.tasks,
+    new MockCompanyAssetProvider(),
+    value.projectAssets,
+    { async listTemporaryAssets() { return []; } } as never,
+    value.stages,
+  );
+  const view = await matching.getView(project.id, value.taskId, value.creator);
+  assert.equal(view.matchingReady, true);
+  assert.equal(view.confirmationReady, true);
+  assert.equal(view.matchingLocked, false);
+  assert.equal(view.videoTask.assetSnapshotId, undefined);
+
+  const confirmed = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    {
+      requestId: "request_replace_old_order_asset_target",
+      expectedTaskRevision: 5,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: view.poolRevision,
+        selectedAssets: selectedReusableAssets(),
+      },
+    },
+    value.creator,
+  );
+  const persisted = await value.tasks.load(value.taskId);
+  assert.ok(persisted?.videoTask.assetSnapshotId);
+  assert.notEqual(persisted.videoTask.assetSnapshotId, staleSnapshot.id);
+  assert.equal(persisted.taskAssetSnapshots.length, 2);
+  assert.equal(persisted.activeStageArtifactVersionIds.asset_matching, confirmed.artifactVersion.id);
+  assert.equal(confirmed.videoTask.currentStage, "storyboard");
+});
+
+test("asset confirmation and Agent command share coordinator-before-admin lock order without deadlock", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+
+  const coordinatorAcquired = deferredBarrier();
+  const allowCoordinatorHolderToEnterAdmin = deferredBarrier();
+  const secondCoordinatorRequestStarted = deferredBarrier();
+  const innerCoordinator = new LocalProjectAssetCoordinator();
+  let coordinatorCallCount = 0;
+  const coordinator: ProjectAssetCoordinator = {
+    runExclusive(batchProjectId, operation) {
+      coordinatorCallCount += 1;
+      const callNumber = coordinatorCallCount;
+      if (callNumber === 2) secondCoordinatorRequestStarted.release();
+      return innerCoordinator.runExclusive(batchProjectId, async () => {
+        if (callNumber === 1) {
+          coordinatorAcquired.release();
+          await allowCoordinatorHolderToEnterAdmin.promise;
+        }
+        return operation();
+      });
+    },
+  };
+
+  const adminSnapshotEntered = deferredBarrier();
+  const allowAdminSnapshotToContinue = deferredBarrier();
+  let pauseNextAdminSnapshot = true;
+  const administration: WorkspaceAdminStore = {
+    load: (requestedTenantId) => value.administration.load(requestedTenantId),
+    listForAccount: (requestedTenantId, accountId) =>
+      value.administration.listForAccount(requestedTenantId, accountId),
+    transact: (requestedTenantId, update) =>
+      value.administration.transact(requestedTenantId, update),
+    withSnapshot: (requestedTenantId, inspect) =>
+      value.administration.withSnapshot(requestedTenantId, async (state) => {
+        if (pauseNextAdminSnapshot) {
+          pauseNextAdminSnapshot = false;
+          adminSnapshotEntered.release();
+          await allowAdminSnapshotToContinue.promise;
+        }
+        return inspect(state);
+      }),
+  };
+  const now = () => "2026-08-19T16:30:00.000Z";
+  let sequence = 0;
+  const createId = (kind: string) => `${kind}_lock_order_${++sequence}`;
+  const commands = new AgentActionCommandRuntime(
+    administration,
+    value.projects,
+    value.tasks,
+    now,
+    createId,
+    coordinator,
+  );
+  const projectAssets = new ProjectAssetRuntime(
+    new MockCompanyAssetProvider(),
+    new BatchProjectAssetPoolStoreAdapter(value.projects),
+    now,
+    undefined,
+    coordinator,
+  );
+  const stages = new VideoTaskStageRuntime(
+    administration,
+    value.projects,
+    value.tasks,
+    now,
+    createId,
+    projectAssets,
+  );
+  const confirmationInput = {
+    requestId: "request_asset_lock_order",
+    expectedTaskRevision: 5,
+    assetSelection: {
+      expectedProjectAssetPoolRevision: 1,
+      selectedAssets: selectedReusableAssets(),
+    },
+  };
+
+  const confirmationPromise = stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    confirmationInput,
+    value.creator,
+  );
+  await completesWithin(coordinatorAcquired.promise, "asset confirmation coordinator acquisition");
+
+  const commandPromise = commands.execute(project.id, value.taskId, {
+    requestId: "command_generate_strategy",
+    card: generateCard(value.taskId),
+  }, value.creator);
+  await completesWithin(
+    secondCoordinatorRequestStarted.promise,
+    "concurrent Agent command coordinator request",
+  );
+
+  allowCoordinatorHolderToEnterAdmin.release();
+  await completesWithin(adminSnapshotEntered.promise, "asset confirmation admin snapshot entry");
+  allowAdminSnapshotToContinue.release();
+
+  const [confirmation, commandReplay] = await completesWithin(
+    Promise.all([confirmationPromise, commandPromise]),
+    "asset confirmation and concurrent Agent command",
+  );
+  const confirmationReplay = await completesWithin(
+    stages.confirmStage(
+      project.id,
+      value.taskId,
+      "asset_matching",
+      confirmationInput,
+      value.creator,
+    ),
+    "third idempotent confirmation replay",
+  );
+
+  assert.equal(confirmation.replayed, false);
+  assert.equal(commandReplay.replayed, true);
+  assert.equal(confirmationReplay.replayed, true);
+  assert.deepEqual(confirmationReplay.receipt, confirmation.receipt);
+  const persisted = await value.tasks.load(value.taskId);
+  assert.ok(persisted);
+  assert.equal(persisted.taskAssetSnapshots.length, 1);
+  assert.equal(
+    persisted.stageConfirmations.filter((item) => item.stage === "asset_matching").length,
+    1,
+  );
+  assert.equal(
+    persisted.stageMutationReceipts.filter(
+      (item) => item.requestId === confirmationInput.requestId,
+    ).length,
+    1,
+  );
+});
+
+test("asset matching confirmation rejects stale selections and client-owned artifact input without mutation", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+  const before = await value.tasks.load(value.taskId);
+  assert.ok(before);
+
+  await assert.rejects(
+    value.stages.confirmStage(project.id, value.taskId, "asset_matching", {
+      requestId: "request_asset_with_client_artifact",
+      expectedTaskRevision: 5,
+      artifact: {
+        artifactId: "client_asset_selection",
+        schemaName: "client_asset_selection",
+        schemaVersion: 1,
+        contentHashSha256: "b".repeat(64),
+      },
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 1,
+        selectedAssets: selectedReusableAssets(),
+      },
+    }, value.creator),
+    hasBusinessCode("AIC-STAGE-ASSET-ARTIFACT-SERVER-OWNED"),
+  );
+  await assert.rejects(
+    value.stages.confirmStage(project.id, value.taskId, "asset_matching", {
+      requestId: "request_asset_stale_pool",
+      expectedTaskRevision: 5,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 99,
+        selectedAssets: selectedReusableAssets(),
+      },
+    }, value.creator),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "AIC-ASSET-SELECTION-REVISION-CONFLICT",
+  );
+  assert.deepEqual(await value.tasks.load(value.taskId), before);
+});
+
+test("non-asset stages reject asset selection input before any task mutation", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+  const before = await value.tasks.load(value.taskId);
+  assert.ok(before);
+  await assert.rejects(
+    value.stages.confirmStage(project.id, value.taskId, "strategy", {
+      requestId: "request_strategy_with_asset_selection",
+      expectedTaskRevision: 3,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 1,
+        selectedAssets: selectedReusableAssets(),
+      },
+    }, value.creator),
+    hasBusinessCode("AIC-STAGE-ASSET-SELECTION-NOT-ALLOWED"),
+  );
+  assert.deepEqual(await value.tasks.load(value.taskId), before);
 });
 
 test("migrated strategy awaiting confirmation resumes without a fabricated request", async () => {
@@ -1072,4 +1592,119 @@ test("failed confirmation and rollback saves leave every stage audit unchanged",
   assert.equal(rollbackSource.stageArtifactInvalidations.length, 0);
   assert.equal(rollbackSource.stageMutationReceipts.length, 1);
   assert.deepEqual(await rollbackValue.tasks.load(rollbackValue.taskId), rollbackSource);
+});
+
+test("temporary asset expiry during deferred metadata loading leaves confirmation atomic", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+
+  const checksumSha256 = "e".repeat(64);
+  const localReference: AssetReference = {
+    assetId: "temporary_scene_expiring_during_confirmation",
+    version: 1,
+    category: "scene",
+    source: "local_upload",
+    batchProjectId: project.id,
+    checksumSha256,
+  };
+  const poolWithTemporaryAsset = await value.projects.transactAssetPool(
+    tenantId,
+    project.id,
+    (current) => ({
+      ...structuredClone(current),
+      revision: current.revision + 1,
+      assets: [...structuredClone(current.assets), structuredClone(localReference)],
+      updatedAt: "2026-08-19T16:30:00.000Z",
+      updatedBy: value.creator.actorAccountId,
+    }),
+  );
+  const temporaryAsset: TemporaryAsset = {
+    id: localReference.assetId,
+    tenantId,
+    batchProjectId: project.id,
+    vehicleId,
+    version: localReference.version,
+    revision: 1,
+    category: localReference.category,
+    fileName: "expiring-scene.webp",
+    mediaType: "image/webp",
+    byteSize: 2048,
+    width: 1920,
+    height: 1080,
+    checksumSha256,
+    sourceDescription: "项目成员现场拍摄的场景素材",
+    rightsDeclaration: "上传者确认拥有本项目广告制作所需授权",
+    rightsConfirmed: true,
+    validationStatus: "valid",
+    validationIssues: [],
+    expiresAt: "2026-08-19T16:31:00.000Z",
+    createdAt: "2026-08-19T16:00:00.000Z",
+    createdBy: value.creator.actorAccountId,
+    updatedAt: "2026-08-19T16:20:00.000Z",
+    updatedBy: value.creator.actorAccountId,
+  };
+
+  const loadStarted = deferredBarrier();
+  const allowLoadToReturn = deferredBarrier();
+  const deferredTemporaryStore = {
+    async loadProject(batchProjectId: string): Promise<TemporaryAsset[]> {
+      assert.equal(batchProjectId, project.id);
+      loadStarted.release();
+      await allowLoadToReturn.promise;
+      return [structuredClone(temporaryAsset)];
+    },
+    async transactProject(): Promise<TemporaryAsset[]> {
+      throw new Error("The deferred temporary asset fixture is read-only.");
+    },
+  };
+  let currentTime = "2026-08-19T16:30:00.000Z";
+  let sequence = 0;
+  const projectAssets = new ProjectAssetRuntime(
+    new MockCompanyAssetProvider(),
+    new BatchProjectAssetPoolStoreAdapter(value.projects),
+    () => currentTime,
+    deferredTemporaryStore,
+  );
+  const stages = new VideoTaskStageRuntime(
+    value.administration,
+    value.projects,
+    value.tasks,
+    () => currentTime,
+    (kind) => `${kind}_expiry_${++sequence}`,
+    projectAssets,
+  );
+  const before = await value.tasks.load(value.taskId);
+  assert.ok(before);
+
+  const confirmation = stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    {
+      requestId: "request_expiring_temporary_asset_confirmation",
+      expectedTaskRevision: before.videoTask.revision,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: poolWithTemporaryAsset.revision,
+        selectedAssets: [localReference],
+      },
+    },
+    value.creator,
+  );
+  await completesWithin(loadStarted.promise, "temporary asset metadata load entry");
+  currentTime = "2026-08-19T16:32:00.000Z";
+  allowLoadToReturn.release();
+
+  await assert.rejects(
+    completesWithin(confirmation, "expired temporary asset confirmation rejection"),
+    (error: unknown) =>
+      error instanceof ProjectAssetRuntimeError &&
+      error.code === "AIC-ASSET-TEMPORARY-REFERENCE-UNUSABLE",
+  );
+  const after = await value.tasks.load(value.taskId);
+  assert.ok(after);
+  assert.equal(after.videoTask.assetSnapshotId, before.videoTask.assetSnapshotId);
+  assert.deepEqual(after.taskAssetSnapshots, before.taskAssetSnapshots);
+  assert.deepEqual(after.stageConfirmations, before.stageConfirmations);
+  assert.deepEqual(after.stageMutationReceipts, before.stageMutationReceipts);
+  assert.deepEqual(after, before);
 });

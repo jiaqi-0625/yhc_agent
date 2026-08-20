@@ -6,12 +6,16 @@ import {
   assertCanViewVideoTask,
   confirmVideoTaskStage,
   deriveStageConfirmationDependencies,
+  lockVideoTaskAssetSnapshot,
+  nextVideoTaskWorkflowState,
   rollbackVideoTaskStage,
+  StageConfirmationDeniedError,
   validateStrategy,
   type VideoTaskProductionRecord,
   type WorkspaceSessionScope,
 } from "@firefly/domain";
 import type {
+  AssetReference,
   BatchProject,
   ConfirmVideoTaskStageRequest,
   ConfirmVideoTaskStageResponse,
@@ -26,6 +30,11 @@ import type {
 
 import type { BatchProjectStore } from "./batch-project-store.ts";
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import type {
+  ProjectAssetRuntime,
+  TaskAssetSelectionResolver,
+  TaskAssetSelectionResolverFactory,
+} from "./project-asset-runtime.ts";
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
 import type {
   WorkspaceAdminState,
@@ -37,6 +46,8 @@ type StageRuntimeIdKind =
   | "confirmation"
   | "rollback"
   | "invalidation"
+  | "project_asset_pool"
+  | "task_asset_snapshot"
   | "stage_mutation_receipt";
 
 function canonicalJson(value: unknown): string {
@@ -58,6 +69,22 @@ function runtimeError(code: string, message: string, statusCode: number): Busine
   return new BusinessRuntimeError(code, message, statusCode);
 }
 
+function assetReferenceSortKey(
+  asset: Readonly<AssetReference>,
+): string {
+  if (asset.source === "company_catalog") {
+    return [asset.source, asset.sourceProvider, asset.assetId, asset.version, asset.category].join(":");
+  }
+  return [
+    asset.source,
+    asset.batchProjectId,
+    asset.assetId,
+    asset.version,
+    asset.category,
+    asset.checksumSha256.toLowerCase(),
+  ].join(":");
+}
+
 function confirmationPayloadHash(
   projectId: string,
   videoTaskId: string,
@@ -76,6 +103,21 @@ function confirmationPayloadHash(
           artifact: {
             ...input.artifact,
             contentHashSha256: input.artifact.contentHashSha256.toLowerCase(),
+          },
+        }),
+    ...(input.assetSelection === undefined
+      ? {}
+      : {
+          assetSelection: {
+            expectedProjectAssetPoolRevision:
+              input.assetSelection.expectedProjectAssetPoolRevision,
+            selectedAssets: input.assetSelection.selectedAssets
+              .map((asset) =>
+                asset.source === "local_upload"
+                  ? { ...asset, checksumSha256: asset.checksumSha256.toLowerCase() }
+                  : asset
+              )
+              .sort((left, right) => assetReferenceSortKey(left).localeCompare(assetReferenceSortKey(right), "en")),
           },
         }),
     ...(input.comment === undefined ? {} : { comment: input.comment }),
@@ -119,6 +161,7 @@ export class VideoTaskStageRuntime {
     private readonly now: () => string = () => new Date().toISOString(),
     private readonly createId: (kind: StageRuntimeIdKind) => string =
       (kind) => `${kind}_${randomUUID()}`,
+    private readonly projectAssets?: ProjectAssetRuntime,
   ) {}
 
   #currentScope(
@@ -367,14 +410,46 @@ export class VideoTaskStageRuntime {
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<ConfirmVideoTaskStageResponse> {
     this.#assertCreator(session);
+    if (stage === "asset_matching") {
+      if (input.assetSelection === undefined) {
+        throw runtimeError(
+          "AIC-STAGE-ASSET-SELECTION-REQUIRED",
+          "Asset matching confirmation requires an exact project asset selection.",
+          409,
+        );
+      }
+      if (input.artifact !== undefined) {
+        throw runtimeError(
+          "AIC-STAGE-ASSET-ARTIFACT-SERVER-OWNED",
+          "The asset matching artifact is derived from the server-locked task snapshot.",
+          409,
+        );
+      }
+      if (this.projectAssets === undefined) {
+        throw runtimeError(
+          "AIC-STAGE-ASSET-SELECTION-UNAVAILABLE",
+          "Task asset selection is not configured for this workspace runtime.",
+          503,
+        );
+      }
+    } else if (input.assetSelection !== undefined) {
+      throw runtimeError(
+        "AIC-STAGE-ASSET-SELECTION-NOT-ALLOWED",
+        "Only asset matching confirmation accepts a task asset selection.",
+        409,
+      );
+    }
     const payloadHash = confirmationPayloadHash(projectId, videoTaskId, stage, input);
     let replayed = false;
-    const record = await this.administration.withSnapshot(session.tenantId, async (state) => {
+    const execute = (createSelectionResolver?: TaskAssetSelectionResolverFactory) =>
+      this.administration.withSnapshot(session.tenantId, async (state) => {
       const scope = this.#currentScope(session, state);
       this.#assertCreator(scope);
       const project = await this.#project(scope.tenantId, projectId);
       assertCanViewBatchProject(scope, project);
-      return this.tasks.transact(videoTaskId, (current) => {
+      const occurredAt = this.now();
+      const transact = (resolveSelection?: TaskAssetSelectionResolver) =>
+        this.tasks.transact(videoTaskId, async (current) => {
         if (!current) {
           throw runtimeError(
             "AIC-STAGE-TASK_NOT_FOUND",
@@ -415,9 +490,77 @@ export class VideoTaskStageRuntime {
           );
         }
         assertCanOperateVideoTask(scope, project, current.videoTask);
-        const artifact = stage === "strategy"
-          ? this.#strategyArtifact(current, input.artifact)
-          : input.artifact;
+        let confirmationRecord = current;
+        let artifact: StageArtifactContentReference | undefined;
+        if (stage === "asset_matching") {
+          if (resolveSelection === undefined) {
+            throw new Error("Asset matching confirmation is missing its coordinated selection resolver.");
+          }
+          const task = current.videoTask;
+          const confirmsEditableSelection =
+            task.status === "active" &&
+            task.currentStage === "asset_matching" &&
+            task.stageStatus === "in_progress";
+          const confirmsSubmittedSelection =
+            task.status === "active" &&
+            task.currentStage === "asset_matching" &&
+            task.stageStatus === "awaiting_confirmation";
+          if (!confirmsEditableSelection && !confirmsSubmittedSelection) {
+            throw new StageConfirmationDeniedError(
+              "Only the current editable or awaiting asset selection can be confirmed.",
+            );
+          }
+          if (confirmsEditableSelection) {
+            const submitted = nextVideoTaskWorkflowState(
+              {
+                taskStatus: task.status,
+                currentStage: task.currentStage,
+                stageStatus: task.stageStatus,
+              },
+              { type: "stage_confirmation_requested", stage: "asset_matching" },
+            );
+            confirmationRecord = {
+              ...structuredClone(current),
+              videoTask: {
+                ...structuredClone(task),
+                status: submitted.taskStatus,
+                currentStage: submitted.currentStage,
+                stageStatus: submitted.stageStatus,
+              },
+            };
+          }
+          const selectedPool = await resolveSelection();
+          confirmationRecord = lockVideoTaskAssetSnapshot(
+            confirmationRecord,
+            project,
+            selectedPool,
+            input.expectedTaskRevision,
+            {
+              tenantId: scope.tenantId,
+              actorAccountId: scope.actorAccountId,
+              occurredAt,
+              createId: (kind) => this.createId(kind),
+            },
+            {
+              advanceTaskRevision: false,
+              replaceExistingAssetSnapshot: true,
+            },
+          );
+          const snapshot = confirmationRecord.taskAssetSnapshots.at(-1);
+          if (snapshot === undefined || confirmationRecord.videoTask.assetSnapshotId !== snapshot.id) {
+            throw new Error("Asset matching confirmation did not append its task snapshot.");
+          }
+          artifact = {
+            artifactId: snapshot.id,
+            schemaName: "task_asset_snapshot",
+            schemaVersion: 1,
+            contentHashSha256: sha256(snapshot),
+          };
+        } else {
+          artifact = stage === "strategy"
+            ? this.#strategyArtifact(current, input.artifact)
+            : input.artifact;
+        }
         if (artifact === undefined) {
           throw runtimeError(
             "AIC-STAGE-ARTIFACT_REQUIRED",
@@ -425,14 +568,13 @@ export class VideoTaskStageRuntime {
             409,
           );
         }
-        const occurredAt = this.now();
         const confirmed = confirmVideoTaskStage(
-          current,
+          confirmationRecord,
           {
             expectedTaskRevision: input.expectedTaskRevision,
             stage,
             artifact,
-            dependencies: deriveStageConfirmationDependencies(current, stage),
+            dependencies: deriveStageConfirmationDependencies(confirmationRecord, stage),
             ...(input.comment === undefined ? {} : { comment: input.comment }),
           },
           {
@@ -473,7 +615,21 @@ export class VideoTaskStageRuntime {
           stageMutationReceipts: [...structuredClone(confirmed.stageMutationReceipts), receipt],
         };
       });
+      if (stage !== "asset_matching") return transact();
+      const selection = input.assetSelection!;
+      if (createSelectionResolver === undefined) {
+        throw new Error("Asset matching confirmation did not acquire the project asset coordinator.");
+      }
+      return transact(createSelectionResolver(
+        project,
+        selection.expectedProjectAssetPoolRevision,
+        selection.selectedAssets,
+        scope,
+      ));
     });
+    const record = stage === "asset_matching"
+      ? await this.projectAssets!.coordinateTaskAssetSelection(projectId, execute)
+      : await execute();
     const receipt = this.#stageReceipt(record, session.actorAccountId, input.requestId);
     if (!receipt || receipt.action !== "confirm_stage") {
       throw new Error("Stage confirmation did not persist its idempotency receipt.");

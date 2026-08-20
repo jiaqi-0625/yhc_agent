@@ -144,17 +144,17 @@ LocalWorkRecord v1
 
 ## 4. Work 状态迁移规则
 
-WS-004/WS-101 将冻结最终枚举；WS-001 先固定语义映射，避免丢失现有状态。
+WS-004/WS-101 冻结了首版枚举，WS-108 已按后续产品决定调整阶段顺序；以下映射是当前迁移器的权威兼容语义。
 
 | v1 `Work.status` | V2 迁移语义 |
 |---|---|
 | `created` | 视频任务已创建，营销策略待开始 |
 | `strategy_draft` | 营销策略进行中，保留最新草稿和全部版本 |
 | `awaiting_strategy_approval` | 营销策略待人工确认 |
-| `strategy_approved` | 营销策略已确认，资产匹配待开始 |
+| `strategy_approved` | 营销策略已确认，脚本待开始；不创建任务素材快照 |
 | `script_draft` | 脚本进行中 |
 | `awaiting_script_approval` | 脚本待人工确认 |
-| `script_approved` | 脚本已确认，分镜待开始 |
+| `script_approved` | 脚本已确认，资产匹配待开始；迁移器可建立兼容素材快照与推断版本 |
 | `prompt_draft` | 保留为旧 Prompt 产物；不作为 V2 独立阶段，分镜待开始 |
 | `awaiting_prompt_approval` | 保留旧确认状态并标记需人工复核；不自动视为 V2 阶段确认 |
 | `prompt_approved` | 保留旧确认记录，分镜待开始 |
@@ -166,9 +166,9 @@ WS-004/WS-101 将冻结最终枚举；WS-001 先固定语义映射，避免丢�
 | `export_ready` | 视频预览已确认，交付待执行 |
 | `exported` | 交付完成 |
 
-旧流程没有“资产匹配”确认点。只有 `strategy_approved` 及更后状态的历史任务可创建一个明确标记为 `legacy_inferred` 的资产匹配版本；不能伪造成人工确认。其他任务应停在资产匹配待确认状态。
+旧流程没有“资产匹配”确认点。只有 `script_approved` 及更后状态的历史任务才创建兼容任务素材快照，并可生成明确标记为 `legacy_inferred` 的脚本、资产匹配及后续版本；不能伪造成人工确认。`strategy_approved` 及更早记录没有 `assetSnapshotId`，也没有资产匹配推断版本。
 
-WS-101 已冻结 V2 写路径枚举：`VideoTask.currentStage` 依次为 `strategy`、`asset_matching`、`script`、`storyboard`、`video_preview`、`delivery`，`stageStatus` 为 `in_progress`、`awaiting_confirmation` 或终态 `confirmed`。迁移器在 WS-307 中按上表显式生成这两个字段；旧 `WorkStatus` 不直接写入 V2 Store。
+WS-108 当前写路径枚举为：`VideoTask.currentStage` 依次为 `strategy`、`script`、`asset_matching`、`storyboard`、`video_preview`、`delivery`，`stageStatus` 为 `in_progress`、`awaiting_confirmation` 或终态 `confirmed`。迁移器按上表显式生成这两个字段；旧 `WorkStatus` 不直接写入 V2 Store。
 
 ## 5. V1 → V2 聚合迁移映射
 
@@ -178,7 +178,7 @@ WS-101 已冻结 V2 写路径枚举：`VideoTask.currentStage` 依次为 `strate
 2. 按 `tenantId + brandId + vehicleId + aspectRatio` 对 v1 Work 分组并创建 `BatchProject`。
 3. 当前 v1 不含画幅，迁移器必须使用显式配置的默认画幅，不能在代码深处静默猜测。
 4. 每个 Work 生成一个 `VideoTask`，保留原 `work_<uuid>` 作为任务 ID。
-5. 车型快照按快照 ID 和事实内容去重校验；V6 任务聚合保存 canonical 不可变副本并由任务 ID 指针锁定。旧服务重启造成的同 ID `createdAt` 漂移只可确定性取最早值，并须在迁移 summary 中计数；任何其他内容差异都拒绝迁移。
+5. 车型快照按快照 ID 和事实内容去重校验；schema v7 任务聚合保存 canonical 不可变副本并由 `videoTask.vehicleSnapshotId` 指针锁定。旧服务重启造成的同 ID `createdAt` 漂移只可确定性取最早值，并须在迁移 summary 中计数；任何其他内容差异都拒绝迁移。
 6. 策略版本和审批记录转换 ID 外键后原样导入，并记录 `migratedFromSchemaVersion: 1` 及原 `Strategy.status`。
 7. 根据上表转换阶段进度；任何推断产生的记录带 `legacy_inferred` 来源。
 8. 更新有 `workId` 的 Agent Session 绑定；无绑定 Session 不变。

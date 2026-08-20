@@ -17,6 +17,11 @@ export interface AssetPoolMutationContext {
   createId: (kind: "project_asset_pool" | "task_asset_snapshot") => string;
 }
 
+export interface AssetSnapshotLockOptions {
+  advanceTaskRevision?: boolean;
+  replaceExistingAssetSnapshot?: boolean;
+}
+
 export type AssetPoolErrorCode =
   | "AIC-ASSET-POOL_SCOPE_INVALID"
   | "AIC-ASSET-POOL_DUPLICATE_REFERENCE"
@@ -43,6 +48,22 @@ function referenceIdentity(reference: Readonly<AssetReference>): string {
     return `${reference.source}:${reference.sourceProvider}:${reference.assetId}`;
   }
   return `${reference.source}:${reference.batchProjectId}:${reference.assetId}`;
+}
+
+function exactReferenceIdentity(reference: Readonly<AssetReference>): string {
+  if (reference.source === "company_catalog") {
+    return reference.category === "vehicle"
+      ? `${referenceIdentity(reference)}:${reference.version}:${reference.category}:${reference.vehicleId}`
+      : `${referenceIdentity(reference)}:${reference.version}:${reference.category}`;
+  }
+  return `${referenceIdentity(reference)}:${reference.version}:${reference.category}:` +
+    reference.checksumSha256.toLowerCase();
+}
+
+function isAssetSelection(
+  value: readonly AssetReference[] | Readonly<AssetSnapshotLockOptions>,
+): value is readonly AssetReference[] {
+  return Array.isArray(value);
 }
 
 export function assertProjectAssetPoolAssets(
@@ -176,10 +197,18 @@ export function lockVideoTaskAssetSnapshot(
   pool: Readonly<ProjectAssetPool>,
   expectedTaskRevision: number,
   context: Readonly<AssetPoolMutationContext>,
-  selectedAssets: readonly AssetReference[] = pool.assets,
+  selectedAssetsOrOptions: readonly AssetReference[] | Readonly<AssetSnapshotLockOptions> =
+    pool.assets,
+  options: Readonly<AssetSnapshotLockOptions> = {},
 ): VideoTaskProductionRecord {
   assertRevision(expectedTaskRevision, record.videoTask.revision);
   const task = record.videoTask;
+  const selectedAssets = isAssetSelection(selectedAssetsOrOptions)
+    ? selectedAssetsOrOptions
+    : pool.assets;
+  const lockOptions = isAssetSelection(selectedAssetsOrOptions)
+    ? options
+    : selectedAssetsOrOptions;
   if (
     task.tenantId !== context.tenantId ||
     task.tenantId !== project.tenantId ||
@@ -199,7 +228,7 @@ export function lockVideoTaskAssetSnapshot(
       "Only the current task owner can lock task assets.",
     );
   }
-  if (task.assetSnapshotId !== undefined) {
+  if (task.assetSnapshotId !== undefined && !lockOptions.replaceExistingAssetSnapshot) {
     throw new AssetPoolError(
       "AIC-ASSET-SNAPSHOT_ALREADY_LOCKED",
       "The video task already has a locked asset snapshot.",
@@ -208,11 +237,11 @@ export function lockVideoTaskAssetSnapshot(
   if (
     task.status !== "active" ||
     task.currentStage !== "asset_matching" ||
-    task.stageStatus !== "in_progress"
+    task.stageStatus !== "awaiting_confirmation"
   ) {
     throw new AssetPoolError(
       "AIC-ASSET-SNAPSHOT_STAGE_INVALID",
-      "Task assets may only be locked after strategy and script confirmation, during asset matching.",
+      "Task assets can only be locked at the asset-matching confirmation boundary.",
     );
   }
   if (task.vehicleSnapshotId === undefined) {
@@ -223,8 +252,8 @@ export function lockVideoTaskAssetSnapshot(
   }
   assertProjectAssetPoolAssets(project, pool.assets);
   assertProjectAssetPoolAssets(project, selectedAssets);
-  const poolReferences = new Set(pool.assets.map(referenceIdentity));
-  if (selectedAssets.some((asset) => !poolReferences.has(referenceIdentity(asset)))) {
+  const poolReferences = new Set(pool.assets.map(exactReferenceIdentity));
+  if (selectedAssets.some((asset) => !poolReferences.has(exactReferenceIdentity(asset)))) {
     throw new AssetPoolError(
       "AIC-ASSET-POOL_SCOPE_INVALID",
       "A task asset selection must use exact references from the current project asset pool.",
@@ -244,13 +273,14 @@ export function lockVideoTaskAssetSnapshot(
     createdAt: context.occurredAt,
     createdBy: context.actorAccountId,
   };
+  const advanceTaskRevision = lockOptions.advanceTaskRevision ?? true;
   return {
     ...structuredClone(record),
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(task),
       assetSnapshotId: snapshot.id,
-      revision: task.revision + 1,
+      revision: task.revision + (advanceTaskRevision ? 1 : 0),
       updatedAt: context.occurredAt,
       updatedBy: context.actorAccountId,
     },

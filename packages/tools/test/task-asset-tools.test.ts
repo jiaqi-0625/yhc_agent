@@ -49,7 +49,7 @@ const taskContext = {
     id: "task_1",
     name: "任务一",
     status: "active",
-    currentStage: "strategy",
+    currentStage: "storyboard",
     stageStatus: "in_progress",
     revision: 2,
     vehicleSnapshotId: "vehicle_snapshot_1",
@@ -66,7 +66,7 @@ const taskContext = {
 
 function productionRecord(): VideoTaskProductionRecord {
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       id: "task_1",
       tenantId: "tenant_1",
@@ -74,7 +74,7 @@ function productionRecord(): VideoTaskProductionRecord {
       name: "任务一",
       ownerAccountId: "account_1",
       status: "active",
-      currentStage: "strategy",
+      currentStage: "storyboard",
       stageStatus: "in_progress",
       revision: 2,
       vehicleSnapshotId: "vehicle_snapshot_1",
@@ -160,6 +160,7 @@ test("task asset tool reads only the server-bound immutable snapshot", async () 
   });
   const [tool] = createTaskAssetTools(reader);
   assert.ok(tool);
+  assert.match(tool.description, /素材匹配经人工确认后锁定/u);
   assert.deepEqual(
     Object.keys((tool.parameters as { properties?: Record<string, unknown> }).properties ?? {}),
     [],
@@ -311,6 +312,23 @@ test("task asset source assessments report no warning when every locked asset is
 });
 
 test("task asset reader rejects cross-scope and stale snapshot data", async () => {
+  const { assetSnapshotId, ...videoTaskWithoutAssetSnapshot } = taskContext.videoTask;
+  assert.equal(assetSnapshotId, "asset_snapshot_1");
+  const taskContextWithoutAssetSnapshot: TaskContext = {
+    ...taskContext,
+    videoTask: videoTaskWithoutAssetSnapshot,
+  };
+  assert.equal(taskContextWithoutAssetSnapshot.videoTask.assetSnapshotId, undefined);
+  assert.throws(
+    () => createScopedTaskAssetSnapshotReader({
+      taskContext: taskContextWithoutAssetSnapshot,
+      store: { async load() { return productionRecord(); } },
+      provider: provider(() => []),
+      providerScope,
+    }),
+    TaskAssetSnapshotAccessError,
+  );
+
   assert.throws(
     () => createScopedTaskAssetSnapshotReader({
       taskContext,

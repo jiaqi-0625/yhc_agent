@@ -295,7 +295,12 @@ export class WorkspaceTaskContextResolver {
           ...(task.vehicleSnapshotId === undefined
             ? {}
             : { vehicleSnapshotId: task.vehicleSnapshotId }),
-          ...(task.assetSnapshotId === undefined
+          ...(
+            task.assetSnapshotId === undefined ||
+              (task.status === "active" &&
+                (task.currentStage === "strategy" ||
+                  task.currentStage === "script" ||
+                  task.currentStage === "asset_matching"))
             ? {}
             : { assetSnapshotId: task.assetSnapshotId }),
           ownership,

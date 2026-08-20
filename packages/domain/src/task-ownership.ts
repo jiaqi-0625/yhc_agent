@@ -58,7 +58,7 @@ export function takeOverVideoTask(
   };
 
   return {
-    schemaVersion: 6,
+    schemaVersion: 7,
     videoTask: {
       ...structuredClone(videoTask),
       ownerAccountId: context.actorAccountId,
