@@ -261,7 +261,7 @@ test("application wiring keeps action commands task-scoped and disabled during A
   const end = source.indexOf("function appendActionProposal(", start);
   assert.ok(start >= 0 && end > start);
   const commandWiring = source.slice(start, end);
-  assert.match(commandWiring, /state\.work\?\.work\.id !== context\.videoTask\.id/u);
+  assert.match(commandWiring, /currentSelectedVideoTaskId\(\) !== context\.videoTask\.id/u);
   assert.match(commandWiring, /if \(state\.busy \|\| state\.workflowBusy\) return;/u);
   assert.match(commandWiring, /context\.scopeGeneration !== expectedContext\.scopeGeneration/u);
   assert.match(commandWiring, /response\.videoTask\.revision < context\.revision/u);
@@ -287,6 +287,19 @@ test("application wiring keeps action commands task-scoped and disabled during A
     source.slice(sendStart, sendEnd),
     /if \(!message \|\| state\.busy \|\| state\.workflowBusy \|\| !state\.sessionId\) return;/u,
   );
+
+  const syncStart = source.indexOf("async function synchronizeAgentWorkspaceSelection(");
+  const syncEnd = source.indexOf("function applyWorkspaceSession(", syncStart);
+  assert.ok(syncStart >= 0 && syncEnd > syncStart);
+  const workspaceSync = source.slice(syncStart, syncEnd);
+  assert.match(workspaceSync, /workspaceScopeGeneration \+= 1/u);
+  assert.match(workspaceSync, /state\.sessionId = null/u);
+  assert.match(workspaceSync, /state\.taskContext = null/u);
+  assert.match(workspaceSync, /restoreSessionForCurrentWork\(scope\)/u);
+  assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
+  assert.match(workspaceSync, /body\.session\.taskContext\.videoTask\.revision < task\.revision/u);
+  assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);
+  assert.match(source, /isSelectionLocked: function \(\) \{ return state\.busy \|\| state\.workflowBusy; \}/u);
 });
 
 test("Agent action cards stay disabled for missing, cross-task, stale, and busy contexts", () => {

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   createWorkspaceContextDetail,
@@ -105,4 +106,13 @@ test("workspace context event detail switches task state without carrying accoun
   });
   assert.equal(JSON.stringify(detail).includes("account_creator"), false);
   assert.equal(createWorkspaceContextDetail(project, null)?.videoTask, null);
+});
+
+test("workspace frame blocks task and overview switches while Agent interaction is busy", async () => {
+  const source = await readFile(new URL("../public/workspace-frame.js", import.meta.url), "utf8");
+  assert.match(source, /function selectionLocked\(\)/u);
+  assert.match(source, /selectionLocked\(\) && taskId !== selection\.task\?\.id/u);
+  assert.match(source, /button\.disabled = locked && button\.dataset\.videoTaskId !== selection\?\.task\?\.id/u);
+  assert.match(source, /if \(selectionLocked\(\) && selection\.task !== null\) return;/u);
+  assert.match(source, /refreshSelectionControls/u);
 });

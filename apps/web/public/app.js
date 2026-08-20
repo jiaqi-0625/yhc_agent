@@ -44,6 +44,7 @@ const state = {
   work: null,
   workSummaries: [],
   workflowBusy: false,
+  selectedVideoTaskId: null,
   workFilter: "",
   modelReady: true,
   account: null,
@@ -64,6 +65,7 @@ const state = {
 let navigationBrandsRequest = 0;
 let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
+let agentSelectionRequest = 0;
 let workspaceFrame = null;
 let assetMatchingPanel = null;
 let workspaceStagesPanel = null;
@@ -119,6 +121,7 @@ const elements = {
   workSearch: document.querySelector("#work-search"),
   themeToggle: document.querySelector("#theme-toggle"),
   workspaceShell: document.querySelector("#workspace-shell"),
+  agentLayoutShell: document.querySelector(".project-workspace-page"),
   topbarWorkName: document.querySelector("#topbar-work-name"),
   studioWorkTitle: document.querySelector("#studio-work-title"),
   studioWorkDescription: document.querySelector("#studio-work-description"),
@@ -171,13 +174,6 @@ const elements = {
   workspaceFrameTaskStage: document.querySelector("#workspace-frame-task-stage"),
   workspaceFrameTaskMeta: document.querySelector("#workspace-frame-task-meta"),
   workspaceFrameModuleTitle: document.querySelector("#workspace-frame-module-title"),
-  workspaceFrameAgentStatus: document.querySelector("#workspace-frame-agent-status"),
-  workspaceFrameAgentTask: document.querySelector("#workspace-frame-agent-task"),
-  workspaceFrameAgentStage: document.querySelector("#workspace-frame-agent-stage"),
-  workspaceFrameAgentOwner: document.querySelector("#workspace-frame-agent-owner"),
-  workspaceFrameAgentRevision: document.querySelector("#workspace-frame-agent-revision"),
-  workspaceFrameAgentComposer: document.querySelector("#workspace-frame-agent-composer"),
-  workspaceFrameAgentSend: document.querySelector("#workspace-frame-agent-send"),
   assetMatchingGate: document.querySelector("#asset-matching-gate"),
   assetMatchingNotice: document.querySelector("#asset-matching-notice"),
   assetMatchingGrid: document.querySelector("#asset-matching-grid"),
@@ -274,7 +270,7 @@ function refreshAgentInteractionControls() {
   elements.send.disabled = interactionBusy || !state.modelReady || !state.sessionId;
   elements.send.hidden = state.busy;
   elements.cancelGeneration.hidden = !state.busy;
-  elements.newSession.disabled = interactionBusy || !state.work;
+  elements.newSession.disabled = interactionBusy || !currentSelectedVideoTaskId();
   elements.sessionSelect.disabled = interactionBusy || state.sessions.length === 0;
   elements.resetSession.disabled = interactionBusy;
   elements.retryMessage.disabled = interactionBusy;
@@ -283,6 +279,7 @@ function refreshAgentInteractionControls() {
       || state.workspaceHydrating
       || state.accounts.length < 2;
   }
+  workspaceFrame?.refreshSelectionControls();
 }
 
 function setBusy(busy) {
@@ -404,6 +401,8 @@ async function loadProjectLibrary(scope = captureWorkspaceScope()) {
 }
 
 function resetWorkspaceContext() {
+  agentSelectionRequest += 1;
+  state.selectedVideoTaskId = null;
   state.sessionId = null;
   state.sessionVideoTaskId = null;
   state.sessions = [];
@@ -540,6 +539,7 @@ function renderStrategyItems(strategy, editable) {
 function renderWork(view) {
   state.work = view;
   if (!view) {
+    state.selectedVideoTaskId = null;
     state.taskContext = null;
     localStorage.removeItem(selectedVideoTaskStorageKey);
     elements.createWorkCard.hidden = false;
@@ -559,6 +559,7 @@ function renderWork(view) {
     return;
   }
   const work = view.work;
+  state.selectedVideoTaskId = work.id;
   const snapshot = view.vehicleSnapshot;
   const workBrand = state.navigationBrands.find(function (brand) { return brand.id === snapshot.brandId; });
   if (workBrand && state.navigationBrandId !== workBrand.id && state.account) {
@@ -1053,7 +1054,7 @@ function currentAgentActionContext() {
     !context
     || !state.sessionId
     || !state.account?.accountId
-    || state.work?.work.id !== context.videoTask.id
+    || currentSelectedVideoTaskId() !== context.videoTask.id
     || state.sessionVideoTaskId !== context.videoTask.id
   ) return null;
   return {
@@ -1600,10 +1601,14 @@ function updateSession(summary) {
   elements.agentTools.title = toolNames.join("、");
 }
 
+function currentSelectedVideoTaskId() {
+  return state.selectedVideoTaskId || state.work?.work.id || null;
+}
+
 async function createSession(videoTaskId, scope = captureWorkspaceScope()) {
-  const selectedVideoTaskId = videoTaskId === undefined ? state.work?.work.id : videoTaskId;
+  const selectedVideoTaskId = videoTaskId === undefined ? currentSelectedVideoTaskId() : videoTaskId;
   const body = await agentApi.createSession(selectedVideoTaskId);
-  if (!isCurrentWorkspaceScope(scope) || (state.work?.work.id || null) !== (selectedVideoTaskId || null)) return false;
+  if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== (selectedVideoTaskId || null)) return false;
   updateSession(body.session);
   clearMessages();
   return true;
@@ -1611,22 +1616,22 @@ async function createSession(videoTaskId, scope = captureWorkspaceScope()) {
 
 async function loadTaskSessions(videoTaskId, scope = captureWorkspaceScope()) {
   const body = await agentApi.listSessions(videoTaskId);
-  if (!isCurrentWorkspaceScope(scope) || state.work?.work.id !== videoTaskId) return false;
+  if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== videoTaskId) return false;
   state.sessions = Array.isArray(body.sessions) ? body.sessions.slice().sort(compareSessions) : [];
   renderSessionOptions();
   return true;
 }
 
 async function activateSession(sessionId, scope = captureWorkspaceScope()) {
-  const selectedVideoTaskId = state.work?.work.id || null;
+  const selectedVideoTaskId = currentSelectedVideoTaskId();
   const body = await agentApi.getSession(sessionId, selectedVideoTaskId);
-  if (!isCurrentWorkspaceScope(scope) || (state.work?.work.id || null) !== selectedVideoTaskId) return false;
+  if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== selectedVideoTaskId) return false;
   if ((body.session.videoTaskId || null) !== selectedVideoTaskId) {
     throw new Error("该助手会话不属于当前任务，已拒绝切换。");
   }
   updateSession(body.session);
   const transcript = await agentApi.getTranscript(sessionId, selectedVideoTaskId);
-  if (!isCurrentWorkspaceScope(scope) || state.sessionId !== sessionId || (state.work?.work.id || null) !== selectedVideoTaskId) return false;
+  if (!isCurrentWorkspaceScope(scope) || state.sessionId !== sessionId || currentSelectedVideoTaskId() !== selectedVideoTaskId) return false;
   restoreTranscriptTimeline(transcript.messages);
   return true;
 }
@@ -1649,7 +1654,7 @@ async function selectSession(sessionId) {
 }
 
 async function restoreSessionForCurrentWork(scope = captureWorkspaceScope()) {
-  const videoTaskId = state.work?.work.id || null;
+  const videoTaskId = currentSelectedVideoTaskId();
   if (!videoTaskId) {
     if (!isCurrentWorkspaceScope(scope)) return false;
     state.sessions = [];
@@ -1669,7 +1674,7 @@ async function restoreSessionForCurrentWork(scope = captureWorkspaceScope()) {
 }
 
 async function ensureSessionForCurrentWork() {
-  const videoTaskId = state.work?.work.id || null;
+  const videoTaskId = currentSelectedVideoTaskId();
   if (state.sessionId && state.sessionVideoTaskId === videoTaskId) return;
   await restoreSession();
 }
@@ -1679,10 +1684,84 @@ async function restoreSession(scope = captureWorkspaceScope()) {
     return await restoreSessionForCurrentWork(scope);
   } catch {
     if (!isCurrentWorkspaceScope(scope)) return false;
-    const videoTaskId = state.work?.work.id || null;
+    const videoTaskId = currentSelectedVideoTaskId();
     localStorage.removeItem(sessionStorageKey(videoTaskId));
     state.sessions = [];
     return createSession(videoTaskId || undefined, scope);
+  }
+}
+
+async function synchronizeAgentWorkspaceSelection(selection) {
+  const videoTaskId = selection.task?.id || null;
+  if (videoTaskId === state.selectedVideoTaskId) {
+    if (
+      videoTaskId &&
+      state.sessionId &&
+      state.sessionVideoTaskId === videoTaskId &&
+      state.taskContext?.videoTask.revision !== selection.task?.revision
+    ) void refreshAgentContextForWorkspaceTask(selection.task);
+    return;
+  }
+  const request = ++agentSelectionRequest;
+  workspaceScopeGeneration += 1;
+  state.selectedVideoTaskId = videoTaskId;
+  state.work = null;
+  state.sessionId = null;
+  state.sessionVideoTaskId = null;
+  state.sessions = [];
+  state.taskContext = null;
+  state.activeRunId = null;
+  state.lastPrompt = "";
+  renderSessionOptions();
+  renderTaskContext(null);
+  clearMessages();
+  clearError();
+  elements.sessionId.textContent = "—";
+  elements.sessionWork.textContent = videoTaskId ? shortWorkId(videoTaskId) : "未绑定";
+  elements.agentTools.textContent = "未加载";
+  if (!videoTaskId) {
+    refreshAgentInteractionControls();
+    return;
+  }
+  const scope = captureWorkspaceScope();
+  setBusy(true);
+  try {
+    await restoreSessionForCurrentWork(scope);
+  } catch (error) {
+    if (request === agentSelectionRequest && isCurrentWorkspaceScope(scope)) showError(error);
+  } finally {
+    if (
+      request === agentSelectionRequest &&
+      isCurrentWorkspaceScope(scope) &&
+      currentSelectedVideoTaskId() === videoTaskId
+    ) {
+      setBusy(false);
+      elements.prompt.focus();
+    }
+  }
+}
+
+async function refreshAgentContextForWorkspaceTask(task) {
+  const sessionId = state.sessionId;
+  const scope = captureWorkspaceScope();
+  if (!sessionId || state.sessionVideoTaskId !== task.id) return;
+  try {
+    const body = await agentApi.getSession(sessionId, task.id);
+    if (
+      !isCurrentWorkspaceScope(scope) ||
+      currentSelectedVideoTaskId() !== task.id ||
+      state.sessionId !== sessionId ||
+      body.session?.taskContext?.videoTask?.id !== task.id ||
+      body.session.taskContext.videoTask.revision < task.revision
+    ) return;
+    updateSession(body.session);
+    refreshActionProposalAvailability();
+  } catch (error) {
+    if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== task.id) return;
+    state.taskContext = null;
+    renderTaskContext(null);
+    refreshActionProposalAvailability();
+    showError(error);
   }
 }
 
@@ -1972,11 +2051,19 @@ workspaceStagesPanel = createWorkspaceStagesPanel({
   },
   api: workspaceApi,
   onTaskUpdated: function (updatedTask) {
+    let updatedProjectId = null;
     for (const summary of state.projectLibrary) {
       const task = summary.tasks.find(function (candidate) { return candidate.id === updatedTask.id; });
       if (!task) continue;
       Object.assign(task, updatedTask);
+      updatedProjectId = summary.project.id;
       break;
+    }
+    if (updatedProjectId && workspaceFrame) {
+      workspaceFrame.open(updatedProjectId, updatedTask.id, {
+        historyMode: "replace",
+        focus: false,
+      });
     }
   },
 });
@@ -2003,17 +2090,12 @@ workspaceFrame = createWorkspaceFrame({
     moduleTitle: elements.workspaceFrameModuleTitle,
     moduleButtons: [...document.querySelectorAll("[data-workspace-frame-module]")],
     modulePanels: [...document.querySelectorAll("[data-workspace-frame-panel]")],
-    agentStatus: elements.workspaceFrameAgentStatus,
-    agentTask: elements.workspaceFrameAgentTask,
-    agentStage: elements.workspaceFrameAgentStage,
-    agentOwner: elements.workspaceFrameAgentOwner,
-    agentRevision: elements.workspaceFrameAgentRevision,
-    agentComposer: elements.workspaceFrameAgentComposer,
-    agentSend: elements.workspaceFrameAgentSend,
   },
   getProjects: function () { return state.projectLibrary; },
+  isSelectionLocked: function () { return state.busy || state.workflowBusy; },
   onBack: function () { renderProjectLibraryPage(); },
   onSelectionChange: function (selection) {
+    void synchronizeAgentWorkspaceSelection(selection);
     assetMatchingPanel.setContext(
       selection.project?.project?.id,
       selection.task,

@@ -1,6 +1,7 @@
 .project-workspace-page {
+  --agent-panel-width: 356px;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr) 356px;
+  grid-template-columns: 248px minmax(0, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 734px));
   height: calc(100dvh - 64px);
   min-height: 0;
   background: var(--background);
@@ -112,31 +113,14 @@
 .workspace-canvas-empty strong { color: var(--foreground); font-size: 13px; }
 .workspace-canvas-empty span { font-size: 10px; }
 
-.workspace-agent-slot { display: flex; flex-direction: column; border-left: 1px solid var(--border); background: var(--card); overflow: hidden; }
-.workspace-agent-header { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); }
-.workspace-agent-identity { display: flex; min-width: 0; align-items: center; gap: 10px; }
-.workspace-agent-avatar { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; border-radius: 50%; color: var(--primary-foreground); background: var(--primary); }
-.workspace-agent-identity strong { display: block; font-size: 11px; }
-.workspace-agent-identity span:last-child { display: block; margin-top: 3px; color: var(--muted-foreground); font-size: 9px; }
-.workspace-agent-context { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; padding: 13px 16px; border-bottom: 1px solid var(--border); background: var(--muted); }
-.workspace-agent-context div { min-width: 0; }
-.workspace-agent-context dt { margin-bottom: 3px; color: var(--muted-foreground); font-size: 9px; }
-.workspace-agent-context dd { margin: 0; overflow: hidden; font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-agent-body { display: grid; min-height: 0; flex: 1; place-items: center; padding: 24px; }
-.workspace-agent-empty { display: grid; justify-items: center; gap: 8px; color: var(--muted-foreground); text-align: center; }
-.workspace-agent-empty .icon { width: 24px; height: 24px; }
-.workspace-agent-empty strong { color: var(--foreground); font-size: 12px; }
-.workspace-agent-empty span { font-size: 10px; }
-.workspace-agent-composer { display: flex; align-items: flex-end; gap: 8px; margin: 0 12px 12px; padding: 7px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--input); }
-.workspace-agent-composer textarea { min-height: 36px; flex: 1; padding: 8px; resize: none; border: 0; color: var(--foreground); background: transparent; font-size: 10px; }
-.workspace-agent-composer button { display: grid; width: 34px; height: 34px; place-items: center; padding: 0; border: 0; border-radius: calc(var(--radius) - 3px); color: var(--primary-foreground); background: var(--primary); }
+.workspace-agent-slot { min-width: 0; min-height: 0; }
 
 button.my-task-card { width: 100%; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
 .project-open-button { display: grid; width: 100%; gap: 5px; padding: 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
 .project-open-button:hover strong { color: var(--primary); }
 
 @media (min-width: 1280px) and (max-width: 1439px) {
-  .project-workspace-page { grid-template-columns: 220px minmax(0, 1fr) 320px; }
+  .project-workspace-page { grid-template-columns: 220px minmax(0, 1fr) 6px min(var(--agent-panel-width), calc(100vw - 646px)); }
   .workspace-rail-header { padding-right: 12px; padding-left: 12px; }
   .workspace-surface-header { gap: 10px; padding-right: 16px; padding-left: 16px; }
   .workspace-module-navigation button { min-width: 48px; padding-right: 7px; padding-left: 7px; }
