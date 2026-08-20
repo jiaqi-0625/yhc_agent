@@ -8,8 +8,8 @@ function sseAgent(event: { eventId: string; sequence: number; sessionId: string;
   return `id: ${event.eventId}\nevent: agent\ndata: ${JSON.stringify(event)}\n\n`;
 }
 
-function sseComplete(runId: string): string {
-  return `event: complete\ndata: ${JSON.stringify({ runId, assistantText: "完成", session: { id: "session_web_replay" } })}\n\n`;
+function sseComplete(runId: string, sessionId = "session_web_replay"): string {
+  return `event: complete\ndata: ${JSON.stringify({ runId, assistantText: "完成", session: { id: sessionId } })}\n\n`;
 }
 
 test("browser Agent API reconnects with the last event ID and suppresses replay duplicates", async (context) => {
@@ -79,7 +79,9 @@ test("browser Agent API rejects a replay sequence gap", async (context) => {
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (new URL(url, "http://local").pathname.endsWith("/runs") && init?.method === "POST") {
-      return Response.json({ run: { runId } }, { status: 202 });
+      return Response.json({
+        run: { runId, requestId: "request_web_gap", sessionId: "session_web_gap" },
+      }, { status: 202 });
     }
     return new Response(sseAgent({
       eventId: `event_${runId}_2`,
@@ -121,6 +123,40 @@ test("browser Agent API stops start retries when the request is cancelled", asyn
     (error: unknown) => error instanceof DOMException && error.name === "AbortError",
   );
   assert.equal(calls, 1);
+});
+
+test("browser Agent API rejects mismatched run start and completion scopes", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+
+  globalThis.fetch = (async () => Response.json({
+    run: {
+      runId: "run_scope_mismatch",
+      requestId: "request_other",
+      sessionId: "session_scope_mismatch",
+    },
+  }, { status: 202 })) as typeof fetch;
+  await assert.rejects(
+    () => agentApi.startRun(
+      "session_scope_mismatch",
+      "作用域检查",
+      "request_scope_mismatch",
+    ),
+    /有效的运行标识/u,
+  );
+
+  globalThis.fetch = (async () => new Response(
+    sseComplete("run_other", "session_scope_mismatch"),
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  )) as typeof fetch;
+  await assert.rejects(
+    () => agentApi.streamRunEvents(
+      "session_scope_mismatch",
+      "run_scope_mismatch",
+      { maximumReconnects: 0 },
+    ),
+    /不属于当前运行的完成结果/u,
+  );
 });
 
 test("browser Agent API sends authenticated workspace commands without changing the body", async (context) => {

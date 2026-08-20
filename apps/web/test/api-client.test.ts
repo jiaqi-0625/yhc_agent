@@ -45,6 +45,34 @@ test("browser authenticated fetch drops caller authorization when no workspace s
   }), { ok: true });
 });
 
+test("browser authenticated fetch refuses cross-origin and non-API targets before fetch", (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    setWorkspaceSessionToken(null);
+  });
+  setWorkspaceSessionToken("session_current");
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return Response.json({});
+  }) as typeof fetch;
+
+  assert.throws(
+    () => authenticatedFetch("https://example.invalid/v1/leak"),
+    /内部 API/u,
+  );
+  assert.throws(
+    () => authenticatedFetch("//example.invalid/v1/leak"),
+    /内部 API/u,
+  );
+  assert.throws(
+    () => authenticatedFetch("/assets/app.js"),
+    /内部 API/u,
+  );
+  assert.equal(calls, 0);
+});
+
 test("browser API preserves the standard error response for action-card handling", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => {

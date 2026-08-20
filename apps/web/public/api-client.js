@@ -21,6 +21,9 @@ export function setWorkspaceSessionToken(token) {
 }
 
 export function authenticatedFetch(path, options) {
+  if (typeof path !== "string" || !/^\/v1(?:\/|\?|$)/u.test(path)) {
+    throw new TypeError("只允许访问当前服务的内部 API。");
+  }
   const headers = new Headers(options?.headers);
   if (workspaceSessionToken) headers.set("authorization", "Bearer " + workspaceSessionToken);
   else headers.delete("authorization");

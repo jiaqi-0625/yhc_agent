@@ -114,46 +114,81 @@ function uncertainCommandResponse() {
 function matchesCommandResult(action, result) {
   if (!isRecord(result)) return false;
   if (action === "generate_strategy") {
-    return result.kind === "strategy_generated"
+    return hasExactKeys(result, ["kind", "strategyDraftId"])
+      && result.kind === "strategy_generated"
       && isIdentifier(result.strategyDraftId);
   }
   return action === "request_strategy_approval"
+    && hasExactKeys(result, ["kind", "strategyDraftId", "stageConfirmationRequestId"])
     && result.kind === "strategy_confirmation_requested"
     && isIdentifier(result.strategyDraftId)
     && isIdentifier(result.stageConfirmationRequestId);
 }
 
-export function agentActionSuccessPresentation(proposal, requestId, projectId, response) {
+function isIsoDateTime(value) {
+  return typeof value === "string"
+    && !Number.isNaN(Date.parse(value))
+    && new Date(value).toISOString() === value;
+}
+
+export function agentActionSuccessPresentation(proposal, requestId, projectId, accountId, response) {
+  const parsedCard = parseAgentActionCard(proposal);
   const receipt = isRecord(response) ? response.receipt : undefined;
   const videoTask = isRecord(response) ? response.videoTask : undefined;
   if (
-    !parseAgentActionCard(proposal)
+    !parsedCard
     || !isIdentifier(requestId)
     || !isIdentifier(projectId)
+    || !isIdentifier(accountId)
+    || !hasExactKeys(response, ["receipt", "replayed", "videoTask"])
     || !isRecord(receipt)
     || !isRecord(videoTask)
     || typeof response.replayed !== "boolean"
+    || !hasExactKeys(receipt, [
+      "schemaVersion",
+      "id",
+      "tenantId",
+      "batchProjectId",
+      "videoTaskId",
+      "actorAccountId",
+      "requestId",
+      "payloadHash",
+      "action",
+      "expectedTaskRevision",
+      "resultingTaskRevision",
+      "cost",
+      "result",
+      "occurredAt",
+    ])
+    || receipt.schemaVersion !== 1
     || !isIdentifier(receipt.id)
+    || !isIdentifier(receipt.tenantId)
+    || receipt.actorAccountId !== accountId
     || receipt.requestId !== requestId
     || receipt.batchProjectId !== projectId
-    || receipt.videoTaskId !== proposal.videoTaskId
-    || receipt.action !== proposal.action
-    || receipt.expectedTaskRevision !== proposal.expectedRevision
-    || receipt.resultingTaskRevision !== proposal.expectedRevision + 1
+    || receipt.videoTaskId !== parsedCard.videoTaskId
+    || receipt.action !== parsedCard.action
+    || receipt.expectedTaskRevision !== parsedCard.expectedRevision
+    || receipt.resultingTaskRevision !== parsedCard.expectedRevision + 1
+    || typeof receipt.payloadHash !== "string"
+    || !/^[A-Fa-f0-9]{64}$/u.test(receipt.payloadHash)
+    || !isIsoDateTime(receipt.occurredAt)
     || !isRecord(receipt.cost)
+    || !hasExactKeys(receipt.cost, ["kind", "amountMinor", "charged"])
     || receipt.cost.kind !== "free"
     || receipt.cost.amountMinor !== 0
     || receipt.cost.charged !== false
-    || !matchesCommandResult(proposal.action, receipt.result)
-    || videoTask.id !== proposal.videoTaskId
+    || !matchesCommandResult(parsedCard.action, receipt.result)
+    || videoTask.id !== parsedCard.videoTaskId
     || videoTask.batchProjectId !== projectId
+    || videoTask.tenantId !== receipt.tenantId
     || !Number.isSafeInteger(videoTask.revision)
     || videoTask.revision < receipt.resultingTaskRevision
   ) {
     throw uncertainCommandResponse();
   }
   const replayPrefix = response.replayed ? "已恢复此前操作结果，未重复执行。" : "操作已由服务端执行。";
-  if (proposal.action === "generate_strategy") {
+  if (parsedCard.action === "generate_strategy") {
     return {
       status: response.replayed ? "已恢复" : "已执行",
       message: replayPrefix + "策略草稿已生成，任务版本更新至 " + receipt.resultingTaskRevision + "。",

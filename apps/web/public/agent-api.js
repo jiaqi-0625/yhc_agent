@@ -72,7 +72,13 @@ async function startAgentRun(sessionId, message, requestId, options = {}) {
       });
       if (!response.ok) throw await responseError(response);
       const body = await response.json();
-      if (!body || !body.run || typeof body.run.runId !== "string") {
+      if (
+        !body
+        || !body.run
+        || typeof body.run.runId !== "string"
+        || body.run.sessionId !== sessionId
+        || body.run.requestId !== requestId
+      ) {
         throw new AgentStreamProtocolError("Agent 未返回有效的运行标识。");
       }
       return body.run;
@@ -133,7 +139,18 @@ async function readRunStream(response, sessionId, runId, state, options) {
         state.lastEventId = stableId;
         options.onEvent?.(payload);
       }
-      if (eventName === "complete") completion = payload;
+      if (eventName === "complete") {
+        if (
+          !payload
+          || payload.runId !== runId
+          || !payload.session
+          || payload.session.id !== sessionId
+          || typeof payload.assistantText !== "string"
+        ) {
+          throw new AgentStreamProtocolError("Agent 返回了不属于当前运行的完成结果。");
+        }
+        completion = payload;
+      }
       if (eventName === "error") throw new AgentStreamServerError(payload, 200);
     });
     if (completion !== undefined) return completion;
