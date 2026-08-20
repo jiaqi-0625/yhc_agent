@@ -269,6 +269,33 @@ function renderTaskCards(container, tasks, onOpenTask) {
   });
 }
 
+export function applyProjectLibraryTaskUpdate(projects, value) {
+  if (!Array.isArray(projects) || !isRecord(value)) return null;
+  const id = nonEmptyString(value.id);
+  const updatedAt = nonEmptyString(value.updatedAt);
+  if (
+    !id || !updatedAt || timestampEpoch(updatedAt) === null ||
+    !["active", "completed", "cancelled", "archived"].includes(value.status) ||
+    !["strategy", "asset_matching", "script", "storyboard", "video_preview", "delivery"].includes(value.currentStage) ||
+    !["in_progress", "awaiting_confirmation", "confirmed"].includes(value.stageStatus) ||
+    !Number.isInteger(value.revision) || value.revision < 1
+  ) return null;
+  for (const summary of projects) {
+    const task = summary?.tasks?.find(function (candidate) { return candidate.id === id; });
+    if (!task) continue;
+    Object.assign(task, {
+      status: value.status,
+      currentStage: value.currentStage,
+      stageStatus: value.stageStatus,
+      revision: value.revision,
+      updatedAt,
+    });
+    summary.latestActivityAt = updatedAt;
+    return summary.project?.id || null;
+  }
+  return null;
+}
+
 function projectStatusBadge(status) {
   const badge = document.createElement("span");
   badge.className = "badge " + (status === "active" ? "success" : "neutral");

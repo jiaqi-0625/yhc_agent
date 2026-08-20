@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { collectMyActiveTasks, filterProjectLibrary, normalizeProjectLibrary, normalizeProjectSearch, projectVehicleOptions, sortProjectLibrary } from "../public/project-library.js";
+import { applyProjectLibraryTaskUpdate, collectMyActiveTasks, filterProjectLibrary, normalizeProjectLibrary, normalizeProjectSearch, projectVehicleOptions, sortProjectLibrary } from "../public/project-library.js";
 
 function summary(
   id: string,
@@ -103,4 +103,36 @@ test("my in-progress tasks use current ownership and active task status", () => 
     "mine_active",
     "mine_active_offset",
   ]);
+});
+
+test("a unified command task result refreshes the selected project task in place", () => {
+  const projects = normalizeProjectLibrary({ projects: [
+    summary("project_a", { tasks: [task("task_a"), task("task_other")] }),
+  ] });
+  const updatedAt = "2026-08-20T07:28:00.000Z";
+  assert.equal(applyProjectLibraryTaskUpdate(projects, {
+    id: "task_a",
+    status: "active",
+    currentStage: "strategy",
+    stageStatus: "in_progress",
+    revision: 2,
+    updatedAt,
+  }), "project_a");
+  assert.deepEqual(projects[0]?.tasks[0], {
+    ...task("task_a"),
+    revision: 2,
+    updatedAt,
+  });
+  assert.equal(projects[0]?.tasks[1]?.revision, 1);
+  assert.equal(projects[0]?.latestActivityAt, updatedAt);
+
+  assert.equal(applyProjectLibraryTaskUpdate(projects, {
+    id: "task_a",
+    status: "active",
+    currentStage: "strategy",
+    stageStatus: "in_progress",
+    revision: 0,
+    updatedAt,
+  }), null);
+  assert.equal(projects[0]?.tasks[0]?.revision, 2);
 });

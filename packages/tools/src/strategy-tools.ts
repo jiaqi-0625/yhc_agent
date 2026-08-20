@@ -14,7 +14,12 @@ function textResult<T>(details: T) {
   return { content: [{ type: "text" as const, text: JSON.stringify(details) }], details };
 }
 
-export function createStrategyTools(service: StrategyWorkflowPort): readonly AgentTool[] {
+export interface StrategyProposalPort {
+  readonly videoTaskId: string;
+  currentRevision(): number | Promise<number>;
+}
+
+export function createStrategyProposalTools(service: StrategyProposalPort) {
   const proposeStrategyGeneration: AgentTool<typeof ProposeStrategyGenerationRequestSchema> = {
     name: "propose_strategy_generation",
     label: "建议生成卖点策略草稿",
@@ -36,16 +41,6 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
     },
   };
 
-  const validateStrategy: AgentTool<typeof ValidateStrategyRequestSchema> = {
-    name: "validate_strategy",
-    label: "校验卖点策略",
-    description: "校验当前策略的固定卖点覆盖、事实依据、类型和禁用表达。",
-    parameters: ValidateStrategyRequestSchema,
-    async execute() {
-      return textResult(await service.validate());
-    },
-  };
-
   const proposeStrategyApproval: AgentTool<typeof ProposeStrategyApprovalRequestSchema> = {
     name: "propose_strategy_approval",
     label: "建议提交卖点策略人工审批",
@@ -64,6 +59,21 @@ export function createStrategyTools(service: StrategyWorkflowPort): readonly Age
         cost: { kind: "free" },
         payload: { schemaVersion: 1 },
       } satisfies AgentActionCard);
+    },
+  };
+
+  return [proposeStrategyGeneration, proposeStrategyApproval] as const;
+}
+
+export function createStrategyTools(service: StrategyWorkflowPort): readonly AgentTool[] {
+  const [proposeStrategyGeneration, proposeStrategyApproval] = createStrategyProposalTools(service);
+  const validateStrategy: AgentTool<typeof ValidateStrategyRequestSchema> = {
+    name: "validate_strategy",
+    label: "校验卖点策略",
+    description: "校验当前策略的固定卖点覆盖、事实依据、类型和禁用表达。",
+    parameters: ValidateStrategyRequestSchema,
+    async execute() {
+      return textResult(await service.validate());
     },
   };
 
