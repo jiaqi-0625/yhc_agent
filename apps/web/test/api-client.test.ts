@@ -2,23 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { ApiError, api, setWorkspaceSessionToken } from "../public/api-client.js";
+import { ApiError, api, authenticatedFetch, setWorkspaceSessionToken } from "../public/api-client.js";
 
-test("browser API attaches the server-issued workspace session and replaces stale caller identity", async (context) => {
+test("browser authenticated fetch and API replace caller authorization with the current session", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => {
     globalThis.fetch = originalFetch;
     setWorkspaceSessionToken(null);
   });
   setWorkspaceSessionToken("session_current");
+  const authorizations: Array<string | null> = [];
   globalThis.fetch = async (_input, init) => {
     const headers = new Headers(init?.headers);
-    assert.equal(headers.get("authorization"), "Bearer session_current");
+    authorizations.push(headers.get("authorization"));
+    return Response.json({ ok: true });
+  };
+
+  const response = await authenticatedFetch("/v1/stream", {
+    headers: { authorization: "Bearer stream_forged" },
+  });
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.deepEqual(await api("/v1/test", {
+    headers: { authorization: "Bearer client_forged" },
+  }), { ok: true });
+  assert.deepEqual(authorizations, ["Bearer session_current", "Bearer session_current"]);
+});
+
+test("browser authenticated fetch drops caller authorization when no workspace session exists", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    setWorkspaceSessionToken(null);
+  });
+  setWorkspaceSessionToken(null);
+  globalThis.fetch = async (_input, init) => {
+    assert.equal(new Headers(init?.headers).has("authorization"), false);
     return Response.json({ ok: true });
   };
 
   assert.deepEqual(await api("/v1/test", {
-    headers: { authorization: "Bearer client_forged" },
+    headers: { authorization: "Bearer caller_forged" },
   }), { ok: true });
 });
 

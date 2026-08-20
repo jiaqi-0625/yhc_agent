@@ -20,14 +20,15 @@ export function setWorkspaceSessionToken(token) {
   workspaceSessionToken = typeof token === "string" && token ? token : null;
 }
 
-export function workspaceFetch(path, options) {
+export function authenticatedFetch(path, options) {
   const headers = new Headers(options?.headers);
   if (workspaceSessionToken) headers.set("authorization", "Bearer " + workspaceSessionToken);
+  else headers.delete("authorization");
   return fetch(path, { ...options, headers });
 }
 
 export async function api(path, options) {
-  const response = await workspaceFetch(path, options);
+  const response = await authenticatedFetch(path, options);
   if (!response.ok) {
     let payload;
     try {

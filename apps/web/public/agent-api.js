@@ -1,4 +1,4 @@
-import { api, workspaceFetch } from "./api-client.js";
+import { api, authenticatedFetch } from "./api-client.js";
 
 class AgentStreamProtocolError extends Error {}
 class AgentStreamTransportError extends Error {}
@@ -23,6 +23,12 @@ function scopedSessionUrl(path, videoTaskId) {
   if (!videoTaskId) return path;
   const separator = path.includes("?") ? "&" : "?";
   return path + separator + "videoTaskId=" + encodeURIComponent(videoTaskId);
+}
+
+function assertIdentifier(value, label) {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
+    throw new TypeError(label + "必须是有效的标识符。");
+  }
 }
 
 function waitForRetry(delayMs, signal) {
@@ -55,7 +61,7 @@ async function startAgentRun(sessionId, message, requestId, options = {}) {
   let attempt = 0;
   while (true) {
     try {
-      const response = await workspaceFetch(scopedSessionUrl(
+      const response = await authenticatedFetch(scopedSessionUrl(
         "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs",
         options.videoTaskId,
       ), {
@@ -144,7 +150,7 @@ async function streamRunEvents(sessionId, runId, options = {}) {
       options.onConnectionState?.(reconnects === 0 ? "connecting" : "reconnecting");
       const headers = { accept: "text/event-stream" };
       if (state.lastEventId) headers["last-event-id"] = state.lastEventId;
-      const response = await workspaceFetch(
+      const response = await authenticatedFetch(
         scopedSessionUrl(
           "/v1/sessions/" + encodeURIComponent(sessionId) + "/runs/" + encodeURIComponent(runId) + "/events",
           options.videoTaskId,
@@ -181,6 +187,19 @@ async function streamAgentMessage(sessionId, message, options = {}) {
 export const agentApi = {
   getOwnBudget: function () {
     return api("/v1/workspace/me/budget");
+  },
+  executeCommand: function (projectId, videoTaskId, body) {
+    assertIdentifier(projectId, "项目 ID");
+    assertIdentifier(videoTaskId, "视频任务 ID");
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/commands",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
   },
   listSessions: function (videoTaskId) {
     return api("/v1/sessions?videoTaskId=" + encodeURIComponent(videoTaskId));
