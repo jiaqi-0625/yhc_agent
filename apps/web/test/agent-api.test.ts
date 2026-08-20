@@ -123,6 +123,70 @@ test("browser Agent API stops start retries when the request is cancelled", asyn
   assert.equal(calls, 1);
 });
 
+test("browser Agent API sends authenticated workspace commands without changing the body", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+    setWorkspaceSessionToken(null);
+  });
+  setWorkspaceSessionToken("session_agent_command");
+  const body = {
+    requestId: "request_agent_command",
+    card: {
+      schemaVersion: 1,
+      kind: "agent_action_card",
+      videoTaskId: "video_task_agent_command",
+      action: "generate_strategy",
+      label: "生成卖点策略草稿",
+      summary: "保持请求体原样发送。",
+      expectedRevision: 3,
+      cost: { kind: "free" },
+      payload: { schemaVersion: 1, audience: "家庭用户", theme: "周末出行" },
+    },
+  };
+  let capturedUrl = "";
+  let capturedInit: RequestInit | undefined;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    capturedUrl = String(input);
+    capturedInit = init;
+    return Response.json({ replayed: false });
+  }) as typeof fetch;
+
+  assert.deepEqual(
+    await agentApi.executeCommand("batch_project-agent_1", "video_task_agent_command", body),
+    { replayed: false },
+  );
+  assert.equal(
+    capturedUrl,
+    "/v1/workspace/batch-projects/batch_project-agent_1/video-tasks/video_task_agent_command/commands",
+  );
+  assert.equal(capturedInit?.method, "POST");
+  const headers = new Headers(capturedInit?.headers);
+  assert.equal(headers.get("content-type"), "application/json");
+  assert.equal(headers.get("authorization"), "Bearer session_agent_command");
+  assert.equal(capturedInit?.body, JSON.stringify(body));
+});
+
+test("browser Agent API rejects invalid workspace command identifiers before fetch", (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => { globalThis.fetch = originalFetch; });
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return Response.json({});
+  }) as typeof fetch;
+
+  assert.throws(
+    () => agentApi.executeCommand("../project_other", "video_task_agent_command", {}),
+    /项目 ID.*标识符/u,
+  );
+  assert.throws(
+    () => agentApi.executeCommand("batch_project_agent_command", "video/task_other", {}),
+    /视频任务 ID.*标识符/u,
+  );
+  assert.equal(calls, 0);
+});
+
 test("browser Agent API loads only the current session budget view", async (context) => {
   const originalFetch = globalThis.fetch;
   context.after(() => { globalThis.fetch = originalFetch; });

@@ -90,18 +90,85 @@ export function extractAgentActionCard(value) {
   return undefined;
 }
 
-export function agentActionRequestBody(proposal) {
+export function createAgentActionRequestId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
+    return "agent_action_" + globalThis.crypto.randomUUID();
+  }
+  return "agent_action_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
+}
+
+export function agentActionRequestBody(proposal, requestId) {
+  const card = parseAgentActionCard(proposal);
+  if (!card || !isIdentifier(requestId)) {
+    throw new Error("无法安全执行这张智能助手操作卡片。");
+  }
+  return { requestId, card };
+}
+
+function uncertainCommandResponse() {
+  const error = new Error("服务端返回的操作结果无法安全核验。");
+  error.mayHaveExecuted = true;
+  return error;
+}
+
+function matchesCommandResult(action, result) {
+  if (!isRecord(result)) return false;
+  if (action === "generate_strategy") {
+    return result.kind === "strategy_generated"
+      && isIdentifier(result.strategyDraftId);
+  }
+  return action === "request_strategy_approval"
+    && result.kind === "strategy_confirmation_requested"
+    && isIdentifier(result.strategyDraftId)
+    && isIdentifier(result.stageConfirmationRequestId);
+}
+
+export function agentActionSuccessPresentation(proposal, requestId, projectId, response) {
+  const receipt = isRecord(response) ? response.receipt : undefined;
+  const videoTask = isRecord(response) ? response.videoTask : undefined;
+  if (
+    !parseAgentActionCard(proposal)
+    || !isIdentifier(requestId)
+    || !isIdentifier(projectId)
+    || !isRecord(receipt)
+    || !isRecord(videoTask)
+    || typeof response.replayed !== "boolean"
+    || !isIdentifier(receipt.id)
+    || receipt.requestId !== requestId
+    || receipt.batchProjectId !== projectId
+    || receipt.videoTaskId !== proposal.videoTaskId
+    || receipt.action !== proposal.action
+    || receipt.expectedTaskRevision !== proposal.expectedRevision
+    || receipt.resultingTaskRevision !== proposal.expectedRevision + 1
+    || !isRecord(receipt.cost)
+    || receipt.cost.kind !== "free"
+    || receipt.cost.amountMinor !== 0
+    || receipt.cost.charged !== false
+    || !matchesCommandResult(proposal.action, receipt.result)
+    || videoTask.id !== proposal.videoTaskId
+    || videoTask.batchProjectId !== projectId
+    || !Number.isSafeInteger(videoTask.revision)
+    || videoTask.revision < receipt.resultingTaskRevision
+  ) {
+    throw uncertainCommandResponse();
+  }
+  const replayPrefix = response.replayed ? "已恢复此前操作结果，未重复执行。" : "操作已由服务端执行。";
   if (proposal.action === "generate_strategy") {
     return {
-      audience: proposal.payload.audience,
-      theme: proposal.payload.theme,
-      expectedRevision: proposal.expectedRevision,
+      status: response.replayed ? "已恢复" : "已执行",
+      message: replayPrefix + "策略草稿已生成，任务版本更新至 " + receipt.resultingTaskRevision + "。",
+      receiptId: receipt.id,
+      resultingRevision: videoTask.revision,
+      replayed: response.replayed,
     };
   }
-  if (proposal.action === "request_strategy_approval") {
-    return { expectedRevision: proposal.expectedRevision };
-  }
-  throw new Error("不支持的智能助手操作卡片。");
+  return {
+    status: response.replayed ? "已恢复" : "已提交",
+    message: replayPrefix + "人工确认请求已提交，当前阶段尚未确认；任务版本更新至 " + receipt.resultingTaskRevision + "。",
+    receiptId: receipt.id,
+    resultingRevision: videoTask.revision,
+    replayed: response.replayed,
+  };
 }
 
 export function agentActionAvailability(
@@ -129,6 +196,14 @@ export function agentActionAvailability(
 export function agentActionFailurePresentation(error) {
   const code = error && typeof error.code === "string" ? error.code : "";
   const charged = Boolean(error && error.charged);
+  if (error && error.mayHaveExecuted) {
+    return {
+      status: "结果待确认",
+      message: "服务端已返回结果，但页面无法安全核验。为避免重复执行，请刷新任务并核对最新状态。",
+      blocksCard: true,
+      stale: false,
+    };
+  }
   const invalidSessionCodes = new Set([
     "AIC-AUTH-SESSION_REQUIRED",
     "AIC-AUTH-SESSION_HEADER_INVALID",

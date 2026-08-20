@@ -3,8 +3,10 @@ import {
   agentActionAvailability,
   agentActionFailurePresentation,
   agentActionRequestBody,
+  agentActionSuccessPresentation,
   agentBudgetPresentation,
   bindAgentPanel,
+  createAgentActionRequestId,
   extractAgentActionCard,
 } from "./agent-panel.js";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
@@ -1007,31 +1009,57 @@ function addToolEvent(turn, event) {
   });
 }
 
-function proposalEndpoint(proposal) {
-  if (!state.work) return null;
-  if (proposal.videoTaskId && proposal.videoTaskId !== state.work.work.id) return null;
-  const workId = encodeURIComponent(state.work.work.id);
-  return proposal.action === "generate_strategy"
-    ? "/v1/works/" + workId + "/strategy/generate"
-    : "/v1/works/" + workId + "/strategy/approval-request";
+function currentAgentActionContext() {
+  const context = state.taskContext;
+  if (
+    !context
+    || !state.sessionId
+    || state.sessionVideoTaskId !== context.videoTask.id
+  ) return null;
+  return {
+    sessionId: state.sessionId,
+    projectId: context.batchProject.id,
+    videoTaskId: context.videoTask.id,
+    revision: context.videoTask.revision,
+  };
 }
 
-function proposalResultText(proposal, view) {
-  const strategy = view.strategy;
-  if (proposal.action === "generate_strategy") {
-    if (!strategy) return "后端已接受操作，但尚未返回策略产物；请刷新作品后重试。";
-    return "已生成策略 v" + strategy.version + "，共 " + strategy.items.length + " 条卖点，任务内容已同步更新。";
-  }
-  return "已提交人工审批，当前状态：" + (statusLabels[view.work.status] || view.work.status) + "。";
+function applyAgentCommandRevision(response, expectedContext) {
+  const context = currentAgentActionContext();
+  if (
+    !context
+    || context.projectId !== expectedContext.projectId
+    || context.videoTaskId !== expectedContext.videoTaskId
+    || response.videoTask.id !== context.videoTaskId
+    || response.videoTask.batchProjectId !== context.projectId
+  ) return;
+  state.taskContext = {
+    ...state.taskContext,
+    videoTask: {
+      ...state.taskContext.videoTask,
+      revision: response.videoTask.revision,
+    },
+  };
+  renderTaskContext(state.taskContext);
+  refreshActionProposalAvailability();
+}
+
+async function refreshAgentContextAfterCommand(sessionId, videoTaskId) {
+  try {
+    const body = await agentApi.getSession(sessionId, videoTaskId);
+    if (state.sessionId !== sessionId || state.sessionVideoTaskId !== videoTaskId) return;
+    updateSession(body.session);
+    refreshActionProposalAvailability();
+  } catch {}
 }
 
 async function executeActionProposal(card, proposal) {
   const button = card.querySelector("button");
   const status = card.querySelector(".agent-action-status");
   const result = card.querySelector(".agent-action-result");
-  const endpoint = proposalEndpoint(proposal);
-  if (!button || !status || !result || !endpoint || !state.work) return;
-  if (proposal.videoTaskId && proposal.videoTaskId !== state.work.work.id) {
+  const context = currentAgentActionContext();
+  if (!button || !status || !result || !context) return;
+  if (proposal.videoTaskId !== context.videoTaskId) {
     status.textContent = "任务不匹配";
     result.textContent = "该操作卡片属于其他视频任务，不能在当前任务执行。";
     result.hidden = false;
@@ -1039,7 +1067,7 @@ async function executeActionProposal(card, proposal) {
     card.classList.add("stale");
     return;
   }
-  if (state.work.work.revision !== proposal.expectedRevision) {
+  if (context.revision !== proposal.expectedRevision) {
     status.textContent = "已失效";
     result.textContent = "任务内容已经更新，请让智能助手基于最新状态重新建议。";
     button.disabled = true;
@@ -1054,18 +1082,28 @@ async function executeActionProposal(card, proposal) {
   delete card.dataset.executionBlocked;
   card.classList.remove("failed");
   try {
-    const view = await api(endpoint, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(agentActionRequestBody(proposal)),
-    });
-    renderWork(view);
-    await refreshWorkList();
-    status.textContent = "已执行";
-    result.textContent = proposalResultText(proposal, view);
+    const requestId = card.dataset.commandRequestId || createAgentActionRequestId();
+    card.dataset.commandRequestId = requestId;
+    const response = await agentApi.executeCommand(
+      context.projectId,
+      context.videoTaskId,
+      agentActionRequestBody(proposal, requestId),
+    );
+    const presentation = agentActionSuccessPresentation(
+      proposal,
+      requestId,
+      context.projectId,
+      response,
+    );
+    applyAgentCommandRevision(response, context);
+    status.textContent = presentation.status;
+    result.textContent = presentation.message;
     result.hidden = false;
+    card.dataset.commandReceiptId = presentation.receiptId;
+    card.dataset.commandReplayed = String(presentation.replayed);
     card.dataset.executed = "true";
     card.classList.add("completed");
+    void refreshAgentContextAfterCommand(context.sessionId, context.videoTaskId);
     elements.messages.scrollTop = elements.messages.scrollHeight;
   } catch (error) {
     const failure = agentActionFailurePresentation(error);
@@ -1075,7 +1113,7 @@ async function executeActionProposal(card, proposal) {
     card.dataset.executionBlocked = failure.blocksCard ? "true" : "false";
     card.classList.toggle("stale", failure.stale);
     card.classList.add("failed");
-    showWorkflowError(error);
+    showWorkflowError(new Error(failure.message));
     button.disabled = failure.blocksCard;
   } finally {
     setWorkflowBusy(false);
@@ -1125,6 +1163,7 @@ function appendActionProposal(turn, proposal) {
 }
 
 function refreshActionProposalAvailability() {
+  const context = currentAgentActionContext();
   document.querySelectorAll(".agent-action-card").forEach(function (card) {
     if (card.dataset.executed === "true") return;
     const button = card.querySelector("button");
@@ -1134,7 +1173,7 @@ function refreshActionProposalAvailability() {
     const availability = agentActionAvailability({
       videoTaskId: card.dataset.videoTaskId,
       expectedRevision: Number(card.dataset.expectedRevision),
-    }, state.work?.work.id, state.work?.work.revision, state.workflowBusy, card.dataset.executionBlocked === "true");
+    }, context?.videoTaskId, context?.revision, state.workflowBusy, card.dataset.executionBlocked === "true");
     button.disabled = !availability.enabled;
     card.classList.toggle("stale", availability.stale);
     if (availability.stale) {

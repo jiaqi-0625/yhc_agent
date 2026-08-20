@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentBudgetPresentation, agentPanelWidthBounds, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -87,17 +87,112 @@ test("Agent action cards require the exact frozen structure before rendering", (
   }
 });
 
-test("Agent action execution sends only allowlisted payload fields", () => {
-  assert.deepEqual(agentActionRequestBody(generationCard), {
-    audience: "家庭用户",
-    theme: "周末出行",
-    expectedRevision: 3,
+test("Agent action execution sends only a request ID and the validated frozen card", () => {
+  assert.match(createAgentActionRequestId(), /^agent_action_[A-Za-z0-9_-]+$/u);
+  assert.deepEqual(agentActionRequestBody(generationCard, "agent_action_request_1"), {
+    requestId: "agent_action_request_1",
+    card: generationCard,
   });
-  assert.deepEqual(agentActionRequestBody({
+  const approvalCard = {
     ...generationCard,
     action: "request_strategy_approval",
+    label: "提交卖点策略人工审批",
     payload: { schemaVersion: 1 },
-  }), { expectedRevision: 3 });
+  };
+  assert.deepEqual(agentActionRequestBody(approvalCard, "agent_action_request_2"), {
+    requestId: "agent_action_request_2",
+    card: approvalCard,
+  });
+  assert.throws(
+    () => agentActionRequestBody({ ...generationCard, accountId: "account_forged" }, "agent_action_request_3"),
+    /无法安全执行/u,
+  );
+  assert.throws(() => agentActionRequestBody(generationCard, "../request"), /无法安全执行/u);
+});
+
+test("Agent action command responses preserve replay and human-confirmation boundaries", () => {
+  const response = {
+    receipt: {
+      id: "command_receipt_1",
+      batchProjectId: "project_1",
+      videoTaskId: "task_1",
+      requestId: "agent_action_request_1",
+      action: "generate_strategy",
+      expectedTaskRevision: 3,
+      resultingTaskRevision: 4,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+    },
+    replayed: false,
+    videoTask: { id: "task_1", batchProjectId: "project_1", revision: 4 },
+  };
+  assert.deepEqual(
+    agentActionSuccessPresentation(generationCard, "agent_action_request_1", "project_1", response),
+    {
+      status: "已执行",
+      message: "操作已由服务端执行。策略草稿已生成，任务版本更新至 4。",
+      receiptId: "command_receipt_1",
+      resultingRevision: 4,
+      replayed: false,
+    },
+  );
+  const approvalCard = {
+    ...generationCard,
+    action: "request_strategy_approval",
+    label: "提交卖点策略人工审批",
+    payload: { schemaVersion: 1 },
+  };
+  const replay = {
+    ...response,
+    replayed: true,
+    receipt: {
+      ...response.receipt,
+      id: "command_receipt_2",
+      requestId: "agent_action_request_2",
+      action: "request_strategy_approval",
+      result: {
+        kind: "strategy_confirmation_requested",
+        strategyDraftId: "strategy_draft_1",
+        stageConfirmationRequestId: "confirmation_request_1",
+      },
+    },
+  };
+  const presentation = agentActionSuccessPresentation(
+    approvalCard,
+    "agent_action_request_2",
+    "project_1",
+    replay,
+  );
+  assert.equal(presentation.status, "已恢复");
+  assert.match(presentation.message, /未重复执行/u);
+  assert.match(presentation.message, /尚未确认/u);
+  assert.doesNotMatch(presentation.message, /已确认/u);
+});
+
+test("Agent action command responses reject mismatched receipts without inviting a duplicate", () => {
+  assert.throws(
+    () => agentActionSuccessPresentation(
+      generationCard,
+      "agent_action_request_1",
+      "project_1",
+      {
+        receipt: {
+          id: "command_receipt_1",
+          batchProjectId: "project_other",
+          videoTaskId: "task_1",
+          requestId: "agent_action_request_1",
+          action: "generate_strategy",
+          expectedTaskRevision: 3,
+          resultingTaskRevision: 4,
+          cost: { kind: "free", amountMinor: 0, charged: false },
+          result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+        },
+        replayed: false,
+        videoTask: { id: "task_1", batchProjectId: "project_1", revision: 4 },
+      },
+    ),
+    (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+  );
 });
 
 test("Agent action cards stay disabled for missing, cross-task, stale, and busy contexts", () => {
@@ -190,6 +285,12 @@ test("Agent action command failures block deterministic retries without exposing
 });
 
 test("Agent action failures never invite a duplicate when the server reports a charge", () => {
+  assert.deepEqual(agentActionFailurePresentation({ mayHaveExecuted: true }), {
+    status: "结果待确认",
+    message: "服务端已返回结果，但页面无法安全核验。为避免重复执行，请刷新任务并核对最新状态。",
+    blocksCard: true,
+    stale: false,
+  });
   assert.deepEqual(agentActionFailurePresentation({
     code: "AIC-PROVIDER-UNKNOWN_RESULT",
     charged: true,
