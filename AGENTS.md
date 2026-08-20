@@ -24,10 +24,10 @@ This repository implements an automotive information-feed advertising production
 - Project-level settings are the vehicle, available asset pool, visual style, and aspect ratio. Audience, theme, duration, script input, and platform tags belong to a video task.
 - Platform selections are metadata tags only in the current product scope; they do not alter generation rules.
 - Company assets are read-only through a replaceable provider interface. Vehicle assets cannot be swapped across vehicles; people and scenes may be replaced from the company catalog.
-- The Agent selects people and scenes during asset matching from administrator-authored asset descriptions. Storyboard shots display their referenced assets and allow human replacement of people and scenes; human edits always win.
-- The project asset pool tracks the latest catalog data, but every video task must lock versioned vehicle and asset snapshots when strategy work starts.
+- After strategy and script confirmation, the Agent selects people and scenes from administrator-authored asset descriptions. Storyboard shots display their referenced assets and allow human replacement of people and scenes; human edits always win.
+- The project asset pool tracks the latest catalog data until asset matching is confirmed. Each video task locks the vehicle snapshot when strategy work starts and locks the selected asset snapshot when asset matching is confirmed.
 - Local uploads belong to a project-scoped temporary asset pool. Validate format, dimensions, duplicates, source, and usage rights before they can be used.
-- The video workflow is `strategy -> asset matching -> script -> storyboard -> video preview -> delivery`. Every stage requires an explicit human confirmation.
+- The video workflow is `strategy -> script -> asset matching -> storyboard -> video preview -> delivery`. Every stage requires an explicit human confirmation.
 - Persist an immutable version at every confirmation. Rolling back a version must invalidate all dependent downstream artifacts.
 - One account may run at most one expensive video-production job at a time. Different accounts may each run one job. Enforce this on the server.
 - Every video task has one active owner. Other authorized project members may view or take over the task, but concurrent ownership is not allowed.
