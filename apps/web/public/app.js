@@ -244,17 +244,27 @@ function clearWorkflowError() {
   elements.workflowError.textContent = "";
 }
 
+function refreshAgentInteractionControls() {
+  const interactionBusy = state.busy || state.workflowBusy;
+  elements.prompt.disabled = interactionBusy || !state.modelReady || !state.sessionId;
+  elements.send.disabled = interactionBusy || !state.modelReady || !state.sessionId;
+  elements.send.hidden = state.busy;
+  elements.cancelGeneration.hidden = !state.busy;
+  elements.newSession.disabled = interactionBusy || !state.work;
+  elements.sessionSelect.disabled = interactionBusy || state.sessions.length === 0;
+  elements.resetSession.disabled = interactionBusy;
+  elements.retryMessage.disabled = interactionBusy;
+  if (elements.agentAccountSelect) {
+    elements.agentAccountSelect.disabled = interactionBusy
+      || state.workspaceHydrating
+      || state.accounts.length < 2;
+  }
+}
+
 function setBusy(busy) {
   state.busy = busy;
-  elements.prompt.disabled = busy || !state.modelReady || !state.sessionId;
-  elements.send.disabled = busy || !state.modelReady || !state.sessionId;
-  elements.send.hidden = busy;
-  elements.cancelGeneration.hidden = !busy;
-  elements.newSession.disabled = busy || !state.work;
-  elements.sessionSelect.disabled = busy || state.sessions.length === 0;
-  elements.resetSession.disabled = busy;
-  elements.retryMessage.disabled = busy;
-  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.workflowBusy || state.workspaceHydrating || state.accounts.length < 2;
+  refreshAgentInteractionControls();
+  refreshActionProposalAvailability();
 }
 
 function setWorkflowBusy(busy) {
@@ -272,7 +282,7 @@ function setWorkflowBusy(busy) {
     elements.stateNewWork,
   ].forEach(function (button) { button.disabled = busy; });
   elements.workList.querySelectorAll("button").forEach(function (button) { button.disabled = busy; });
-  if (elements.agentAccountSelect) elements.agentAccountSelect.disabled = busy || state.busy || state.workspaceHydrating || state.accounts.length < 2;
+  refreshAgentInteractionControls();
   refreshActionProposalAvailability();
 }
 
@@ -506,6 +516,7 @@ function renderStrategyItems(strategy, editable) {
 function renderWork(view) {
   state.work = view;
   if (!view) {
+    state.taskContext = null;
     localStorage.removeItem(selectedVideoTaskStorageKey);
     elements.createWorkCard.hidden = false;
     elements.activeWork.hidden = true;
@@ -531,7 +542,10 @@ function renderWork(view) {
     localStorage.setItem(navigationBrandStorageKey(state.account.accountId), workBrand.id);
     renderNavigationBrands();
   }
-  if (state.sessionVideoTaskId !== work.id) renderTaskContext(null);
+  if (state.sessionVideoTaskId !== work.id) {
+    state.taskContext = null;
+    renderTaskContext(null);
+  }
   localStorage.setItem(selectedVideoTaskStorageKey, work.id);
   elements.createWorkCard.hidden = true;
   elements.activeWork.hidden = false;
@@ -1014,10 +1028,14 @@ function currentAgentActionContext() {
   if (
     !context
     || !state.sessionId
+    || !state.account?.accountId
+    || state.work?.work.id !== context.videoTask.id
     || state.sessionVideoTaskId !== context.videoTask.id
   ) return null;
   return {
     sessionId: state.sessionId,
+    accountId: state.account?.accountId,
+    scopeGeneration: workspaceScopeGeneration,
     projectId: context.batchProject.id,
     videoTaskId: context.videoTask.id,
     revision: context.videoTask.revision,
@@ -1028,10 +1046,13 @@ function applyAgentCommandRevision(response, expectedContext) {
   const context = currentAgentActionContext();
   if (
     !context
+    || context.scopeGeneration !== expectedContext.scopeGeneration
     || context.projectId !== expectedContext.projectId
     || context.videoTaskId !== expectedContext.videoTaskId
     || response.videoTask.id !== context.videoTaskId
     || response.videoTask.batchProjectId !== context.projectId
+    || !Number.isSafeInteger(response.videoTask.revision)
+    || response.videoTask.revision < context.revision
   ) return;
   state.taskContext = {
     ...state.taskContext,
@@ -1044,16 +1065,27 @@ function applyAgentCommandRevision(response, expectedContext) {
   refreshActionProposalAvailability();
 }
 
-async function refreshAgentContextAfterCommand(sessionId, videoTaskId) {
+async function refreshAgentContextAfterCommand(sessionId, videoTaskId, expectedScopeGeneration) {
   try {
     const body = await agentApi.getSession(sessionId, videoTaskId);
-    if (state.sessionId !== sessionId || state.sessionVideoTaskId !== videoTaskId) return;
+    if (
+      workspaceScopeGeneration !== expectedScopeGeneration
+      || state.sessionId !== sessionId
+      || state.sessionVideoTaskId !== videoTaskId
+    ) return;
+    const refreshedRevision = body.session?.taskContext?.videoTask?.revision;
+    const currentRevision = state.taskContext?.videoTask?.revision;
+    if (
+      !Number.isSafeInteger(refreshedRevision)
+      || (Number.isSafeInteger(currentRevision) && refreshedRevision < currentRevision)
+    ) return;
     updateSession(body.session);
     refreshActionProposalAvailability();
   } catch {}
 }
 
 async function executeActionProposal(card, proposal) {
+  if (state.busy || state.workflowBusy) return;
   const button = card.querySelector("button");
   const status = card.querySelector(".agent-action-status");
   const result = card.querySelector(".agent-action-result");
@@ -1093,6 +1125,7 @@ async function executeActionProposal(card, proposal) {
       proposal,
       requestId,
       context.projectId,
+      context.accountId,
       response,
     );
     applyAgentCommandRevision(response, context);
@@ -1103,7 +1136,11 @@ async function executeActionProposal(card, proposal) {
     card.dataset.commandReplayed = String(presentation.replayed);
     card.dataset.executed = "true";
     card.classList.add("completed");
-    void refreshAgentContextAfterCommand(context.sessionId, context.videoTaskId);
+    void refreshAgentContextAfterCommand(
+      context.sessionId,
+      context.videoTaskId,
+      context.scopeGeneration,
+    );
     elements.messages.scrollTop = elements.messages.scrollHeight;
   } catch (error) {
     const failure = agentActionFailurePresentation(error);
@@ -1173,7 +1210,7 @@ function refreshActionProposalAvailability() {
     const availability = agentActionAvailability({
       videoTaskId: card.dataset.videoTaskId,
       expectedRevision: Number(card.dataset.expectedRevision),
-    }, context?.videoTaskId, context?.revision, state.workflowBusy, card.dataset.executionBlocked === "true");
+    }, context?.videoTaskId, context?.revision, state.busy || state.workflowBusy, card.dataset.executionBlocked === "true");
     button.disabled = !availability.enabled;
     card.classList.toggle("stale", availability.stale);
     if (availability.stale) {
@@ -1329,7 +1366,7 @@ function renderSessionOptions() {
   if (state.sessionId && state.sessions.some(function (session) { return session.id === state.sessionId; })) {
     elements.sessionSelect.value = state.sessionId;
   }
-  elements.sessionSelect.disabled = state.busy || state.sessions.length === 0;
+  elements.sessionSelect.disabled = state.busy || state.workflowBusy || state.sessions.length === 0;
 }
 
 function renderAccount() {
@@ -1782,7 +1819,7 @@ async function initialize() {
 
 async function sendMessage(text) {
   const message = text.trim();
-  if (!message || state.busy || !state.sessionId) return;
+  if (!message || state.busy || state.workflowBusy || !state.sessionId) return;
   state.lastPrompt = message;
   elements.retryMessage.hidden = true;
   clearError();

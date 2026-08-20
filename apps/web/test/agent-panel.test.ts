@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
@@ -113,21 +114,32 @@ test("Agent action execution sends only a request ID and the validated frozen ca
 test("Agent action command responses preserve replay and human-confirmation boundaries", () => {
   const response = {
     receipt: {
+      schemaVersion: 1,
       id: "command_receipt_1",
+      tenantId: "tenant_1",
       batchProjectId: "project_1",
       videoTaskId: "task_1",
+      actorAccountId: "account_creator_a",
       requestId: "agent_action_request_1",
+      payloadHash: "a".repeat(64),
       action: "generate_strategy",
       expectedTaskRevision: 3,
       resultingTaskRevision: 4,
       cost: { kind: "free", amountMinor: 0, charged: false },
       result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+      occurredAt: "2026-08-20T00:00:00.000Z",
     },
     replayed: false,
-    videoTask: { id: "task_1", batchProjectId: "project_1", revision: 4 },
+    videoTask: { id: "task_1", tenantId: "tenant_1", batchProjectId: "project_1", revision: 4 },
   };
   assert.deepEqual(
-    agentActionSuccessPresentation(generationCard, "agent_action_request_1", "project_1", response),
+    agentActionSuccessPresentation(
+      generationCard,
+      "agent_action_request_1",
+      "project_1",
+      "account_creator_a",
+      response,
+    ),
     {
       status: "已执行",
       message: "操作已由服务端执行。策略草稿已生成，任务版本更新至 4。",
@@ -161,6 +173,7 @@ test("Agent action command responses preserve replay and human-confirmation boun
     approvalCard,
     "agent_action_request_2",
     "project_1",
+    "account_creator_a",
     replay,
   );
   assert.equal(presentation.status, "已恢复");
@@ -175,23 +188,104 @@ test("Agent action command responses reject mismatched receipts without inviting
       generationCard,
       "agent_action_request_1",
       "project_1",
+      "account_creator_a",
       {
         receipt: {
+          schemaVersion: 1,
           id: "command_receipt_1",
+          tenantId: "tenant_1",
           batchProjectId: "project_other",
           videoTaskId: "task_1",
+          actorAccountId: "account_creator_a",
           requestId: "agent_action_request_1",
+          payloadHash: "a".repeat(64),
           action: "generate_strategy",
           expectedTaskRevision: 3,
           resultingTaskRevision: 4,
           cost: { kind: "free", amountMinor: 0, charged: false },
           result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+          occurredAt: "2026-08-20T00:00:00.000Z",
         },
         replayed: false,
-        videoTask: { id: "task_1", batchProjectId: "project_1", revision: 4 },
+        videoTask: { id: "task_1", tenantId: "tenant_1", batchProjectId: "project_1", revision: 4 },
       },
     ),
     (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+  );
+});
+
+test("Agent action command responses bind receipt metadata to the current account and tenant", () => {
+  const valid = {
+    receipt: {
+      schemaVersion: 1,
+      id: "command_receipt_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      videoTaskId: "task_1",
+      actorAccountId: "account_creator_a",
+      requestId: "agent_action_request_1",
+      payloadHash: "a".repeat(64),
+      action: "generate_strategy",
+      expectedTaskRevision: 3,
+      resultingTaskRevision: 4,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "strategy_generated", strategyDraftId: "strategy_draft_1" },
+      occurredAt: "2026-08-20T00:00:00.000Z",
+    },
+    replayed: false,
+    videoTask: { id: "task_1", tenantId: "tenant_1", batchProjectId: "project_1", revision: 4 },
+  };
+  for (const invalid of [
+    { ...valid, receipt: { ...valid.receipt, actorAccountId: "account_other" } },
+    { ...valid, videoTask: { ...valid.videoTask, tenantId: "tenant_other" } },
+    { ...valid, receipt: { ...valid.receipt, payloadHash: "not-a-hash" } },
+    { ...valid, receipt: { ...valid.receipt, occurredAt: "not-a-date" } },
+    { ...valid, receipt: { ...valid.receipt, internalDetail: "should-not-exist" } },
+  ]) {
+    assert.throws(
+      () => agentActionSuccessPresentation(
+        generationCard,
+        "agent_action_request_1",
+        "project_1",
+        "account_creator_a",
+        invalid,
+      ),
+      (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+    );
+  }
+});
+
+test("application wiring keeps action commands task-scoped and disabled during Agent runs", async () => {
+  const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  const start = source.indexOf("function currentAgentActionContext()");
+  const end = source.indexOf("function appendActionProposal(", start);
+  assert.ok(start >= 0 && end > start);
+  const commandWiring = source.slice(start, end);
+  assert.match(commandWiring, /state\.work\?\.work\.id !== context\.videoTask\.id/u);
+  assert.match(commandWiring, /if \(state\.busy \|\| state\.workflowBusy\) return;/u);
+  assert.match(commandWiring, /context\.scopeGeneration !== expectedContext\.scopeGeneration/u);
+  assert.match(commandWiring, /response\.videoTask\.revision < context\.revision/u);
+  assert.match(commandWiring, /agentApi\.executeCommand/u);
+  assert.doesNotMatch(commandWiring, /\/v1\/works\//u);
+  assert.match(source, /state\.busy \|\| state\.workflowBusy, card\.dataset\.executionBlocked/u);
+
+  const controlsStart = source.indexOf("function refreshAgentInteractionControls()");
+  const controlsEnd = source.indexOf("function captureWorkspaceScope()", controlsStart);
+  assert.ok(controlsStart >= 0 && controlsEnd > controlsStart);
+  const interactionWiring = source.slice(controlsStart, controlsEnd);
+  assert.match(interactionWiring, /const interactionBusy = state\.busy \|\| state\.workflowBusy;/u);
+  assert.match(interactionWiring, /elements\.prompt\.disabled = interactionBusy/u);
+  assert.match(interactionWiring, /elements\.send\.disabled = interactionBusy/u);
+  assert.match(interactionWiring, /elements\.newSession\.disabled = interactionBusy/u);
+  assert.match(interactionWiring, /elements\.sessionSelect\.disabled = interactionBusy/u);
+  assert.equal(interactionWiring.match(/refreshAgentInteractionControls\(\);/gu)?.length, 2);
+
+  const sendStart = source.indexOf("async function sendMessage(");
+  const sendEnd = source.indexOf("bindAgentPanel({", sendStart);
+  assert.ok(sendStart >= 0 && sendEnd > sendStart);
+  assert.match(
+    source.slice(sendStart, sendEnd),
+    /if \(!message \|\| state\.busy \|\| state\.workflowBusy \|\| !state\.sessionId\) return;/u,
   );
 });
 
