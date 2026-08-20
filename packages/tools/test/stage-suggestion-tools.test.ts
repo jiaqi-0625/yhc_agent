@@ -8,15 +8,16 @@ import {
   createScopedStageSuggestionContextReader,
   createStageSuggestionTools,
   StageSuggestionContextAccessError,
-  type CompanyAssetProvider,
+  type AssetMatchingCandidateReader,
 } from "../src/index.ts";
 
 const occurredAt = "2026-08-19T09:00:00.000Z";
-const companyAssetProvider: CompanyAssetProvider = {
-  providerId: "mock-company-assets",
-  async searchAssets() {
+const assetMatchingCandidateReader: AssetMatchingCandidateReader = {
+  batchProjectId: "project_1",
+  async read() {
     return {
-      items: [{
+      projectAssetPoolRevision: 7,
+      companyCandidates: [{
         reference: {
           source: "company_catalog",
           sourceProvider: "mock-company-assets",
@@ -31,10 +32,20 @@ const companyAssetProvider: CompanyAssetProvider = {
         preview: { mediaType: "image/webp", width: 1440, height: 1920 },
         updatedAt: occurredAt,
       }],
+      localCandidates: [{
+        reference: {
+          source: "local_upload",
+          batchProjectId: "project_1",
+          assetId: "local_camp",
+          version: 2,
+          category: "scene",
+          checksumSha256: "b".repeat(64),
+        },
+        displayName: "露营地.webp",
+        description: "湖畔草地露营场景",
+        sourceStatus: "requires_manual_review",
+      }],
     };
-  },
-  async resolveAssets() {
-    return { items: [], missingReferences: [] };
   },
 };
 const stageOrder: readonly VideoTaskStage[] = [
@@ -165,13 +176,7 @@ function readerFor(
     taskContext: taskContext(stage),
     tenantId: "tenant_1",
     store: { async load() { return record; } },
-    companyAssetProvider,
-    companyAssetScope: {
-      tenantId: "tenant_1",
-      actorAccountId: "account_1",
-      allowedBrandIds: ["brand_1"],
-      allowedVehicleIds: ["vehicle_1"],
-    },
+    assetMatchingCandidateReader,
   });
 }
 
@@ -195,8 +200,11 @@ test("stage suggestion context exposes exact confirmed upstream versions for eac
     assert.equal(result.suggestionBoundary.mayPersistArtifact, false);
     assert.equal(result.suggestionBoundary.mayConfirmStage, false);
     if (stage === "asset_matching") {
+      assert.equal(result.assetMatchingContext?.projectAssetPoolRevision, 7);
       assert.equal(result.assetMatchingContext?.companyCandidates[0]?.description, "适合家庭周末露营场景");
       assert.equal(result.assetMatchingContext?.companyCandidates[0]?.reference.version, 3);
+      assert.equal(result.assetMatchingContext?.localCandidates[0]?.description, "湖畔草地露营场景");
+      assert.equal(result.assetMatchingContext?.localCandidates[0]?.reference.version, 2);
       assert.equal(result.assetMatchingContext?.selectionPolicy.humanSelectionHasPriority, true);
     } else {
       assert.equal(result.assetMatchingContext, undefined);
@@ -204,22 +212,23 @@ test("stage suggestion context exposes exact confirmed upstream versions for eac
   }
 });
 
-test("stage suggestion context rejects mismatched asset catalog scope", () => {
-  assert.throws(
-    () => createScopedStageSuggestionContextReader({
-      taskContext: taskContext("asset_matching"),
-      tenantId: "tenant_1",
-      store: { async load() { return productionRecord("asset_matching"); } },
-      companyAssetProvider,
-      companyAssetScope: {
+test("asset matching suggestion context requires a project-bound candidate reader", () => {
+  for (const candidateReader of [
+    undefined,
+    { ...assetMatchingCandidateReader, batchProjectId: "project_other" },
+  ]) {
+    assert.throws(
+      () => createScopedStageSuggestionContextReader({
+        taskContext: taskContext("asset_matching"),
         tenantId: "tenant_1",
-        actorAccountId: "account_1",
-        allowedBrandIds: ["brand_other"],
-        allowedVehicleIds: ["vehicle_1"],
-      },
-    }),
-    StageSuggestionContextAccessError,
-  );
+        store: { async load() { return productionRecord("asset_matching"); } },
+        ...(candidateReader === undefined
+          ? {}
+          : { assetMatchingCandidateReader: candidateReader }),
+      }),
+      StageSuggestionContextAccessError,
+    );
+  }
 });
 
 test("script and asset matching suggestion contexts do not require an asset snapshot", async () => {
@@ -266,6 +275,6 @@ test("stage suggestion tool accepts no model-proposed identity or artifact refer
   assert.deepEqual(Object.keys((tool.parameters as { properties?: Record<string, unknown> }).properties ?? {}), []);
   const result = await tool.execute("call_1", {});
   assert.equal(result.details.stage, "delivery");
-  assert.match(tool.description, /资产匹配阶段/u);
+  assert.match(tool.description, /项目资产池 revision/u);
   assert.match(tool.description, /不生成、不持久化、不确认阶段/u);
 });
