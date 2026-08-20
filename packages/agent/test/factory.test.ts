@@ -221,6 +221,8 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
   assert.match(agent.state.systemPrompt, /脚本建议只遵守已确认策略，不提前选材/u);
   assert.match(agent.state.systemPrompt, /资产匹配建议同时遵守已确认策略和脚本/u);
   assert.match(agent.state.systemPrompt, /分镜建议必须遵守已确认素材选择/u);
+  assert.match(agent.state.systemPrompt, /当前项目资产池返回的素材描述词/u);
+  assert.match(agent.state.systemPrompt, /本地候选必须提示人工复核来源和使用权/u);
   assert.match(agent.state.systemPrompt, /资产匹配可返回带描述词的精确版本人物\/场景候选并提出推荐/u);
   assert.match(agent.state.systemPrompt, /不得持久化选择或确认阶段/u);
   assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);

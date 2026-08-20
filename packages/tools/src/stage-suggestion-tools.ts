@@ -3,15 +3,12 @@ import type { VideoTaskProductionRecord } from "@firefly/domain";
 import type {
   StageArtifactVersion,
   TaskContext,
+  TemporaryAssetReference,
   VideoTaskStage,
 } from "@firefly/schemas";
 import { Type } from "typebox";
 
-import type {
-  CompanyAssetCatalogItem,
-  CompanyAssetProvider,
-  CompanyAssetProviderScope,
-} from "./company-asset-provider.ts";
+import type { CompanyAssetCatalogItem } from "./company-asset-provider.ts";
 
 const GetCurrentStageSuggestionContextRequestSchema = Type.Object({}, { additionalProperties: false });
 
@@ -35,7 +32,9 @@ export interface StageSuggestionContextView {
   readonly productionBrief: TaskContext["productionBrief"];
   readonly confirmedUpstreamArtifacts: readonly StageArtifactVersion[];
   readonly assetMatchingContext?: {
+    readonly projectAssetPoolRevision: number;
     readonly companyCandidates: readonly CompanyAssetCatalogItem[];
+    readonly localCandidates: readonly AssetMatchingLocalCandidate[];
     readonly selectionPolicy: {
       readonly vehicleAssetsLocked: true;
       readonly personSceneHumanReplaceable: true;
@@ -54,6 +53,24 @@ export interface StageSuggestionContextView {
   readonly stageGuidance: readonly string[];
 }
 
+export interface AssetMatchingLocalCandidate {
+  readonly reference: TemporaryAssetReference;
+  readonly displayName: string;
+  readonly description: string;
+  readonly sourceStatus: "requires_manual_review";
+}
+
+export interface AssetMatchingCandidateSet {
+  readonly projectAssetPoolRevision: number;
+  readonly companyCandidates: readonly CompanyAssetCatalogItem[];
+  readonly localCandidates: readonly AssetMatchingLocalCandidate[];
+}
+
+export interface AssetMatchingCandidateReader {
+  readonly batchProjectId: string;
+  read(signal?: AbortSignal): Promise<AssetMatchingCandidateSet>;
+}
+
 export interface StageSuggestionContextReader {
   readonly videoTaskId: string;
   read(signal?: AbortSignal): Promise<StageSuggestionContextView>;
@@ -67,8 +84,7 @@ export interface CreateScopedStageSuggestionContextReaderOptions {
   readonly taskContext: TaskContext;
   readonly tenantId: string;
   readonly store: StageSuggestionRecordStore;
-  readonly companyAssetProvider: CompanyAssetProvider;
-  readonly companyAssetScope: CompanyAssetProviderScope;
+  readonly assetMatchingCandidateReader?: AssetMatchingCandidateReader;
 }
 
 export class StageSuggestionContextAccessError extends Error {
@@ -148,10 +164,11 @@ export function createScopedStageSuggestionContextReader(
 ): StageSuggestionContextReader {
   const videoTaskId = options.taskContext.videoTask.id;
   if (
-    options.companyAssetScope.tenantId !== options.tenantId ||
-    options.companyAssetScope.actorAccountId.length === 0 ||
-    !options.companyAssetScope.allowedBrandIds.includes(options.taskContext.brand.id) ||
-    !options.companyAssetScope.allowedVehicleIds.includes(options.taskContext.vehicle.id)
+    options.taskContext.videoTask.currentStage === "asset_matching" &&
+    (
+      options.assetMatchingCandidateReader === undefined ||
+      options.assetMatchingCandidateReader.batchProjectId !== options.taskContext.batchProject.id
+    )
   ) {
     throw new StageSuggestionContextAccessError();
   }
@@ -194,26 +211,22 @@ export function createScopedStageSuggestionContextReader(
           );
         }
       }
-      const assetMatchingContext = stage === "asset_matching"
-        ? {
-            companyCandidates: (await options.companyAssetProvider.searchAssets(
-              {
-                categories: ["person", "scene"],
-                brandId: options.taskContext.brand.id,
-                vehicleId: options.taskContext.vehicle.id,
-                limit: 100,
-              },
-              options.companyAssetScope,
-              signal === undefined ? undefined : { signal },
-            )).items.map((item) => structuredClone(item)),
+      const candidateSet = stage === "asset_matching"
+        ? await options.assetMatchingCandidateReader!.read(signal)
+        : undefined;
+      const assetMatchingContext = candidateSet === undefined
+        ? undefined
+        : {
+            projectAssetPoolRevision: candidateSet.projectAssetPoolRevision,
+            companyCandidates: candidateSet.companyCandidates.map((item) => structuredClone(item)),
+            localCandidates: candidateSet.localCandidates.map((item) => structuredClone(item)),
             selectionPolicy: {
               vehicleAssetsLocked: true as const,
               personSceneHumanReplaceable: true as const,
               humanSelectionHasPriority: true as const,
               preserveExactAssetVersions: true as const,
             },
-          }
-        : undefined;
+          };
       signal?.throwIfAborted();
       return {
         schemaVersion: 1,
@@ -248,7 +261,7 @@ export function createStageSuggestionTools(reader: StageSuggestionContextReader)
   const getCurrentStageSuggestionContext: AgentTool<typeof GetCurrentStageSuggestionContextRequestSchema> = {
     name: "get_current_stage_suggestion_context",
     label: "读取当前阶段建议依据",
-    description: "读取当前阶段仍有效的已确认上游产物精确版本；资产匹配阶段同时返回带描述词的精确版本人物/场景候选。仅用于提出建议，不生成、不持久化、不确认阶段，也不发布广告。",
+    description: "读取当前阶段仍有效的已确认上游产物精确版本；资产匹配阶段同时返回当前项目资产池 revision、带描述词的精确版本人物/场景公司与本地候选。仅用于提出建议，不生成、不持久化、不确认阶段，也不发布广告。",
     parameters: GetCurrentStageSuggestionContextRequestSchema,
     async execute(_toolCallId, _params, signal) {
       const details = await reader.read(signal);

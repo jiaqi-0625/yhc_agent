@@ -11,6 +11,10 @@ import {
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { LocalAccountBudgetStore } from "./account-budget-store.ts";
 import {
+  createAgentAssetMatchingCandidateReader,
+  createCurrentProjectAssetPoolReader,
+} from "./agent-asset-matching-candidates.ts";
+import {
   handleAgentActionCommandRoute,
   matchAgentActionCommandPath,
 } from "./agent-action-command-routes.ts";
@@ -609,13 +613,37 @@ export function createApiServer(
                     taskContext,
                     tenantId: sessionScope.tenantId,
                     store: videoTaskStore,
-                    companyAssetProvider,
-                    companyAssetScope: {
-                      tenantId: sessionScope.tenantId,
-                      actorAccountId: sessionScope.actorId,
-                      allowedBrandIds: [taskContext.brand.id],
-                      allowedVehicleIds: [taskContext.vehicle.id],
-                    },
+                    ...(taskContext.videoTask.currentStage !== "asset_matching" ||
+                      assetPoolStore === undefined || temporaryAssetStore === undefined
+                      ? {}
+                      : {
+                          assetMatchingCandidateReader: createAgentAssetMatchingCandidateReader({
+                            taskContext,
+                            currentProjectAssetPool: createCurrentProjectAssetPoolReader({
+                              taskContext,
+                              administration: adminStore!,
+                              projects: batchProjectStore!,
+                              projectAssets: localProjectAssets!,
+                              actor: {
+                                tenantId: sessionScope.tenantId,
+                                accountId: sessionScope.actorId,
+                                role: activeWorkspaceSessions.listDevelopmentAccounts().find(
+                                  (account) =>
+                                    account.tenantId === sessionScope.tenantId &&
+                                    account.accountId === sessionScope.actorId,
+                                )?.role,
+                              },
+                            }),
+                            temporaryAssets: temporaryAssetStore,
+                            companyAssets: companyAssetProvider,
+                            companyAssetScope: {
+                              tenantId: sessionScope.tenantId,
+                              actorAccountId: sessionScope.actorId,
+                              allowedBrandIds: [taskContext.brand.id],
+                              allowedVehicleIds: [taskContext.vehicle.id],
+                            },
+                          }),
+                        }),
                   })
                 : undefined,
           }

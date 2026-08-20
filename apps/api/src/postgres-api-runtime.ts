@@ -10,6 +10,10 @@ import type { TaskContext } from "@firefly/schemas";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
+import {
+  createAgentAssetMatchingCandidateReader,
+  createCurrentProjectAssetPoolReader,
+} from "./agent-asset-matching-candidates.ts";
 import { AgentActionCommandRuntime } from "./agent-action-command-runtime.ts";
 import { AssetMatchingRuntime } from "./asset-matching-runtime.ts";
 import {
@@ -321,13 +325,36 @@ export async function createPostgresApiRuntime(
             taskContext,
             tenantId: sessionScope.tenantId,
             store: videoTaskStore,
-            companyAssetProvider: companyAssets,
-            companyAssetScope: {
-              tenantId: sessionScope.tenantId,
-              actorAccountId: sessionScope.actorId,
-              allowedBrandIds: [taskContext.brand.id],
-              allowedVehicleIds: [taskContext.vehicle.id],
-            },
+            ...(taskContext.videoTask.currentStage !== "asset_matching"
+              ? {}
+              : {
+                  assetMatchingCandidateReader: createAgentAssetMatchingCandidateReader({
+                    taskContext,
+                    currentProjectAssetPool: createCurrentProjectAssetPoolReader({
+                      taskContext,
+                      administration: administrationStore,
+                      projects: projectStore,
+                      projectAssets,
+                      actor: {
+                        tenantId: sessionScope.tenantId,
+                        accountId: sessionScope.actorId,
+                        role: workspaceSessions.listDevelopmentAccounts().find(
+                          (account) =>
+                            account.tenantId === sessionScope.tenantId &&
+                            account.accountId === sessionScope.actorId,
+                        )?.role,
+                      },
+                    }),
+                    temporaryAssets: temporaryAssetStore,
+                    companyAssets,
+                    companyAssetScope: {
+                      tenantId: sessionScope.tenantId,
+                      actorAccountId: sessionScope.actorId,
+                      allowedBrandIds: [taskContext.brand.id],
+                      allowedVehicleIds: [taskContext.vehicle.id],
+                    },
+                  }),
+                }),
           })
         : undefined,
       readiness,
