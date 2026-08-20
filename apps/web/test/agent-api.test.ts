@@ -3,6 +3,8 @@ import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
 import { agentApi } from "../public/agent-api.js";
+// @ts-expect-error The browser module is intentionally plain JavaScript.
+import { setWorkspaceSessionToken } from "../public/api-client.js";
 
 function sseAgent(event: { eventId: string; sequence: number; sessionId: string; runId: string; type: string }): string {
   return `id: ${event.eventId}\nevent: agent\ndata: ${JSON.stringify(event)}\n\n`;

@@ -73,8 +73,6 @@ test("production status exposes only the authenticated account run slot", async 
     join(directory, "migrations"),
     undefined,
     undefined,
-    false,
-    undefined,
     runLocks,
   );
   context.after(() => server.close());
