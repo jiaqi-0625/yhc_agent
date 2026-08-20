@@ -24,4 +24,6 @@ export function workspaceProductionErrorText(error: unknown): string;
 export function createWorkspaceStagesPanel(options: Readonly<Record<string, unknown>>): {
   setContext(projectId: string | undefined, project: unknown, task: VideoTask | null, activeModule: string | null): void;
   refresh(): Promise<void>;
+  reset(): void;
+  isBusy(): boolean;
 };

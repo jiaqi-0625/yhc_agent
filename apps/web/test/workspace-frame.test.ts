@@ -114,5 +114,7 @@ test("workspace frame blocks task and overview switches while Agent interaction 
   assert.match(source, /selectionLocked\(\) && taskId !== selection\.task\?\.id/u);
   assert.match(source, /button\.disabled = locked && button\.dataset\.videoTaskId !== selection\?\.task\?\.id/u);
   assert.match(source, /if \(selectionLocked\(\) && selection\.task !== null\) return;/u);
+  assert.match(source, /elements\.projectAssets\.disabled = locked/u);
+  assert.match(source, /if \(!selection \|\| selectionLocked\(\)\) return;/u);
   assert.match(source, /refreshSelectionControls/u);
 });

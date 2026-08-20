@@ -273,7 +273,10 @@ test("application wiring keeps action commands task-scoped and disabled during A
   const controlsEnd = source.indexOf("function captureWorkspaceScope()", controlsStart);
   assert.ok(controlsStart >= 0 && controlsEnd > controlsStart);
   const interactionWiring = source.slice(controlsStart, controlsEnd);
-  assert.match(interactionWiring, /const interactionBusy = state\.busy \|\| state\.workflowBusy;/u);
+  assert.match(
+    interactionWiring,
+    /const interactionBusy = state\.busy \|\| state\.workflowBusy \|\| workspaceStagesPanel\?\.isBusy\(\);/u,
+  );
   assert.match(interactionWiring, /elements\.prompt\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.send\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.newSession\.disabled = interactionBusy/u);
@@ -299,7 +302,10 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
   assert.match(workspaceSync, /body\.session\.taskContext\.videoTask\.revision < task\.revision/u);
   assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);
-  assert.match(source, /isSelectionLocked: function \(\) \{ return state\.busy \|\| state\.workflowBusy; \}/u);
+  assert.match(
+    source,
+    /isSelectionLocked: function \(\) \{ return state\.busy \|\| state\.workflowBusy \|\| workspaceStagesPanel\?\.isBusy\(\); \}/u,
+  );
 });
 
 test("Agent action cards stay disabled for missing, cross-task, stale, and busy contexts", () => {

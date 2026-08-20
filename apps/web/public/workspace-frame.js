@@ -195,6 +195,7 @@ export function createWorkspaceFrame(options) {
     const locked = selectionLocked();
     elements.back.disabled = locked;
     elements.projectOverview.disabled = locked && selection?.task !== null;
+    elements.projectAssets.disabled = locked;
     elements.taskList.querySelectorAll("button[data-video-task-id]").forEach(function (button) {
       button.disabled = locked && button.dataset.videoTaskId !== selection?.task?.id;
     });
@@ -490,7 +491,7 @@ export function createWorkspaceFrame(options) {
     synchronize("push");
   });
   elements.projectAssets.addEventListener("click", function () {
-    if (!selection) return;
+    if (!selection || selectionLocked()) return;
     const resolved = resolveWorkspaceSelection([selection.project], selection.project.project.id);
     selection = { project: selection.project, task: resolved?.task || null };
     activeView = "module";
