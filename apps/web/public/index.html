@@ -6,8 +6,9 @@
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232f80ed'/><path d='M16 7l2 7 7 2-7 2-2 7-2-7-7-2 7-2z' fill='white'/></svg>" />
     <title>萤火虫 · 汽车广告工作区</title>
-    <link rel="stylesheet" href="/app.css?build=project-creation-ws403-v2" />
-    <link rel="stylesheet" href="/agent-panel.css?build=project-creation-ws403-v2" />
+    <link rel="stylesheet" href="/app.css?build=workspace-frame-ws404-v1" />
+    <link rel="stylesheet" href="/workspace-frame.css?build=workspace-frame-ws404-v1" />
+    <link rel="stylesheet" href="/agent-panel.css?build=workspace-frame-ws404-v1" />
   </head>
   <body>
     <svg class="svg-sprite" aria-hidden="true">
@@ -171,6 +172,108 @@
         </main>
 
         <p id="project-created-success" class="project-created-success" role="status" aria-live="polite" hidden></p>
+
+        <main id="project-workspace-view" class="project-workspace-page" aria-label="项目工作区" hidden>
+          <aside class="workspace-project-rail" aria-label="项目与视频任务">
+            <header class="workspace-rail-header">
+              <button id="workspace-frame-back" class="workspace-back-button" type="button">
+                <svg class="icon" aria-hidden="true"><use href="#i-chevron" /></svg>项目库
+              </button>
+              <div class="workspace-project-identity">
+                <h1 id="workspace-frame-project-name">项目</h1>
+                <p id="workspace-frame-project-context">品牌 · 车型</p>
+              </div>
+              <div class="workspace-project-meta">
+                <span id="workspace-frame-project-meta">—</span>
+                <span id="workspace-frame-project-status" class="badge neutral">—</span>
+              </div>
+            </header>
+
+            <nav class="workspace-rail-navigation" aria-label="项目导航">
+              <button id="workspace-frame-overview" type="button"><svg class="icon" aria-hidden="true"><use href="#i-home" /></svg>项目概览</button>
+              <button id="workspace-frame-assets" type="button"><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg>资产池</button>
+            </nav>
+
+            <section class="workspace-task-section" aria-labelledby="workspace-frame-task-list-title">
+              <header class="workspace-rail-section-title">
+                <h2 id="workspace-frame-task-list-title">视频任务</h2>
+                <span id="workspace-frame-task-count">0 个</span>
+              </header>
+              <div id="workspace-frame-task-list" class="workspace-task-list"></div>
+            </section>
+          </aside>
+
+          <section class="workspace-main-surface" aria-label="工作区主区域">
+            <header class="workspace-surface-header">
+              <div class="workspace-surface-title">
+                <div>
+                  <h1 id="workspace-frame-task-name">未选择视频任务</h1>
+                  <span id="workspace-frame-task-stage" class="badge neutral">未开始</span>
+                </div>
+                <p id="workspace-frame-task-meta">—</p>
+              </div>
+              <nav class="workspace-module-navigation" aria-label="工作区功能模块">
+                <button class="active" type="button" data-workspace-frame-module="planning" aria-current="page">策划</button>
+                <button type="button" data-workspace-frame-module="assets">资产</button>
+                <button type="button" data-workspace-frame-module="storyboard">分镜</button>
+                <button type="button" data-workspace-frame-module="production">制作</button>
+                <button type="button" data-workspace-frame-module="delivery">交付</button>
+              </nav>
+            </header>
+
+            <div class="workspace-module-content">
+              <section class="workspace-module-panel" data-workspace-frame-panel="planning">
+                <div>
+                  <header class="workspace-module-heading"><h2 id="workspace-frame-module-title">策划</h2></header>
+                  <div class="workspace-stage-path" aria-label="视频制作流程">
+                    <span class="active">营销策略</span><span>脚本</span><span>资产匹配</span><span>分镜</span><span>视频预览</span><span>交付</span>
+                  </div>
+                </div>
+                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-grid" /></svg><strong>策划工作区</strong><span>暂无内容</span></div></div>
+              </section>
+              <section class="workspace-module-panel" data-workspace-frame-panel="assets" hidden>
+                <header class="workspace-module-heading"><h2>资产</h2></header>
+                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg><strong>资产工作区</strong><span>暂无内容</span></div></div>
+              </section>
+              <section class="workspace-module-panel" data-workspace-frame-panel="storyboard" hidden>
+                <header class="workspace-module-heading"><h2>分镜</h2></header>
+                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-image" /></svg><strong>分镜工作区</strong><span>暂无内容</span></div></div>
+              </section>
+              <section class="workspace-module-panel" data-workspace-frame-panel="production" hidden>
+                <header class="workspace-module-heading"><h2>制作</h2></header>
+                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg><strong>制作工作区</strong><span>暂无内容</span></div></div>
+              </section>
+              <section class="workspace-module-panel" data-workspace-frame-panel="delivery" hidden>
+                <header class="workspace-module-heading"><h2>交付</h2></header>
+                <div class="workspace-canvas-empty"><div><svg class="icon" aria-hidden="true"><use href="#i-package" /></svg><strong>交付工作区</strong><span>暂无内容</span></div></div>
+              </section>
+            </div>
+          </section>
+
+          <aside class="workspace-agent-slot" aria-label="萤火虫助手">
+            <header class="workspace-agent-header">
+              <div class="workspace-agent-identity">
+                <span class="workspace-agent-avatar" aria-hidden="true"><svg class="icon"><use href="#i-spark" /></svg></span>
+                <div><strong>萤火虫助手</strong><span>当前视频任务</span></div>
+              </div>
+              <span id="workspace-frame-agent-status" class="badge neutral">未绑定任务</span>
+            </header>
+            <dl class="workspace-agent-context">
+              <div><dt>视频任务</dt><dd id="workspace-frame-agent-task">—</dd></div>
+              <div><dt>当前阶段</dt><dd id="workspace-frame-agent-stage">—</dd></div>
+              <div><dt>负责人</dt><dd id="workspace-frame-agent-owner">—</dd></div>
+              <div><dt>任务版本</dt><dd id="workspace-frame-agent-revision">—</dd></div>
+            </dl>
+            <div class="workspace-agent-body">
+              <div class="workspace-agent-empty"><svg class="icon" aria-hidden="true"><use href="#i-message" /></svg><strong>助手工作区</strong><span>等待接入</span></div>
+            </div>
+            <div class="workspace-agent-composer">
+              <label class="sr-only" for="workspace-frame-agent-composer">发送消息</label>
+              <textarea id="workspace-frame-agent-composer" rows="1" placeholder="助手接入后可用" disabled></textarea>
+              <button id="workspace-frame-agent-send" type="button" aria-label="发送消息" disabled><svg class="icon" aria-hidden="true"><use href="#i-send" /></svg></button>
+            </div>
+          </aside>
+        </main>
 
         <nav class="mobile-panel-switcher" aria-label="移动端工作区切换" hidden>
           <button type="button" data-mobile-target="projects"><svg class="icon"><use href="#i-folder" /></svg>项目</button>
@@ -402,6 +505,6 @@
         </div>
       </div>
     </div>
-    <script type="module" src="/app.js?build=project-creation-ws403-v2"></script>
+    <script type="module" src="/app.js?build=workspace-frame-ws404-v1"></script>
   </body>
 </html>

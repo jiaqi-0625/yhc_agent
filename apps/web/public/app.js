@@ -16,6 +16,7 @@ import {
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js";
+import { createWorkspaceFrame } from "./workspace-frame.js";
 import {
   bindWorkspaceShell,
   migrateSelectedVideoTaskStorage,
@@ -59,6 +60,7 @@ const state = {
 let navigationBrandsRequest = 0;
 let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
+let workspaceFrame = null;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -149,6 +151,27 @@ const elements = {
   projectCreationBack: document.querySelector("#new-project-back"),
   projectCreationSubmit: document.querySelector("#new-project-submit"),
   projectCreatedSuccess: document.querySelector("#project-created-success"),
+  projectWorkspaceView: document.querySelector("#project-workspace-view"),
+  workspaceFrameBack: document.querySelector("#workspace-frame-back"),
+  workspaceFrameProjectName: document.querySelector("#workspace-frame-project-name"),
+  workspaceFrameProjectContext: document.querySelector("#workspace-frame-project-context"),
+  workspaceFrameProjectMeta: document.querySelector("#workspace-frame-project-meta"),
+  workspaceFrameProjectStatus: document.querySelector("#workspace-frame-project-status"),
+  workspaceFrameOverview: document.querySelector("#workspace-frame-overview"),
+  workspaceFrameAssets: document.querySelector("#workspace-frame-assets"),
+  workspaceFrameTaskCount: document.querySelector("#workspace-frame-task-count"),
+  workspaceFrameTaskList: document.querySelector("#workspace-frame-task-list"),
+  workspaceFrameTaskName: document.querySelector("#workspace-frame-task-name"),
+  workspaceFrameTaskStage: document.querySelector("#workspace-frame-task-stage"),
+  workspaceFrameTaskMeta: document.querySelector("#workspace-frame-task-meta"),
+  workspaceFrameModuleTitle: document.querySelector("#workspace-frame-module-title"),
+  workspaceFrameAgentStatus: document.querySelector("#workspace-frame-agent-status"),
+  workspaceFrameAgentTask: document.querySelector("#workspace-frame-agent-task"),
+  workspaceFrameAgentStage: document.querySelector("#workspace-frame-agent-stage"),
+  workspaceFrameAgentOwner: document.querySelector("#workspace-frame-agent-owner"),
+  workspaceFrameAgentRevision: document.querySelector("#workspace-frame-agent-revision"),
+  workspaceFrameAgentComposer: document.querySelector("#workspace-frame-agent-composer"),
+  workspaceFrameAgentSend: document.querySelector("#workspace-frame-agent-send"),
 };
 
 const projectLibraryElements = {
@@ -274,6 +297,12 @@ function projectLibraryOptions() {
     retry: function () {
       if (state.projectLibraryInitializationError) void initialize();
       else void loadProjectLibrary();
+    },
+    openProject: function (projectId) {
+      workspaceFrame?.open(projectId);
+    },
+    openTask: function (projectId, taskId) {
+      workspaceFrame?.open(projectId, taskId);
     },
   };
 }
@@ -1381,6 +1410,7 @@ function selectNavigationBrand(brandId) {
   if (state.navigationBrandId === brandId) return;
   clearError();
   clearWorkflowError();
+  workspaceFrame?.close();
   state.navigationBrandId = brandId;
   state.projectLibraryVehicleId = "all";
   localStorage.setItem(navigationBrandStorageKey(state.account.accountId), brandId);
@@ -1562,6 +1592,7 @@ function applyWorkspaceSession(session) {
     sessionStorage.setItem("firefly.workspaceSession", session.token);
   }
   state.account = session.account;
+  workspaceFrame?.close();
   workspaceScopeGeneration += 1;
   localStorage.setItem("firefly.accountId", session.account.accountId);
   projectCreationWizard.resetForAccount();
@@ -1784,6 +1815,40 @@ bindAgentPanel({
   clearError,
   showError,
   setBusy,
+});
+
+workspaceFrame = createWorkspaceFrame({
+  elements: {
+    view: elements.projectWorkspaceView,
+    library: elements.libraryView,
+    creation: elements.projectCreationView,
+    legacyWorkspace: elements.workspaceShell,
+    topbarTitle: elements.topbarWorkName,
+    back: elements.workspaceFrameBack,
+    projectName: elements.workspaceFrameProjectName,
+    projectContext: elements.workspaceFrameProjectContext,
+    projectMeta: elements.workspaceFrameProjectMeta,
+    projectStatus: elements.workspaceFrameProjectStatus,
+    projectOverview: elements.workspaceFrameOverview,
+    projectAssets: elements.workspaceFrameAssets,
+    taskCount: elements.workspaceFrameTaskCount,
+    taskList: elements.workspaceFrameTaskList,
+    taskName: elements.workspaceFrameTaskName,
+    taskStage: elements.workspaceFrameTaskStage,
+    taskMeta: elements.workspaceFrameTaskMeta,
+    moduleTitle: elements.workspaceFrameModuleTitle,
+    moduleButtons: [...document.querySelectorAll("[data-workspace-frame-module]")],
+    modulePanels: [...document.querySelectorAll("[data-workspace-frame-panel]")],
+    agentStatus: elements.workspaceFrameAgentStatus,
+    agentTask: elements.workspaceFrameAgentTask,
+    agentStage: elements.workspaceFrameAgentStage,
+    agentOwner: elements.workspaceFrameAgentOwner,
+    agentRevision: elements.workspaceFrameAgentRevision,
+    agentComposer: elements.workspaceFrameAgentComposer,
+    agentSend: elements.workspaceFrameAgentSend,
+  },
+  getProjects: function () { return state.projectLibrary; },
+  onBack: function () { renderProjectLibraryPage(); },
 });
 
 bindProjectLibrary(projectLibraryOptions());

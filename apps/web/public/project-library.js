@@ -231,15 +231,17 @@ function emptyNode(title, actionLabel, onAction) {
   return wrapper;
 }
 
-function renderTaskCards(container, tasks) {
+function renderTaskCards(container, tasks, onOpenTask) {
   container.replaceChildren();
   if (tasks.length === 0) {
     container.appendChild(emptyNode("暂无进行中的任务"));
     return;
   }
   tasks.forEach(function (entry) {
-    const card = document.createElement("article");
+    const card = document.createElement("button");
+    card.type = "button";
     card.className = "my-task-card";
+    card.setAttribute("aria-label", "打开任务 " + entry.task.name);
     const top = document.createElement("div");
     top.className = "my-task-topline";
     const stage = document.createElement("span");
@@ -260,6 +262,9 @@ function renderTaskCards(container, tasks) {
     vehicle.className = "task-vehicle";
     vehicle.textContent = entry.brand.name + " · " + entry.vehicle.displayName;
     card.append(top, title, project, vehicle);
+    if (typeof onOpenTask === "function") {
+      card.addEventListener("click", function () { onOpenTask(entry.project.id, entry.task.id); });
+    }
     container.appendChild(card);
   });
 }
@@ -271,7 +276,7 @@ function projectStatusBadge(status) {
   return badge;
 }
 
-function renderProjectRows(container, projects, hasAnyProjects, resetFilters) {
+function renderProjectRows(container, projects, hasAnyProjects, resetFilters, onOpenProject) {
   container.replaceChildren();
   if (projects.length === 0) {
     const row = document.createElement("tr");
@@ -290,12 +295,20 @@ function renderProjectRows(container, projects, hasAnyProjects, resetFilters) {
     const row = document.createElement("tr");
     if (summary.project.status === "archived") row.className = "archived";
     const identity = document.createElement("td");
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "project-open-button";
+    open.setAttribute("aria-label", "打开项目 " + summary.project.name);
     const name = document.createElement("strong");
     name.textContent = summary.project.name;
     name.title = summary.project.name;
     const brand = document.createElement("span");
     brand.textContent = summary.brand.name + " · " + summary.project.batchName;
-    identity.append(name, brand);
+    open.append(name, brand);
+    if (typeof onOpenProject === "function") {
+      open.addEventListener("click", function () { onOpenProject(summary.project.id); });
+    }
+    identity.appendChild(open);
 
     const vehicle = document.createElement("td");
     const vehicleName = document.createElement("strong");
@@ -476,14 +489,14 @@ export function renderProjectLibrary(options) {
   const myTasks = collectMyActiveTasks(brandProjects);
   elements.projectCount.textContent = visibleProjects.length + " 个项目";
   elements.myTaskCount.textContent = myTasks.length + " 个任务";
-  if (isCreator) renderTaskCards(elements.myTaskList, myTasks);
+  if (isCreator) renderTaskCards(elements.myTaskList, myTasks, options.openTask);
   renderProjectRows(elements.projectList, visibleProjects, brandProjects.length > 0, function () {
     state.workFilter = "";
     state.projectLibraryVehicleId = "all";
     state.projectLibraryStatus = "all";
     elements.search.value = "";
     renderProjectLibrary(options);
-  });
+  }, options.openProject);
 }
 
 export function bindProjectLibrary(options) {

@@ -129,9 +129,10 @@ test("workspace brand API uses the role-specific server endpoints", async (conte
 });
 
 test("workspace shell markup is Chinese-first, embed-ready, and declares its desktop boundary", async () => {
-  const [page, styles] = await Promise.all([
+  const [page, styles, workspaceFrameStyles] = await Promise.all([
     readFile(new URL("../public/index.html", import.meta.url), "utf8"),
     readFile(new URL("../public/app.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/workspace-frame.css", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(page, /platform-sidebar/u);
   assert.match(page, /<select id="brand-navigation" aria-label="切换品牌"/u);
@@ -146,10 +147,18 @@ test("workspace shell markup is Chinese-first, embed-ready, and declares its des
   assert.match(page, /id="new-project-back"[^>]*>← 返回项目库<\/button>/u);
   assert.match(page, /id="new-project-submit"[^>]*>创建项目<\/button>/u);
   assert.match(page, /id="workspace-shell"[^>]*hidden/u);
+  assert.match(page, /id="project-workspace-view"[^>]*class="project-workspace-page"[^>]*hidden/u);
+  assert.match(page, /class="workspace-project-rail"[^>]*aria-label="项目与视频任务"/u);
+  assert.match(page, /class="workspace-main-surface"[^>]*aria-label="工作区主区域"/u);
+  assert.match(page, /class="workspace-agent-slot"[^>]*aria-label="萤火虫助手"/u);
+  assert.match(page, />策划<\/button>[\s\S]*>资产<\/button>[\s\S]*>分镜<\/button>[\s\S]*>制作<\/button>[\s\S]*>交付<\/button>/u);
+  assert.match(page, />营销策略<\/span><span>脚本<\/span><span>资产匹配<\/span><span>分镜<\/span><span>视频预览<\/span><span>交付<\/span>/u);
   assert.match(page, /请使用桌面端打开/u);
   assert.doesNotMatch(page, />[^<]*(?:Projects|Current work|Strategy workspace|Agent)[^<]*</u);
   assert.doesNotMatch(styles, /--platform-sidebar-width:/u);
   assert.match(styles, /@media not all and \(min-width: 1280px\)/u);
   assert.match(styles, /\.app-shell \{ display: none; \}/u);
+  assert.match(workspaceFrameStyles, /grid-template-columns: 248px minmax\(0, 1fr\) 356px/u);
+  assert.match(workspaceFrameStyles, /grid-template-columns: 220px minmax\(0, 1fr\) 320px/u);
   assert.match(page, /id="brand-navigation-status"[^>]*role="status"[^>]*aria-live="polite"/u);
 });

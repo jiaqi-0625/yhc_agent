@@ -93,11 +93,12 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(page, /viewport-notice/u);
   assert.match(page, /新建广告作品/u);
   assert.match(page, /基于此车型新建作品/u);
-  assert.match(page, /project-creation-ws403/u);
+  assert.match(page, /workspace-frame-ws404/u);
   assert.match(page, /type="module"/u);
 
   const [
     styleResponse,
+    workspaceFrameStyleResponse,
     agentStyleResponse,
     scriptResponse,
     authApiResponse,
@@ -105,10 +106,12 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     agentPanelResponse,
     workspaceApiResponse,
     workspaceShellResponse,
+    workspaceFrameResponse,
     projectLibraryResponse,
     projectWizardResponse,
   ] = await Promise.all([
     fetch(`${baseUrl}/app.css`),
+    fetch(`${baseUrl}/workspace-frame.css`),
     fetch(`${baseUrl}/agent-panel.css`),
     fetch(`${baseUrl}/app.js`),
     fetch(`${baseUrl}/auth-api.js`),
@@ -116,11 +119,14 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
     fetch(`${baseUrl}/agent-panel.js`),
     fetch(`${baseUrl}/workspace-api.js`),
     fetch(`${baseUrl}/workspace-shell.js`),
+    fetch(`${baseUrl}/workspace-frame.js`),
     fetch(`${baseUrl}/project-library.js`),
     fetch(`${baseUrl}/project-creation-wizard.js`),
   ]);
   assert.equal(styleResponse.status, 200);
   assert.match(styleResponse.headers.get("content-type") ?? "", /^text\/css/u);
+  assert.equal(workspaceFrameStyleResponse.status, 200);
+  assert.match(await workspaceFrameStyleResponse.text(), /\.project-workspace-page/u);
   assert.equal(agentStyleResponse.status, 200);
   assert.match(await agentStyleResponse.text(), /\.agent-action-card/u);
   assert.equal(scriptResponse.status, 200);
@@ -130,6 +136,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(agentPanelResponse.status, 200);
   assert.equal(workspaceApiResponse.status, 200);
   assert.equal(workspaceShellResponse.status, 200);
+  assert.equal(workspaceFrameResponse.status, 200);
   assert.equal(projectLibraryResponse.status, 200);
   assert.equal(projectWizardResponse.status, 200);
   const script = await scriptResponse.text();
@@ -142,6 +149,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.match(script, /\.\/workspace-api\.js/u);
   assert.match(script, /\.\/project-library\.js/u);
   assert.match(script, /\.\/project-creation-wizard\.js/u);
+  assert.match(script, /\.\/workspace-frame\.js/u);
   assert.match(agentApiScript, /\/runs/u);
   assert.match(agentApiScript, /listSessions/u);
   assert.match(agentApiScript, /last-event-id/u);
@@ -158,6 +166,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   const workspaceShellScript = await workspaceShellResponse.text();
   assert.match(workspaceShellScript, /bindWorkspaceShell/u);
   assert.match(workspaceShellScript, /normalizeNavigationBrands/u);
+  assert.match(await workspaceFrameResponse.text(), /resolveWorkspaceSelection/u);
   assert.match(script, /读取车型事实快照/u);
   assert.match(script, /function friendlyToolInput/u);
   assert.match(script, /function friendlyToolResult/u);
