@@ -25,10 +25,10 @@ import {
   DEVELOPMENT_ACCOUNTS,
 } from "../src/workspace-session-runtime.ts";
 
-function fixture() {
+function fixture(vehicleVersions: readonly Vehicle[] = DEFAULT_ADMIN_VEHICLES) {
   const administration = new LocalWorkspaceAdminStore(".data/test-project-creation-admin", {
     brands: DEFAULT_ADMIN_BRANDS,
-    vehicleVersions: DEFAULT_ADMIN_VEHICLES,
+    vehicleVersions,
     vehicleAssetAssociations: DEFAULT_VEHICLE_ASSET_ASSOCIATIONS,
     accessGrants: DEVELOPMENT_ACCESS_GRANTS,
   }, false);
@@ -119,6 +119,22 @@ test("project creation options and all three steps are scoped to active creator 
     (error: unknown) =>
       error instanceof BusinessRuntimeError &&
       error.code === "AIC-PROJECT-CREATION-REPLACEMENT_CATEGORY_DENIED",
+  );
+});
+
+test("project creation excludes persisted vehicles whose official facts are unusable", async () => {
+  const invalidVehicles = DEFAULT_ADMIN_VEHICLES.map((vehicle) =>
+    vehicle.id === vehicleId
+      ? { ...vehicle, fixedClaims: [], optionalClaims: [] }
+      : vehicle);
+  const { administration, runtime } = fixture(invalidVehicles);
+  const creator = await session(administration);
+  assert.deepEqual((await runtime.getOptions(creator)).brands, []);
+  await assert.rejects(
+    runtime.getConfiguration(vehicleId, creator),
+    (error: unknown) =>
+      error instanceof BusinessRuntimeError &&
+      error.code === "AIC-PROJECT-CREATION-VEHICLE_FACTS_INVALID",
   );
 });
 
@@ -289,7 +305,16 @@ test("historical selected references normalize to latest catalog versions", asyn
     modelYear: 2026,
     trim: "长续航",
     parameters: {},
-    fixedClaims: [],
+    fixedClaims: [{
+      id: "claim_e5_body",
+      kind: "fixed",
+      name: "五座 SUV",
+      statement: "E5 为五座 SUV",
+      requiredInVoiceover: false,
+      requiredInSubtitle: false,
+      mayRephrase: true,
+      riskNotes: [],
+    }],
     optionalClaims: [],
     prohibitedClaims: [],
     ...audit,

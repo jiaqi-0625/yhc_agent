@@ -98,6 +98,26 @@ test("management HTTP API completes brand, vehicle, asset, grant, and budget com
     headers: headers(creatorToken),
   });
   assert.equal(creatorDenied.status, 403);
+  for (const targetAccountId of ["account_creator_b", "account_missing"]) {
+    const createBudgetDenied = await fetch(
+      `${baseUrl}/v1/admin/accounts/${targetAccountId}/budget`,
+      {
+        method: "POST",
+        headers: headers(creatorToken),
+        body: JSON.stringify({ currency: "CNY", limitAmountMinor: 10_000 }),
+      },
+    );
+    assert.equal(createBudgetDenied.status, 403);
+    const updateBudgetDenied = await fetch(
+      `${baseUrl}/v1/admin/accounts/${targetAccountId}/budget`,
+      {
+        method: "PATCH",
+        headers: headers(creatorToken),
+        body: JSON.stringify({ expectedRevision: 1, limitAmountMinor: 10_000 }),
+      },
+    );
+    assert.equal(updateBudgetDenied.status, 403);
+  }
 
   const adminToken = await sessionToken(baseUrl, "account_admin");
   const catalog = await fetch(
@@ -148,7 +168,16 @@ test("management HTTP API completes brand, vehicle, asset, grant, and budget com
       modelYear: 2027,
       trim: "旗舰版",
       parameters: { seats: 5 },
-      fixedClaims: [],
+      fixedClaims: [{
+        id: "claim_x1_seats",
+        kind: "fixed",
+        name: "五座布局",
+        statement: "车型采用五座布局",
+        requiredInVoiceover: false,
+        requiredInSubtitle: false,
+        mayRephrase: true,
+        riskNotes: [],
+      }],
       optionalClaims: [],
       prohibitedClaims: ["禁止无证据的第一表述"],
     }),
@@ -165,6 +194,19 @@ test("management HTTP API completes brand, vehicle, asset, grant, and budget com
     items: Array<{ reference: Record<string, unknown> }>;
   }).items[0]?.reference;
   assert.ok(newVehicleReference);
+  const vehicleFreeAssociationResponse = await fetch(
+    `${baseUrl}/v1/admin/vehicles/${vehicleId}/asset-associations`,
+    {
+      method: "PUT",
+      headers: headers(adminToken),
+      body: JSON.stringify({ expectedRevision: 0, assets: [] }),
+    },
+  );
+  assert.equal(vehicleFreeAssociationResponse.status, 400);
+  assert.equal(
+    ((await vehicleFreeAssociationResponse.json()) as { code: string }).code,
+    "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_REQUIRED",
+  );
   const associationResponse = await fetch(
     `${baseUrl}/v1/admin/vehicles/${vehicleId}/asset-associations`,
     {
@@ -233,4 +275,27 @@ test("management HTTP API completes brand, vehicle, asset, grant, and budget com
   assert.equal(overviewBody.counts.brands, 2);
   assert.equal(overviewBody.counts.configuredBudgets, 1);
   assert.equal(overviewBody.taskOverview.available, false);
+});
+
+test("management overview returns a stable 422 error when same-currency totals overflow", async (context) => {
+  const { server, baseUrl } = await startFixture();
+  context.after(() => server.close());
+  const adminToken = await sessionToken(baseUrl, "account_admin");
+  for (const accountId of ["account_creator_a", "account_creator_b"]) {
+    const response = await fetch(`${baseUrl}/v1/admin/accounts/${accountId}/budget`, {
+      method: "POST",
+      headers: headers(adminToken),
+      body: JSON.stringify({ currency: "CNY", limitAmountMinor: Number.MAX_SAFE_INTEGER }),
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const overview = await fetch(`${baseUrl}/v1/admin/overview`, {
+    headers: headers(adminToken),
+  });
+  assert.equal(overview.status, 422);
+  assert.equal(
+    ((await overview.json()) as { code?: string }).code,
+    "AIC-COST-BUDGET_AGGREGATE_OVERFLOW",
+  );
 });

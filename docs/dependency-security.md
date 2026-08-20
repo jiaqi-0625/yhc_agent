@@ -1,11 +1,12 @@
 # 依赖许可与安全基线
 
-评估日期：2026-08-14。
+评估日期：2026-08-20。
 
 - Node.js 最低版本固定为 `22.19.0`，直接依赖使用精确版本，锁文件纳入仓库。
 - `@earendil-works/pi-agent-core@0.84.1` 与 `@earendil-works/pi-ai@0.84.1` 的 npm 元数据均声明 MIT 许可证。
+- PostgreSQL 驱动固定为 `pg@8.22.0`；其 npm 元数据声明 MIT 许可证。驱动只在 API 基础设施层加载，不进入 Agent 工具面。
 - 安装默认启用 `ignore-scripts=true`，降低第三方安装脚本风险；若未来依赖必须运行安装脚本，需要单独评审。
-- `npm run audit:prod` 固定使用 npm 官方安全审计端点，当前结果为生产依赖 0 个已知漏洞。
+- `npm run audit:prod` 使用 npm 官方安全审计端点；在网络受限环境中的离线结果不能替代 CI 的在线复核。
 - `npm run security:check` 扫描仓库中的私钥及常见服务令牌模式。
 - CI 在无模型凭据情况下执行类型检查、测试、凭据扫描和生产依赖审计。
 

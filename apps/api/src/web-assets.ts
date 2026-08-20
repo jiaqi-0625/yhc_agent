@@ -9,18 +9,22 @@ const webAssets = new Map<string, { path: string; type: string }>([
   ["/asset-matching.css", { path: fileURLToPath(new URL("../../web/public/asset-matching.css", import.meta.url)), type: "text/css; charset=utf-8" }],
   ["/workspace-stages.css", { path: fileURLToPath(new URL("../../web/public/workspace-stages.css", import.meta.url)), type: "text/css; charset=utf-8" }],
   ["/agent-panel.css", { path: fileURLToPath(new URL("../../web/public/agent-panel.css", import.meta.url)), type: "text/css; charset=utf-8" }],
+  ["/management-center.css", { path: fileURLToPath(new URL("../../web/public/management-center.css", import.meta.url)), type: "text/css; charset=utf-8" }],
   ["/app.js", { path: fileURLToPath(new URL("../../web/public/app.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/api-client.js", { path: fileURLToPath(new URL("../../web/public/api-client.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/auth-api.js", { path: fileURLToPath(new URL("../../web/public/auth-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-api.js", { path: fileURLToPath(new URL("../../web/public/workspace-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-shell.js", { path: fileURLToPath(new URL("../../web/public/workspace-shell.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-frame.js", { path: fileURLToPath(new URL("../../web/public/workspace-frame.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/workspace-agent-context.js", { path: fileURLToPath(new URL("../../web/public/workspace-agent-context.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/asset-matching.js", { path: fileURLToPath(new URL("../../web/public/asset-matching.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/workspace-stages.js", { path: fileURLToPath(new URL("../../web/public/workspace-stages.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/project-library.js", { path: fileURLToPath(new URL("../../web/public/project-library.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/project-creation-wizard.js", { path: fileURLToPath(new URL("../../web/public/project-creation-wizard.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/agent-api.js", { path: fileURLToPath(new URL("../../web/public/agent-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
   ["/agent-panel.js", { path: fileURLToPath(new URL("../../web/public/agent-panel.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/management-api.js", { path: fileURLToPath(new URL("../../web/public/management-api.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
+  ["/management-center.js", { path: fileURLToPath(new URL("../../web/public/management-center.js", import.meta.url)), type: "text/javascript; charset=utf-8" }],
 ]);
 
 export async function sendWebAsset(response: ServerResponse, pathname: string): Promise<boolean> {

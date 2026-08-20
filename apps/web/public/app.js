@@ -1,14 +1,21 @@
-import { agentApi } from "./agent-api.js";
+import { agentApi } from "./agent-api.js?build=ws501-v1";
 import { createAssetMatchingPanel } from "./asset-matching.js";
 import {
   agentActionAvailability,
+  agentActionFailurePresentation,
+  agentActionRequestBody,
+  agentActionSuccessPresentation,
   agentBudgetPresentation,
   bindAgentPanel,
+  createAgentActionRequestId,
+  createStableAgentActionRequestId,
   executeAgentActionCommand,
   extractAgentActionCard,
-} from "./agent-panel.js";
+} from "./agent-panel.js?build=ws502-v1";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
+import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
+import { createManagementCenter } from "./management-center.js?build=management-center-ws409-v3";
 import {
   applyProjectLibraryTaskUpdate,
   bindProjectLibrary,
@@ -17,8 +24,9 @@ import {
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
+import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
 import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
-import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1";
 import {
   bindWorkspaceShell,
   migrateSelectedVideoTaskStorage,
@@ -64,9 +72,11 @@ let navigationBrandsRequest = 0;
 let projectLibraryRequest = 0;
 let workspaceScopeGeneration = 0;
 let agentSelectionRequest = 0;
+let activeAgentActionExecution = null;
 let workspaceFrame = null;
 let assetMatchingPanel = null;
 let workspaceStagesPanel = null;
+let managementCenter = null;
 const elements = {
   messages: document.querySelector("#messages"),
   welcome: document.querySelector("#welcome"),
@@ -1065,6 +1075,18 @@ function currentAgentActionContext() {
   };
 }
 
+function isCurrentAgentActionContext(expectedContext) {
+  const context = currentAgentActionContext();
+  return Boolean(
+    context
+    && context.sessionId === expectedContext.sessionId
+    && context.accountId === expectedContext.accountId
+    && context.scopeGeneration === expectedContext.scopeGeneration
+    && context.projectId === expectedContext.projectId
+    && context.videoTaskId === expectedContext.videoTaskId
+  );
+}
+
 function applyAgentCommandRevision(response, expectedContext) {
   const context = currentAgentActionContext();
   if (
@@ -1141,6 +1163,8 @@ async function executeActionProposal(card, proposal) {
     card.classList.add("stale");
     return;
   }
+  const execution = { context };
+  activeAgentActionExecution = execution;
   clearWorkflowError();
   setWorkflowBusy(true);
   button.disabled = true;
@@ -1149,33 +1173,56 @@ async function executeActionProposal(card, proposal) {
   delete card.dataset.executionBlocked;
   card.classList.remove("failed");
   try {
-    const execution = await executeAgentActionCommand(
+    const requestId = card.dataset.commandRequestId || (
+      card.dataset.commandSourceId
+        ? await createStableAgentActionRequestId(
+          context.sessionId,
+          card.dataset.commandSourceId,
+          proposal,
+        )
+        : createAgentActionRequestId()
+    );
+    if (!isCurrentAgentActionContext(context)) return;
+    card.dataset.commandRequestId = requestId;
+    const commandExecution = await executeAgentActionCommand(
       proposal,
       context,
-      card.dataset.commandRequestId,
+      requestId,
       card.dataset.executionBlocked === "true",
     );
-    card.dataset.commandRequestId = execution.requestId;
-    if (execution.kind === "blocked") return;
-    if (execution.kind === "success") {
-      const { presentation, response } = execution;
-      applyAgentCommandRevision(response, context);
-      status.textContent = presentation.status;
-      result.textContent = presentation.message;
+    if (!isCurrentAgentActionContext(context)) return;
+    card.dataset.commandRequestId = commandExecution.requestId;
+    if (commandExecution.kind === "blocked") return;
+    if (commandExecution.kind === "failure") {
+      const failure = commandExecution.presentation;
+      status.textContent = failure.status;
+      result.textContent = failure.message;
       result.hidden = false;
-      card.dataset.commandReceiptId = presentation.receiptId;
-      card.dataset.commandReplayed = String(presentation.replayed);
-      card.dataset.executed = "true";
-      card.classList.add("completed");
-      void refreshAgentContextAfterCommand(
-        context.sessionId,
-        context.videoTaskId,
-        context.scopeGeneration,
-      );
-      elements.messages.scrollTop = elements.messages.scrollHeight;
+      card.dataset.executionBlocked = failure.blocksCard ? "true" : "false";
+      card.classList.toggle("stale", failure.stale);
+      card.classList.add("failed");
+      showWorkflowError(new Error(failure.message));
+      button.disabled = failure.blocksCard;
       return;
     }
-    const failure = execution.presentation;
+    const { presentation, response } = commandExecution;
+    applyAgentCommandRevision(response, context);
+    status.textContent = presentation.status;
+    result.textContent = presentation.message;
+    result.hidden = false;
+    card.dataset.commandReceiptId = presentation.receiptId;
+    card.dataset.commandReplayed = String(presentation.replayed);
+    card.dataset.executed = "true";
+    card.classList.add("completed");
+    void refreshAgentContextAfterCommand(
+      context.sessionId,
+      context.videoTaskId,
+      context.scopeGeneration,
+    );
+    elements.messages.scrollTop = elements.messages.scrollHeight;
+  } catch (error) {
+    if (!isCurrentAgentActionContext(context)) return;
+    const failure = agentActionFailurePresentation(error);
     status.textContent = failure.status;
     result.textContent = failure.message;
     result.hidden = false;
@@ -1185,17 +1232,23 @@ async function executeActionProposal(card, proposal) {
     showWorkflowError(new Error(failure.message));
     button.disabled = failure.blocksCard;
   } finally {
-    setWorkflowBusy(false);
+    if (activeAgentActionExecution === execution) {
+      activeAgentActionExecution = null;
+      setWorkflowBusy(false);
+    }
   }
 }
 
-function appendActionProposal(turn, proposal) {
+function appendActionProposal(turn, proposal, sourceId) {
   const content = appendTimelineEvent(turn, "action-event");
   const card = document.createElement("section");
   card.className = "agent-action-card";
   card.dataset.action = proposal.action;
   card.dataset.expectedRevision = String(proposal.expectedRevision);
   card.dataset.videoTaskId = proposal.videoTaskId || "";
+  if (/^[A-Za-z0-9_-]{1,128}$/u.test(sourceId || "")) {
+    card.dataset.commandSourceId = sourceId;
+  }
   const header = document.createElement("div");
   header.className = "agent-action-header";
   const copy = document.createElement("div");
@@ -1276,7 +1329,7 @@ function finishToolEvent(turn, event, resumeThinking) {
   const proposalMatchesTool = proposal
     && ((tool.toolName === "propose_strategy_generation" && proposal.action === "generate_strategy")
       || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval"));
-  if (proposalMatchesTool) appendActionProposal(turn, proposal);
+  if (proposalMatchesTool) appendActionProposal(turn, proposal, event.toolCallId);
   if (resumeThinking !== false) appendThinkingEvent(turn);
 }
 
@@ -1421,6 +1474,10 @@ function renderAccount() {
   elements.agentAccountRole.textContent = state.account ? roleLabels[state.account.role] || "未知角色" : "—";
   const displayName = state.account?.displayName || "";
   elements.accountAvatar.textContent = Array.from(displayName.trim())[0] || "账";
+  managementCenter?.setAccount(
+    state.account,
+    state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy?.() || state.workspaceHydrating,
+  );
 }
 
 function renderNavigationBrands() {
@@ -1591,6 +1648,7 @@ function renderTaskContext(context) {
 }
 
 function updateSession(summary) {
+  assertWorkspaceAgentSession(summary, currentSelectedVideoTaskId(), state.projectLibrary);
   state.sessionId = summary.id;
   state.sessionVideoTaskId = summary.videoTaskId || null;
   state.taskContext = summary.taskContext || null;
@@ -1625,7 +1683,9 @@ async function createSession(videoTaskId, scope = captureWorkspaceScope()) {
 async function loadTaskSessions(videoTaskId, scope = captureWorkspaceScope()) {
   const body = await agentApi.listSessions(videoTaskId);
   if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== videoTaskId) return false;
-  state.sessions = Array.isArray(body.sessions) ? body.sessions.slice().sort(compareSessions) : [];
+  state.sessions = Array.isArray(body.sessions) ? body.sessions.map(function (session) {
+    return assertWorkspaceAgentSession(session, videoTaskId, state.projectLibrary);
+  }).sort(compareSessions) : [];
   renderSessionOptions();
   return true;
 }
@@ -1891,6 +1951,7 @@ async function switchWorkspaceAccount(accountId) {
 
 async function initialize() {
   state.workspaceHydrating = true;
+  setBusy(state.busy);
   clearProjectLibrary(false);
   renderAccount();
   try {
@@ -1926,6 +1987,7 @@ async function initialize() {
     showError(error);
   } finally {
     state.workspaceHydrating = false;
+    setBusy(state.busy);
     renderAccount();
     renderNavigationBrands();
   }
@@ -1934,6 +1996,15 @@ async function initialize() {
 async function sendMessage(text) {
   const message = text.trim();
   if (!message || state.busy || state.workflowBusy || !state.sessionId) return;
+  const scope = captureWorkspaceScope();
+  const sessionId = state.sessionId;
+  const videoTaskId = state.sessionVideoTaskId;
+  const isCurrentTurn = function () {
+    return isCurrentWorkspaceScope(scope)
+      && state.sessionId === sessionId
+      && state.sessionVideoTaskId === videoTaskId
+      && currentSelectedVideoTaskId() === videoTaskId;
+  };
   state.lastPrompt = message;
   elements.retryMessage.hidden = true;
   clearError();
@@ -1946,18 +2017,21 @@ async function sendMessage(text) {
   let liveAnswer = null;
   try {
     const result = await agentApi.streamMessage(
-      state.sessionId,
+      sessionId,
       message,
       {
-        videoTaskId: state.sessionVideoTaskId,
+        videoTaskId,
         onRunStarted: function (run) {
+          if (!isCurrentTurn()) return;
           state.activeRunId = run.runId;
         },
         onConnectionState: function (connectionState) {
+          if (!isCurrentTurn()) return;
           if (connectionState === "reconnecting") setStatus("warning", "正在恢复连接");
           if (connectionState === "connected") setStatus("online", "服务正常");
         },
         onEvent: function (event) {
+          if (!isCurrentTurn()) return;
           if (event.type === "thinking_status" && event.status === "completed") finishThinkingEvent(turn);
           if (event.type === "text_delta") {
             streamedText += event.delta;
@@ -1970,10 +2044,12 @@ async function sendMessage(text) {
               isError: event.status !== "succeeded",
             });
           }
-          if (event.type === "action_card") appendActionProposal(turn, event.card);
+          if (event.type === "action_card") appendActionProposal(turn, event.card, event.eventId);
         },
       },
     );
+    if (!isCurrentTurn()) return;
+    assertWorkspaceAgentSession(result.session, videoTaskId, state.projectLibrary);
     if (result.stopReason === "aborted") {
       failAgentTurn(turn, "已取消当前生成。");
     } else if (!completeStreamingAnswer(liveAnswer, result.assistantText)) {
@@ -1981,6 +2057,7 @@ async function sendMessage(text) {
     }
     updateSession(result.session);
   } catch (error) {
+    if (!isCurrentTurn()) return;
     const cancelled = error instanceof DOMException && error.name === "AbortError";
     const messageText = cancelled ? "已取消当前生成。" : error instanceof Error ? error.message : "智能助手请求失败。";
     failAgentTurn(turn, messageText);
@@ -1989,6 +2066,7 @@ async function sendMessage(text) {
       elements.retryMessage.hidden = false;
     }
   } finally {
+    if (!isCurrentTurn()) return;
     state.activeRunId = null;
     elements.cancelGeneration.disabled = false;
     setBusy(false);
@@ -2151,6 +2229,35 @@ const projectCreationWizard = createProjectCreationWizard({
     await loadProjectLibrary(captureWorkspaceScope());
   },
 });
+
+const managementBrandSwitcher = document.querySelector(".topbar-brand-switcher");
+managementCenter = createManagementCenter({
+  api: managementApi,
+  topbarTitle: elements.topbarWorkName,
+  getProjects: function () { return state.projectLibrary; },
+  onBeforeOpen: function () {
+    workspaceFrame?.close({ historyMode: "replace" });
+    projectCreationWizard.close();
+    elements.libraryView.hidden = true;
+    elements.projectCreationView.hidden = true;
+    elements.projectWorkspaceView.hidden = true;
+    elements.workspaceShell.hidden = true;
+    if (managementBrandSwitcher) managementBrandSwitcher.hidden = true;
+  },
+  onAfterClose: function () {
+    elements.libraryView.hidden = false;
+    if (managementBrandSwitcher) managementBrandSwitcher.hidden = false;
+    renderProjectLibraryPage();
+  },
+  onCatalogChanged: async function () {
+    await loadNavigationBrands();
+    await loadProjectLibrary(captureWorkspaceScope());
+  },
+});
+managementCenter.setAccount(
+  state.account,
+  state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy?.() || state.workspaceHydrating,
+);
 
 bindWorkspaceShell({
   elements,

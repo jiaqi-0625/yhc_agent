@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { AccountBudgetSchema, type AccountBudget } from "@firefly/schemas";
 import { Value } from "typebox/value";
 
-function assertIdentifier(value: string, label: string): void {
+export function assertAccountBudgetIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
   }
@@ -22,6 +22,20 @@ export interface AccountBudgetStore {
   ): Promise<AccountBudget>;
 }
 
+export function validateAccountBudget(
+  budget: Readonly<AccountBudget>,
+  tenantId: string,
+  accountId: string,
+): void {
+  if (
+    budget.tenantId !== tenantId ||
+    budget.accountId !== accountId ||
+    !Value.Check(AccountBudgetSchema, budget)
+  ) {
+    throw new Error("Persisted account budget has an invalid format or scope.");
+  }
+}
+
 export class LocalAccountBudgetStore implements AccountBudgetStore {
   readonly #directory: string;
   readonly #memory = new Map<string, AccountBudget>();
@@ -32,8 +46,8 @@ export class LocalAccountBudgetStore implements AccountBudgetStore {
   }
 
   #key(tenantId: string, accountId: string): string {
-    assertIdentifier(tenantId, "Tenant ID");
-    assertIdentifier(accountId, "Account ID");
+    assertAccountBudgetIdentifier(tenantId, "Tenant ID");
+    assertAccountBudgetIdentifier(accountId, "Account ID");
     return `${tenantId}:${accountId}`;
   }
 
@@ -46,16 +60,6 @@ export class LocalAccountBudgetStore implements AccountBudgetStore {
     return path;
   }
 
-  #validate(budget: Readonly<AccountBudget>, tenantId: string, accountId: string): void {
-    if (
-      budget.tenantId !== tenantId ||
-      budget.accountId !== accountId ||
-      !Value.Check(AccountBudgetSchema, budget)
-    ) {
-      throw new Error("Persisted account budget has an invalid format or scope.");
-    }
-  }
-
   async load(tenantId: string, accountId: string): Promise<AccountBudget | undefined> {
     const key = this.#key(tenantId, accountId);
     const memory = this.#memory.get(key);
@@ -65,7 +69,7 @@ export class LocalAccountBudgetStore implements AccountBudgetStore {
       const parsed = JSON.parse(
         await readFile(this.#path(tenantId, accountId), "utf8"),
       ) as AccountBudget;
-      this.#validate(parsed, tenantId, accountId);
+      validateAccountBudget(parsed, tenantId, accountId);
       this.#memory.set(key, structuredClone(parsed));
       return structuredClone(parsed);
     } catch (error: unknown) {
@@ -75,7 +79,7 @@ export class LocalAccountBudgetStore implements AccountBudgetStore {
   }
 
   async #save(budget: Readonly<AccountBudget>): Promise<void> {
-    this.#validate(budget, budget.tenantId, budget.accountId);
+    validateAccountBudget(budget, budget.tenantId, budget.accountId);
     const key = this.#key(budget.tenantId, budget.accountId);
     const copy = structuredClone(budget);
     if (this.persist) {
@@ -114,7 +118,7 @@ export class LocalAccountBudgetStore implements AccountBudgetStore {
     await previous;
     try {
       const next = await update(await this.load(tenantId, accountId));
-      this.#validate(next, tenantId, accountId);
+      validateAccountBudget(next, tenantId, accountId);
       await this.#save(next);
       return structuredClone(next);
     } finally {

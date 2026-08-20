@@ -58,7 +58,7 @@ interface WorkspaceSessionFile {
   sessions: StoredWorkspaceSessionRecord[];
 }
 
-interface StoredWorkspaceSessionRecord {
+export interface StoredWorkspaceSessionRecord {
   schemaVersion: 1;
   sessionIdHash: string;
   accountId: string;
@@ -67,48 +67,50 @@ interface StoredWorkspaceSessionRecord {
   signedOutAt?: string;
 }
 
-function assertIdentifier(value: string, label: string): void {
+export function assertWorkspaceSessionIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
   }
 }
 
-function timestamp(value: string, label: string): number {
+export function workspaceSessionTimestamp(value: string, label: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error(`${label} must be a valid date-time.`);
   return parsed;
 }
 
-function validateSession(session: Readonly<WorkspaceSessionRecord>): void {
+export function validateWorkspaceSession(session: Readonly<WorkspaceSessionRecord>): void {
   if (!Value.Check(WorkspaceSessionRecordSchema, session)) {
     throw new Error("Workspace session has an invalid format.");
   }
-  const createdAt = timestamp(session.createdAt, "Session creation time");
-  const expiresAt = timestamp(session.expiresAt, "Session expiry time");
+  const createdAt = workspaceSessionTimestamp(session.createdAt, "Session creation time");
+  const expiresAt = workspaceSessionTimestamp(session.expiresAt, "Session expiry time");
   if (expiresAt <= createdAt) {
     throw new Error("Workspace session expiry must be after its creation time.");
   }
   if (
     session.signedOutAt !== undefined &&
-    timestamp(session.signedOutAt, "Session sign-out time") < createdAt
+    workspaceSessionTimestamp(session.signedOutAt, "Session sign-out time") < createdAt
   ) {
     throw new Error("Workspace session sign-out cannot precede its creation time.");
   }
 }
 
-function validateStoredSession(session: Readonly<StoredWorkspaceSessionRecord>): void {
+export function validateStoredWorkspaceSession(
+  session: Readonly<StoredWorkspaceSessionRecord>,
+): void {
   if (!Value.Check(StoredWorkspaceSessionRecordSchema, session)) {
     throw new Error("Persisted workspace session has an invalid format.");
   }
   const { sessionIdHash: _sessionIdHash, ...record } = session;
-  validateSession({ ...record, sessionId: "session_persisted_digest" });
+  validateWorkspaceSession({ ...record, sessionId: "session_persisted_digest" });
 }
 
-function sessionIdHash(sessionId: string): string {
+export function workspaceSessionIdHash(sessionId: string): string {
   return createHash("sha256").update(sessionId, "utf8").digest("hex");
 }
 
-function hydrateSession(
+export function hydrateWorkspaceSession(
   sessionId: string,
   stored: Readonly<StoredWorkspaceSessionRecord>,
 ): WorkspaceSessionRecord {
@@ -162,7 +164,7 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
       }
       const ids = new Set<string>();
       for (const session of parsed.sessions) {
-        validateStoredSession(session);
+        validateStoredWorkspaceSession(session);
         if (ids.has(session.sessionIdHash)) {
           throw new Error("Persisted workspace sessions contain a duplicate ID.");
         }
@@ -183,7 +185,7 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
 
   async #save(): Promise<void> {
     const sessions = [...this.#sessions.values()].map((session) => {
-      validateStoredSession(session);
+      validateStoredWorkspaceSession(session);
       return structuredClone(session);
     });
     if (this.persist) {
@@ -224,12 +226,12 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
     accountId: string,
     expiresAt: string,
   ): Promise<WorkspaceSessionRecord> {
-    assertIdentifier(accountId, "Account ID");
+    assertWorkspaceSessionIdentifier(accountId, "Account ID");
     return this.#transact(async () => {
       const createdAt = this.now();
       const sessionId = this.createSessionId();
-      assertIdentifier(sessionId, "Session ID");
-      const digest = sessionIdHash(sessionId);
+      assertWorkspaceSessionIdentifier(sessionId, "Session ID");
+      const digest = workspaceSessionIdHash(sessionId);
       if (this.#sessions.has(digest)) {
         throw new Error("Workspace session ID collision.");
       }
@@ -240,7 +242,7 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
         createdAt,
         expiresAt,
       };
-      validateSession(session);
+      validateWorkspaceSession(session);
       const stored: StoredWorkspaceSessionRecord = {
         schemaVersion: 1,
         sessionIdHash: digest,
@@ -260,10 +262,10 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
   }
 
   async load(sessionId: string): Promise<WorkspaceSessionRecord | undefined> {
-    assertIdentifier(sessionId, "Session ID");
+    assertWorkspaceSessionIdentifier(sessionId, "Session ID");
     await this.#ensureLoaded();
-    const session = this.#sessions.get(sessionIdHash(sessionId));
-    return session === undefined ? undefined : hydrateSession(sessionId, session);
+    const session = this.#sessions.get(workspaceSessionIdHash(sessionId));
+    return session === undefined ? undefined : hydrateWorkspaceSession(sessionId, session);
   }
 
   async loadActive(
@@ -271,11 +273,11 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
     occurredAt = this.now(),
   ): Promise<WorkspaceSessionRecord | undefined> {
     const session = await this.load(sessionId);
-    const occurredAtTimestamp = timestamp(occurredAt, "Session resolution time");
+    const occurredAtTimestamp = workspaceSessionTimestamp(occurredAt, "Session resolution time");
     if (
       session === undefined ||
       session.signedOutAt !== undefined ||
-      occurredAtTimestamp >= timestamp(session.expiresAt, "Session expiry time")
+      occurredAtTimestamp >= workspaceSessionTimestamp(session.expiresAt, "Session expiry time")
     ) {
       return undefined;
     }
@@ -283,17 +285,19 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
   }
 
   async signOut(sessionId: string): Promise<WorkspaceSessionRecord | undefined> {
-    assertIdentifier(sessionId, "Session ID");
+    assertWorkspaceSessionIdentifier(sessionId, "Session ID");
     return this.#transact(async () => {
-      const digest = sessionIdHash(sessionId);
+      const digest = workspaceSessionIdHash(sessionId);
       const current = this.#sessions.get(digest);
       if (current === undefined) return undefined;
-      if (current.signedOutAt !== undefined) return hydrateSession(sessionId, current);
+      if (current.signedOutAt !== undefined) {
+        return hydrateWorkspaceSession(sessionId, current);
+      }
       const updated: StoredWorkspaceSessionRecord = {
         ...structuredClone(current),
         signedOutAt: this.now(),
       };
-      validateStoredSession(updated);
+      validateStoredWorkspaceSession(updated);
       this.#sessions.set(digest, updated);
       try {
         await this.#save();
@@ -301,7 +305,7 @@ export class LocalWorkspaceSessionStore implements WorkspaceSessionStore {
         this.#sessions.set(digest, current);
         throw error;
       }
-      return hydrateSession(sessionId, updated);
+      return hydrateWorkspaceSession(sessionId, updated);
     });
   }
 }

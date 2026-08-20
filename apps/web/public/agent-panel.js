@@ -97,6 +97,40 @@ export function createAgentActionRequestId() {
   return "agent_action_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2);
 }
 
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (isRecord(value)) {
+    return `{${Object.keys(value).sort().map(
+      (key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`,
+    ).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+export async function createStableAgentActionRequestId(sessionId, sourceId, proposal) {
+  const card = parseAgentActionCard(proposal);
+  if (
+    !isIdentifier(sessionId)
+    || !isIdentifier(sourceId)
+    || !card
+    || !globalThis.crypto?.subtle
+    || typeof globalThis.TextEncoder !== "function"
+  ) {
+    throw new Error("无法为这张智能助手操作卡片生成稳定请求标识。");
+  }
+  const bytes = new TextEncoder().encode(canonicalJson({
+    sessionId,
+    sourceId,
+    videoTaskId: card.videoTaskId,
+    action: card.action,
+    expectedRevision: card.expectedRevision,
+    payload: card.payload,
+  }));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  const hex = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  return `agent_action_${hex}`;
+}
+
 export function agentActionRequestBody(proposal, requestId) {
   const card = parseAgentActionCard(proposal);
   if (!card || !isIdentifier(requestId)) {

@@ -33,6 +33,7 @@ import type {
   WorkspaceAdminStore,
 } from "./workspace-admin-store.ts";
 import type { DevelopmentAccount } from "./workspace-session-runtime.ts";
+import { hasUsableVehicleFacts } from "./vehicle-facts.ts";
 
 type IdKind = "brand" | "vehicle" | "grant" | "vehicle_asset_association";
 
@@ -65,7 +66,21 @@ export const DEFAULT_ADMIN_VEHICLES: readonly Vehicle[] = [
       bodyType: "纯电紧凑型 SUV",
       seats: 5,
     },
-    fixedClaims: [],
+    fixedClaims: [{
+      id: "claim_firefly_e5_five_seat_suv",
+      kind: "fixed",
+      name: "五座纯电 SUV",
+      statement: "萤火 E5 长续航版为五座纯电紧凑型 SUV",
+      evidence: {
+        sourceName: "萤火汽车官方车型目录",
+        sourceReference: "firefly-e5-2026-long-range#body-and-seats",
+        effectiveFrom: "2026-01-01",
+      },
+      requiredInVoiceover: false,
+      requiredInSubtitle: false,
+      mayRephrase: true,
+      riskNotes: ["不得扩展为未经官方证据支持的空间或安全排名"],
+    }],
     optionalClaims: [],
     prohibitedClaims: ["未经官方证据支持的续航、能耗或安全排名"],
     createdAt: "2026-08-19T00:00:00.000Z",
@@ -134,6 +149,30 @@ function assertAdministrator(session: Readonly<WorkspaceSessionScope>): void {
       403,
     );
   }
+}
+
+function assertUsableVehicleFacts(
+  input: Readonly<Pick<CreateVehicleRequest, "fixedClaims" | "optionalClaims">>,
+): void {
+  if (!hasUsableVehicleFacts(input)) {
+    throw new BusinessRuntimeError(
+      "AIC-ADMIN-VEHICLE_FACTS_INVALID",
+      "A vehicle requires 1 to 20 globally unique facts in their matching fixed or extended groups.",
+      400,
+    );
+  }
+}
+
+function safeMinorTotal(left: number, right: number): number {
+  const total = BigInt(left) + BigInt(right);
+  if (total > BigInt(Number.MAX_SAFE_INTEGER) || total < BigInt(Number.MIN_SAFE_INTEGER)) {
+    throw new BusinessRuntimeError(
+      "AIC-COST-BUDGET_AGGREGATE_OVERFLOW",
+      "The budget overview exceeds the safe integer range and cannot be represented exactly.",
+      422,
+    );
+  }
+  return Number(total);
 }
 
 function latestVehicles(versions: readonly Vehicle[]): Vehicle[] {
@@ -402,6 +441,7 @@ export class WorkspaceAdminRuntime {
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<Vehicle> {
     assertAdministrator(session);
+    assertUsableVehicleFacts(input);
     let created: Vehicle | undefined;
     await this.store.transact(session.tenantId, (state) => {
       const brand = this.#managedBrand(state, brandId, session);
@@ -442,6 +482,7 @@ export class WorkspaceAdminRuntime {
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<Vehicle> {
     assertAdministrator(session);
+    assertUsableVehicleFacts(input);
     let created: Vehicle | undefined;
     await this.store.transact(session.tenantId, (state) => {
       const latest = this.#latestVehicle(state, vehicleId);
@@ -662,6 +703,7 @@ export class WorkspaceAdminRuntime {
     limitAmountMinor: number,
     session: Readonly<WorkspaceSessionScope>,
   ) {
+    assertAdministrator(session);
     this.#targetAccount(session.tenantId, accountId);
     return this.budgets.createForAccount(accountId, currency, limitAmountMinor, session);
   }
@@ -672,6 +714,7 @@ export class WorkspaceAdminRuntime {
     limitAmountMinor: number,
     session: Readonly<WorkspaceSessionScope>,
   ) {
+    assertAdministrator(session);
     this.#targetAccount(session.tenantId, accountId);
     return this.budgets.updateLimit(accountId, expectedRevision, limitAmountMinor, session);
   }
@@ -766,6 +809,15 @@ export class WorkspaceAdminRuntime {
       throw new BusinessRuntimeError(
         "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_MISMATCH",
         "Vehicle assets cannot be associated across vehicles.",
+        400,
+      );
+    }
+    if (!input.assets.some(
+      (reference) => reference.category === "vehicle" && reference.vehicleId === vehicleId,
+    )) {
+      throw new BusinessRuntimeError(
+        "AIC-ADMIN-ASSET_ASSOCIATION_VEHICLE_REQUIRED",
+        "The recommended asset package requires an asset for the current vehicle.",
         400,
       );
     }
@@ -875,10 +927,22 @@ export class WorkspaceAdminRuntime {
           reservedAmountMinor: 0,
           availableAmountMinor: 0,
         };
-        current.limitAmountMinor += entry.balance.limitAmountMinor;
-        current.spentAmountMinor += entry.balance.spentAmountMinor;
-        current.reservedAmountMinor += entry.balance.reservedAmountMinor;
-        current.availableAmountMinor += entry.balance.availableAmountMinor;
+        current.limitAmountMinor = safeMinorTotal(
+          current.limitAmountMinor,
+          entry.balance.limitAmountMinor,
+        );
+        current.spentAmountMinor = safeMinorTotal(
+          current.spentAmountMinor,
+          entry.balance.spentAmountMinor,
+        );
+        current.reservedAmountMinor = safeMinorTotal(
+          current.reservedAmountMinor,
+          entry.balance.reservedAmountMinor,
+        );
+        current.availableAmountMinor = safeMinorTotal(
+          current.availableAmountMinor,
+          entry.balance.availableAmountMinor,
+        );
         summary[currency] = current;
         return summary;
       }, {})),

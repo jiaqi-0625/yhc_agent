@@ -63,6 +63,13 @@ export function resolveWorkspaceSelection(projects, projectId, taskId) {
   return { project, task: requestedTask || activeTask || tasks[0] || null };
 }
 
+export function workspaceRouteChangesSelection(route, selection) {
+  if (!selection) return route !== null;
+  if (!route) return true;
+  return route.projectId !== selection.project?.project?.id
+    || (route.videoTaskId || null) !== (selection.task?.id || null);
+}
+
 export function readWorkspaceUrlState(href) {
   try {
     const url = new URL(href, "http://localhost/");
@@ -442,6 +449,10 @@ export function createWorkspaceFrame(options) {
   function restoreFromLocation() {
     if (!browserLocation) return false;
     const route = readWorkspaceUrlState(browserLocation.href);
+    if (selectionLocked() && workspaceRouteChangesSelection(route, selection)) {
+      writeRoute("replace");
+      return false;
+    }
     if (!route) {
       close({ synchronize: false });
       return true;

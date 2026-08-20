@@ -131,6 +131,9 @@ async function readRunStream(response, sessionId, runId, state, options) {
         if (payload.sessionId !== sessionId || payload.runId !== runId) {
           throw new AgentStreamProtocolError("Agent 返回了不属于当前运行的事件。");
         }
+        if (options.videoTaskId && payload.videoTaskId !== options.videoTaskId) {
+          throw new AgentStreamProtocolError("Agent 返回了不属于当前任务的事件。");
+        }
         if (!Number.isInteger(payload.sequence) || payload.sequence !== state.lastSequence + 1) {
           throw new AgentStreamProtocolError("Agent 事件流出现缺口，无法安全续传。");
         }
@@ -145,6 +148,7 @@ async function readRunStream(response, sessionId, runId, state, options) {
           || payload.runId !== runId
           || !payload.session
           || payload.session.id !== sessionId
+          || (options.videoTaskId && payload.session.videoTaskId !== options.videoTaskId)
           || typeof payload.assistantText !== "string"
         ) {
           throw new AgentStreamProtocolError("Agent 返回了不属于当前运行的完成结果。");

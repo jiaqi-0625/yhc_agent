@@ -73,17 +73,17 @@ export interface BatchProjectCreateMetadata {
   payloadHash: string;
 }
 
-function assertIdentifier(value: string, label: string): void {
+export function assertIdentifier(value: string, label: string): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) {
     throw new Error(`${label} contains invalid characters.`);
   }
 }
 
-function normalizedName(value: string): string {
+export function normalizedName(value: string): string {
   return value.normalize("NFKC").trim();
 }
 
-function validateAggregate(
+export function validateAggregate(
   aggregate: Readonly<BatchProjectAggregate>,
   tenantId: string,
   projectId: string,

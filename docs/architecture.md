@@ -10,14 +10,26 @@
 
 ```text
 apps/web             账号与任务切换、Agent 面板、SSE 客户端、人工操作卡片
-apps/api             HTTP/SSE、认证解析、TaskContext 装配、统一/兼容命令边界
+apps/api             HTTP/SSE、认证解析、TaskContext 装配、PostgreSQL 适配器、统一/兼容命令边界
 packages/agent       Pi Agent 生命周期、会话/运行存储、事件日志、审计与脱敏
 packages/tools       车型、资产、阶段建议和策略领域工具
 packages/domain      工作流状态机、工具策略、权限/revision/版本规则
 packages/schemas     TaskContext、事件、卡片及业务共享契约
 ```
 
-依赖方向是 `web -> api -> agent/tools/domain -> schemas`。API 可以把业务服务端口注入 Agent，但 Agent 不得直接访问数据库、文件系统、任意网络或审批接口。
+依赖方向是 `web -> api -> agent/tools/domain -> schemas`。PostgreSQL 驱动和 SQL 只存在于 API 基础设施适配器；API 可以把业务服务端口注入 Agent，但 Agent 不得直接访问数据库、文件系统、任意网络或审批接口。
+
+## PostgreSQL 持久化
+
+Workspace V2 在线权威状态使用 PostgreSQL，决定记录见 [ADR-001](./decisions/adr-001-postgresql-persistence.md)。API 进程共享一个连接池，Store 通过同一连接执行显式 `BEGIN`/`COMMIT`/`ROLLBACK`，并始终释放连接。生产启动只执行连接与 schema 版本检查；DDL 由部署阶段的显式迁移命令执行。
+
+首期表使用关系型信封列保存 `tenant_id`、实体 ID、revision、规范化名称、幂等元数据与时间戳，版本化业务聚合存入 JSONB 并继续通过共享 schema 校验。数据库唯一约束、行锁和 revision 条件用于抵御跨实例竞争，但认证身份、权限、状态机、人工确认和预算规则仍由服务端领域层重新校验。
+
+七个在线 Store 使用 PostgreSQL：Workspace 管理状态、Workspace Session、账号额度、账号高消耗运行锁、批次项目/项目资产池、项目临时资产和视频任务。项目资产的跨 Store 服务操作由根事务和 PostgreSQL advisory lock 跨实例串行，同一异步调用链的嵌套 Store 复用该连接并整体提交或回滚；需要新的跨聚合原子写入命令时仍须由显式协调器建立根事务。旧 `.data/works` 只可由 WS-307 显式迁移读取，不能用来恢复或推断 Workspace V2 业务状态；Agent transcript 继续是隔离的本地对话存储。
+
+`GET /health` 仅报告进程存活；`GET /ready` 执行无敏感信息的数据库与 schema readiness 检查。关闭 API 时先停止接收请求，再关闭连接池。开发 Docker 数据库只绑定 loopback；生产账号签发仍等待正式 identity provider，开发账号入口在 `NODE_ENV=production` 下保持关闭。
+
+WS-307 的 V2 `TaskContext` resolver 与 Web 项目/任务选择正在与 PostgreSQL 装配进行集成验收。该工作不得以 legacy `.data/works` 回退来规避失败；验收未完成前不把 Agent 会话端到端可用性等同于数据库 readiness。
 
 ## 权威状态与上下文
 
@@ -87,7 +99,7 @@ WS-305 统一命令边界在每次执行时重新校验认证会话、最新授�
 
 ## 工作流和版本
 
-Workspace V2 权威流程为：
+Workspace V2 产品权威目标流程为：
 
 ```text
 strategy -> script -> asset_matching -> storyboard -> video_preview -> delivery

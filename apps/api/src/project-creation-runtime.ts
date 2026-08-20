@@ -32,6 +32,7 @@ import type {
   WorkspaceAdminState,
   WorkspaceAdminStore,
 } from "./workspace-admin-store.ts";
+import { hasUsableVehicleFacts } from "./vehicle-facts.ts";
 
 function latestVehicles(versions: readonly Vehicle[]): Vehicle[] {
   const latest = new Map<string, Vehicle>();
@@ -140,6 +141,13 @@ export class ProjectCreationRuntime {
         409,
       );
     }
+    if (!hasUsableVehicleFacts(vehicle)) {
+      throw error(
+        "AIC-PROJECT-CREATION-VEHICLE_FACTS_INVALID",
+        "The selected vehicle does not have 1 to 20 usable, uniquely identified facts.",
+        409,
+      );
+    }
     const association = state.vehicleAssetAssociations.find(
       (candidate) => candidate.vehicleId === vehicle.id,
     );
@@ -183,6 +191,7 @@ export class ProjectCreationRuntime {
     const vehicles = latestVehicles(state.vehicleVersions).filter(
       (vehicle) =>
         vehicle.status === "active" &&
+        hasUsableVehicleFacts(vehicle) &&
         allowedVehicles.has(`${vehicle.brandId}:${vehicle.id}`),
     );
     const brandIds = new Set(vehicles.map((vehicle) => vehicle.brandId));

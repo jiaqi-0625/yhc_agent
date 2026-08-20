@@ -37,8 +37,13 @@ import {
   isMigrationSafeAgentRuntime,
 } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
+import { parsePostgresDatabaseConfig, type PostgresDatabaseConfig } from "./database-config.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
+import {
+  createPostgresApiRuntime,
+  type PostgresApiRuntime,
+} from "./postgres-api-runtime.ts";
 import {
   handleProjectLibraryRoute,
   ProjectLibraryPath,
@@ -88,6 +93,9 @@ import {
 } from "./workspace-task-context.ts";
 
 const version = "0.1.0";
+export type ApiReadinessProbe = () => Promise<void>;
+
+const alwaysReady: ApiReadinessProbe = async () => undefined;
 const resolveLocalAgentIdentity: AgentIdentityResolver = () => ({
   actorId: LOCAL_SCOPE.actorId,
   tenantId: LOCAL_SCOPE.tenantId,
@@ -115,10 +123,13 @@ function createWorkspaceAgentIdentityResolver(
   };
 }
 
-function developmentAccountsAllowed(host: string): boolean {
-  if (process.env.NODE_ENV === "production") return false;
+function developmentAccountsAllowed(
+  host: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  if (environment.NODE_ENV === "production") return false;
   if (["127.0.0.1", "::1", "localhost"].includes(host)) return true;
-  return process.env.FIREFLY_ENABLE_DEVELOPMENT_ACCOUNTS === "true";
+  return environment.FIREFLY_ENABLE_DEVELOPMENT_ACCOUNTS === "true";
 }
 
 async function handleRequest(
@@ -138,6 +149,7 @@ async function handleRequest(
   legacyLocalAccessEnabled: boolean,
   projectLibrary: ProjectLibraryRuntime | undefined,
   legacyWritesDisabled: boolean,
+  readiness: ApiReadinessProbe,
   assetMatching: AssetMatchingRuntime | undefined,
   accountRunLocks: AccountRunLockRuntime | undefined,
 ): Promise<void> {
@@ -145,6 +157,19 @@ async function handleRequest(
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
   if (request.method === "GET" && url.pathname === "/health") {
     sendJson(response, 200, { status: "ok", service: "firefly-ad-agent-api", version });
+    return;
+  }
+  if (request.method === "GET" && url.pathname === "/ready") {
+    try {
+      await readiness();
+      sendJson(response, 200, { status: "ready", service: "firefly-ad-agent-api", version });
+    } catch {
+      sendJson(response, 503, {
+        status: "unavailable",
+        service: "firefly-ad-agent-api",
+        version,
+      });
+    }
     return;
   }
   if (request.method === "GET" && url.pathname === "/v1/meta") {
@@ -390,6 +415,7 @@ export function createApiServer(
   projectLibrary: ProjectLibraryRuntime | undefined = undefined,
   legacyWritesDisabled = false,
   resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
+  readiness: ApiReadinessProbe = alwaysReady,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
 ): Server {
@@ -682,6 +708,7 @@ export function createApiServer(
       legacyLocalAccessEnabled,
       activeProjectLibrary,
       legacyWritesDisabled,
+      readiness,
       activeAssetMatching,
       activeAccountRunLocks,
     ).catch((error: unknown) => {
@@ -707,13 +734,16 @@ export async function startApiServer(
   projectLibrary: ProjectLibraryRuntime | undefined = undefined,
   migrationStateDirectory = process.env.WORKSPACE_MIGRATION_DATA_DIRECTORY ?? ".data/workspace-migrations",
   resolveAgentTaskContext: AgentTaskContextResolver | undefined = undefined,
+  readiness: ApiReadinessProbe = alwaysReady,
+  forceLegacyWritesDisabled = false,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
   try {
-    const legacyWritesDisabled = (await migrationState.inspect()).completedMigrationIds.length > 0;
+    const legacyWritesDisabled = forceLegacyWritesDisabled ||
+      (await migrationState.inspect()).completedMigrationIds.length > 0;
     const server = createApiServer(
       runtime,
       business,
@@ -729,6 +759,7 @@ export async function startApiServer(
       projectLibrary,
       legacyWritesDisabled,
       resolveAgentTaskContext,
+      readiness,
       assetMatching,
       accountRunLocks,
     );
@@ -749,16 +780,185 @@ export async function startApiServer(
   }
 }
 
+export type PersistenceBackend = "local" | "postgres";
+
+type ApiEnvironment = Readonly<Record<string, string | undefined>>;
+
+export function resolvePersistenceBackend(
+  environment: ApiEnvironment = process.env,
+): PersistenceBackend {
+  const configured = environment.PERSISTENCE_BACKEND ?? "postgres";
+  if (configured !== "local" && configured !== "postgres") {
+    throw new Error("PERSISTENCE_BACKEND must be either local or postgres.");
+  }
+  if (environment.NODE_ENV === "production" && configured !== "postgres") {
+    throw new Error("Production requires PERSISTENCE_BACKEND=postgres.");
+  }
+  return configured;
+}
+
+export interface StartConfiguredApiServerOptions {
+  readonly environment?: ApiEnvironment;
+  readonly business?: LocalBusinessRuntime;
+  readonly createPostgresRuntime?: (
+    config: PostgresDatabaseConfig,
+  ) => Promise<PostgresApiRuntime>;
+  readonly registerSignalHandlers?: boolean;
+}
+
+function closeListeningServer(server: Server): Promise<void> {
+  if (!server.listening) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => error === undefined ? resolve() : reject(error));
+  });
+}
+
+function attachPostgresLifecycle(
+  server: Server,
+  postgres: PostgresApiRuntime,
+  registerSignalHandlers: boolean,
+): void {
+  let closePromise: Promise<void> | undefined;
+  const closePostgres = (): Promise<void> => {
+    closePromise ??= postgres.close();
+    return closePromise;
+  };
+  const shutdown = (): void => {
+    void (async () => {
+      try {
+        await closeListeningServer(server);
+        await closePostgres();
+      } catch {
+        process.exitCode = 1;
+      }
+    })();
+  };
+  const removeSignalHandlers = (): void => {
+    if (!registerSignalHandlers) return;
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
+  };
+
+  server.once("close", () => {
+    removeSignalHandlers();
+    void closePostgres().catch(() => {
+      process.exitCode = 1;
+    });
+  });
+  if (registerSignalHandlers) {
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  }
+}
+
+export async function startConfiguredApiServer(
+  port = 3100,
+  host = "127.0.0.1",
+  options: Readonly<StartConfiguredApiServerOptions> = {},
+): Promise<Server> {
+  const environment = options.environment ?? process.env;
+  const backend = resolvePersistenceBackend(environment);
+  const migrationStateDirectory = environment.WORKSPACE_MIGRATION_DATA_DIRECTORY ??
+    process.env.WORKSPACE_MIGRATION_DATA_DIRECTORY ??
+    ".data/workspace-migrations";
+  if (backend === "local") {
+    const business = options.business ?? new LocalBusinessRuntime();
+    return startApiServer(
+      port,
+      host,
+      undefined,
+      business,
+      undefined,
+      undefined,
+      developmentAccountsAllowed(host, environment),
+      developmentAccountsAllowed(host, environment),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      migrationStateDirectory,
+    );
+  }
+
+  const postgres = await (options.createPostgresRuntime ?? createPostgresApiRuntime)(
+    parsePostgresDatabaseConfig(environment),
+  );
+  const business = options.business ?? new LocalBusinessRuntime();
+  let server: Server | undefined;
+  try {
+    const runtime = createBusinessAgentRuntime(
+      business,
+      loadLocalAgentConfig(environment),
+      {
+        disableLegacyStrategyTools: true,
+        resolveWorkStatus: postgres.resolveWorkStatus,
+        resolveVehicleService: postgres.resolveVehicleService,
+        resolveTaskAssetReader: postgres.resolveTaskAssetReader,
+        resolveStageSuggestionReader: postgres.resolveStageSuggestionReader,
+      },
+    );
+    const resolvePostgresTaskContext: AgentTaskContextResolver = async (request, videoTaskId) => {
+      const bearer = readOptionalWorkspaceBearer(request);
+      if (bearer === undefined) {
+        throw new BusinessRuntimeError(
+          "AIC-AUTH-SESSION_REQUIRED",
+          "A valid workspace bearer session is required.",
+          401,
+        );
+      }
+      const session = await postgres.workspaceSessions.resolveSession(bearer);
+      return postgres.taskContexts.resolve(videoTaskId, session.scope);
+    };
+    server = await startApiServer(
+      port,
+      host,
+      runtime,
+      business,
+      undefined,
+      postgres.workspaceSessions,
+      developmentAccountsAllowed(host, environment),
+      false,
+      postgres.workspaceAdmin,
+      postgres.projectCreation,
+      postgres.videoTasks,
+      postgres.agentActionCommands,
+      postgres.videoTaskStages,
+      postgres.projectLibrary,
+      migrationStateDirectory,
+      resolvePostgresTaskContext,
+      postgres.readiness,
+      true,
+      postgres.assetMatching,
+      postgres.accountRunLocks,
+    );
+    attachPostgresLifecycle(
+      server,
+      postgres,
+      options.registerSignalHandlers ?? true,
+    );
+    return server;
+  } catch (error) {
+    if (server !== undefined) await closeListeningServer(server).catch(() => undefined);
+    await postgres.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 const isEntrypoint = process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1];
 if (isEntrypoint) {
   const configuredPort = Number.parseInt(process.env.PORT ?? "3100", 10);
   const configuredHost = process.env.HOST ?? "127.0.0.1";
-  const business = new LocalBusinessRuntime();
-  const agentConfig = loadLocalAgentConfig();
-  const server = await startApiServer(configuredPort, configuredHost, undefined, business);
-  const address = server.address();
-  const activePort = typeof address === "object" && address ? address.port : configuredPort;
-  console.log(
-    `Firefly Local Agent API listening on http://${configuredHost}:${activePort} provider=${agentConfig.provider} model=${agentConfig.modelId}`,
-  );
+  try {
+    const server = await startConfiguredApiServer(configuredPort, configuredHost);
+    const address = server.address();
+    const activePort = typeof address === "object" && address ? address.port : configuredPort;
+    console.log(
+      `Firefly Agent API listening on http://${configuredHost}:${activePort} persistence=${resolvePersistenceBackend()}`,
+    );
+  } catch {
+    console.error("Firefly Agent API failed to start.");
+    process.exitCode = 1;
+  }
 }
