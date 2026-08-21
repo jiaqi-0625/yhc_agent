@@ -24,6 +24,7 @@ export interface VehicleCatalogEntry {
   series: string;
   modelYear: number;
   trim: string;
+  factsText?: string;
   parameters: Readonly<Record<string, string | number | boolean>>;
   fixedClaims: readonly Claim[];
   optionalClaims: readonly Claim[];
@@ -209,6 +210,7 @@ export class InMemoryVehicleService implements VehicleServicePort {
       modelYear: entry.modelYear,
       trim: entry.trim,
       ...(request.color === undefined ? {} : { color: request.color }),
+      ...(entry.factsText === undefined ? {} : { factsText: entry.factsText }),
       parameters: structuredClone(entry.parameters),
       fixedClaims: [...structuredClone(entry.fixedClaims)],
       optionalClaims: [...structuredClone(entry.optionalClaims)],

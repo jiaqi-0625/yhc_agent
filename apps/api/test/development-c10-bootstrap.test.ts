@@ -10,6 +10,8 @@ test("C10 development facts keep powertrain versions separate and store facts as
   assert.notEqual(c10PureElectricVehicle.id, c10ExtendedRangeVehicle.id);
   assert.equal(c10PureElectricVehicle.parameters && Object.keys(c10PureElectricVehicle.parameters).length, 0);
   assert.equal(c10ExtendedRangeVehicle.parameters && Object.keys(c10ExtendedRangeVehicle.parameters).length, 0);
+  assert.equal(typeof c10PureElectricVehicle.factsText, "string");
+  assert.equal(typeof c10ExtendedRangeVehicle.factsText, "string");
 
   const pureElectricFacts = [
     ...c10PureElectricVehicle.fixedClaims,
@@ -32,4 +34,7 @@ test("C10 development facts keep powertrain versions separate and store facts as
   assert.match(extendedRangeText, /纯电续航为 290km/u);
   assert.match(extendedRangeText, /综合续航为 1300km/u);
   assert.doesNotMatch(extendedRangeText, /电池容量为 81\.9kWh/u);
+  assert.match(c10PureElectricVehicle.factsText!, /660km/u);
+  assert.doesNotMatch(c10PureElectricVehicle.factsText!, /综合续航为 1300km/u);
+  assert.match(c10ExtendedRangeVehicle.factsText!, /综合续航为 1300km/u);
 });

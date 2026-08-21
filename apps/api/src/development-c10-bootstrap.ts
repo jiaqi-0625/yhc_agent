@@ -37,10 +37,10 @@ import type { WorkspaceAdminState } from "./workspace-admin-store.ts";
 const importedAt = "2026-08-21T00:00:00.000Z";
 const administratorId = "account_admin";
 const creatorIds = ["account_creator_a", "account_creator_b"] as const;
-const c10ProjectId = "batch_project_leapmotor_c10_assets_v2";
-const c10AssetPoolId = "project_asset_pool_leapmotor_c10_assets_v2";
-const c10ProjectRequestId = "request_import_leapmotor_c10_assets_v2";
-const c10TaskRequestId = "request_import_leapmotor_c10_acceptance_task_v2";
+const c10ProjectId = "batch_project_leapmotor_c10_assets_v3";
+const c10AssetPoolId = "project_asset_pool_leapmotor_c10_assets_v3";
+const c10ProjectRequestId = "request_import_leapmotor_c10_assets_v3";
+const c10TaskRequestId = "request_import_leapmotor_c10_acceptance_task_v3";
 
 const c10Brand: Brand = {
   id: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
@@ -92,15 +92,36 @@ const c10CommonClaims: Vehicle["optionalClaims"] = [
   c10Claim("claim_c10_chassis", "底盘稳定控制", "零跑 C10 采用 LMC 一体化运动融合底盘，并具备爆胎稳定控制能力。", ["不得扩展为绝对安全或零事故承诺"]),
 ];
 
+const c10CommonFactsText = [
+  "零跑 C10 车身尺寸为 4739×1900×1680mm，轴距为 2825mm，采用大五座布局。",
+  "零跑 C10 采用 LEAP 3.0 零跑自研架构。",
+  "零跑 C10 后排空间宽裕，后排座椅可放倒以拓展后备箱装载空间。",
+  "零跑 C10 配备 14.6 英寸 2.5K 中控屏，并使用 Leapmotor OS 交互系统和 AI 大模型语音助手。",
+  "适用配置配备 18 扬声器、2088W、7.1 声道音响及主驾头枕私享音区。",
+  "适用配置主副驾支持通风、加热和 10 点按摩，主驾配备 4 向气动腰托。",
+  "零跑 C10 使用 Oeko-Tex 环保内饰面料。",
+  "零跑 C10 采用 CTC 2.0 电池底盘一体化技术、2000MPa 热成型钢及 AI-BMS 电池热管理系统。",
+  "零跑 C10 采用 LMC 一体化运动融合底盘，并具备爆胎稳定控制能力。",
+];
+
 export const c10PureElectricVehicle: Vehicle = {
   id: LEAPMOTOR_C10_MOCK_ASSET_BINDING.vehicleId,
   tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
   brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
-  version: 2,
+  version: 3,
   status: "active",
   series: "零跑 C10",
   modelYear: 2026,
   trim: "2026 焕新版纯电 660km（本地资料版）",
+  factsText: [
+    "本项目车型为零跑 C10 2026 焕新版纯电 660km 版本。",
+    ...c10CommonFactsText,
+    "该版本 CLTC 续航为 660km，电池容量为 81.9kWh。",
+    "该版本采用 800V 高压平台和 3C 快充，资料标注电量从 30% 充至 80% 需 16 分钟。",
+    "该版本采用后置单电机，最大功率 230kW、最大扭矩 360N·m，资料标注 0 至 100km/h 加速时间为 6.02 秒。",
+    "仅激光雷达配置搭载 128 线禾赛激光雷达，并支持城市 NAP、高速领航、记忆泊车和遥控泊车。",
+    "高阶配置搭载高通 8295 座舱芯片。",
+  ].join("\n"),
   parameters: {},
   fixedClaims: [{
     id: "claim_leapmotor_c10_model_identity",
@@ -135,8 +156,16 @@ export const c10PureElectricVehicle: Vehicle = {
 export const c10ExtendedRangeVehicle: Vehicle = {
   ...structuredClone(c10PureElectricVehicle),
   id: "vehicle_leapmotor_c10_2026_erev_290",
-  version: 1,
+  version: 2,
   trim: "2026 焕新版增程 290km（本地资料版）",
+  factsText: [
+    "本项目车型为零跑 C10 2026 焕新版增程 290km 版本。",
+    ...c10CommonFactsText,
+    "该版本 CLTC 纯电续航为 290km，资料标注综合续航为 1300km。",
+    "该版本采用 200kW 后置驱动电机，可油可电。",
+    "仅激光雷达配置搭载 128 线禾赛激光雷达，并支持城市 NAP、高速领航、记忆泊车和遥控泊车。",
+    "高阶配置搭载高通 8295 座舱芯片。",
+  ].join("\n"),
   fixedClaims: [{
     ...structuredClone(c10PureElectricVehicle.fixedClaims[0]!),
     id: "claim_c10_erev_identity",
@@ -336,7 +365,7 @@ async function main(): Promise<void> {
         expectedAssetAssociationRevision: c10Association.revision,
         selectedAssets: c10References,
         aspectRatio: "9:16",
-        batchName: "C10 素材池导入",
+        batchName: "C10 素材池导入 V3",
       },
       {
         actorAccountId: creatorAccount.accountId,

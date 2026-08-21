@@ -219,6 +219,50 @@ const workspaceV2ColumnExpectations = [
   ["media_artifacts", "creation_request_id", varchar128, true],
   ["media_artifacts", "creation_payload_hash", "character(64)", true],
   ["media_artifacts", "artifact", "jsonb", true],
+
+  ["vehicle_models", "tenant_id", varchar128, true],
+  ["vehicle_models", "model_id", varchar128, true],
+  ["vehicle_models", "brand_id", varchar128, true],
+  ["vehicle_models", "series_name", "character varying(120)", true],
+  ["vehicle_models", "model_year", "integer", true],
+  ["vehicle_models", "status", "character varying(16)", true],
+  ["vehicle_models", "created_at", timestamptz, true],
+  ["vehicle_models", "created_by", varchar128, true],
+  ["vehicle_models", "updated_at", timestamptz, true],
+  ["vehicle_models", "updated_by", varchar128, true],
+  ["vehicle_variants", "tenant_id", varchar128, true],
+  ["vehicle_variants", "variant_id", varchar128, true],
+  ["vehicle_variants", "model_id", varchar128, true],
+  ["vehicle_variants", "variant_name", "character varying(120)", true],
+  ["vehicle_variants", "status", "character varying(16)", true],
+  ["vehicle_variants", "current_fact_version", "bigint", true],
+  ["vehicle_variants", "created_at", timestamptz, true],
+  ["vehicle_variants", "created_by", varchar128, true],
+  ["vehicle_variants", "updated_at", timestamptz, true],
+  ["vehicle_variants", "updated_by", varchar128, true],
+  ["vehicle_fact_versions", "tenant_id", varchar128, true],
+  ["vehicle_fact_versions", "variant_id", varchar128, true],
+  ["vehicle_fact_versions", "fact_version", "bigint", true],
+  ["vehicle_fact_versions", "facts_text", "text", true],
+  ["vehicle_fact_versions", "facts_sha256", "character(64)", true],
+  ["vehicle_fact_versions", "validation_index", "jsonb", true],
+  ["vehicle_fact_versions", "source_name", "text", true],
+  ["vehicle_fact_versions", "source_reference", "text", true],
+  ["vehicle_fact_versions", "effective_from", "date", true],
+  ["vehicle_fact_versions", "effective_until", "date", false],
+  ["vehicle_fact_versions", "created_at", timestamptz, true],
+  ["vehicle_fact_versions", "created_by", varchar128, true],
+  ["video_task_vehicle_snapshots", "snapshot_id", varchar128, true],
+  ["video_task_vehicle_snapshots", "tenant_id", varchar128, true],
+  ["video_task_vehicle_snapshots", "batch_project_id", varchar128, true],
+  ["video_task_vehicle_snapshots", "video_task_id", varchar128, true],
+  ["video_task_vehicle_snapshots", "variant_id", varchar128, true],
+  ["video_task_vehicle_snapshots", "fact_version", "bigint", true],
+  ["video_task_vehicle_snapshots", "facts_text", "text", true],
+  ["video_task_vehicle_snapshots", "facts_sha256", "character(64)", true],
+  ["video_task_vehicle_snapshots", "validation_index", "jsonb", true],
+  ["video_task_vehicle_snapshots", "locked_at", timestamptz, true],
+  ["video_task_vehicle_snapshots", "locked_by", varchar128, true],
 ] as const;
 const workspaceV2ConstraintExpectations = [
   ["workspace_admin_states_pkey", "p", "tenant_id", null, null],
@@ -242,6 +286,19 @@ const workspaceV2ConstraintExpectations = [
   ["media_artifacts_creation_request_key", "u", "tenant_id,batch_project_id,video_task_id,creation_actor_account_id,creation_request_id", null, null],
   ["media_artifacts_object_locator_key", "u", "storage_provider_id,storage_bucket_name,storage_object_key", null, null],
   ["media_artifacts_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
+  ["vehicle_models_pkey", "p", "tenant_id,model_id", null, null],
+  ["vehicle_models_model_id_key", "u", "model_id", null, null],
+  ["vehicle_models_identity_key", "u", "tenant_id,brand_id,series_name,model_year", null, null],
+  ["vehicle_variants_pkey", "p", "tenant_id,variant_id", null, null],
+  ["vehicle_variants_variant_id_key", "u", "variant_id", null, null],
+  ["vehicle_variants_model_name_key", "u", "tenant_id,model_id,variant_name", null, null],
+  ["vehicle_variants_model_fkey", "f", "tenant_id,model_id", "vehicle_models", "tenant_id,model_id"],
+  ["vehicle_variants_current_fact_fkey", "f", "tenant_id,variant_id,current_fact_version", "vehicle_fact_versions", "tenant_id,variant_id,fact_version"],
+  ["vehicle_fact_versions_pkey", "p", "tenant_id,variant_id,fact_version", null, null],
+  ["vehicle_fact_versions_variant_fkey", "f", "tenant_id,variant_id", "vehicle_variants", "tenant_id,variant_id"],
+  ["video_task_vehicle_snapshots_pkey", "p", "tenant_id,batch_project_id,video_task_id", null, null],
+  ["video_task_vehicle_snapshots_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
+  ["video_task_vehicle_snapshots_fact_fkey", "f", "tenant_id,variant_id,fact_version", "vehicle_fact_versions", "tenant_id,variant_id,fact_version"],
 ] as const;
 
 function recordAppliedMigrations(
@@ -256,7 +313,7 @@ function recordAppliedMigrations(
 test("migration loader reads the append-only Workspace V2 schemas with stable checksums", async () => {
   const loaded = await loadDatabaseMigrations();
 
-  assert.equal(loaded.length, 2);
+  assert.equal(loaded.length, 3);
   assert.equal(loaded[0]?.version, 1);
   assert.equal(loaded[0]?.name, "workspace_v2");
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE workspace_admin_states/);
@@ -272,6 +329,14 @@ test("migration loader reads the append-only Workspace V2 schemas with stable ch
   assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_task_fkey/u);
   assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_key_check/u);
   assert.equal(loaded[1]?.checksum, computeMigrationChecksum(loaded[1]?.sql ?? ""));
+  assert.equal(loaded[2]?.version, 3);
+  assert.equal(loaded[2]?.name, "vehicle_catalog");
+  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_models/u);
+  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_variants/u);
+  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_fact_versions/u);
+  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE video_task_vehicle_snapshots/u);
+  assert.match(loaded[2]?.sql ?? "", /facts_text text NOT NULL/u);
+  assert.equal(loaded[2]?.checksum, computeMigrationChecksum(loaded[2]?.sql ?? ""));
 });
 test("migration runner serializes, applies, records, and idempotently skips migrations", async () => {
   const database = new MigrationDatabase();
@@ -368,6 +433,10 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
     "temporary_asset_project_states",
     "account_run_lock_states",
     "media_artifacts",
+    "vehicle_models",
+    "vehicle_variants",
+    "vehicle_fact_versions",
+    "video_task_vehicle_snapshots",
   ]);
   const columnCall = database.calls.find(
     (call) => call.sql.includes("workspace_v2_required_columns"),

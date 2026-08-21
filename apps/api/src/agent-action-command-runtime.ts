@@ -216,6 +216,7 @@ export class AgentActionCommandRuntime {
       series: vehicle.series,
       modelYear: vehicle.modelYear,
       trim: vehicle.trim,
+      ...(vehicle.factsText === undefined ? {} : { factsText: vehicle.factsText }),
       parameters: structuredClone(vehicle.parameters),
       fixedClaims: structuredClone(vehicle.fixedClaims),
       optionalClaims: structuredClone(vehicle.optionalClaims),

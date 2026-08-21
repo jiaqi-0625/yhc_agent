@@ -164,6 +164,8 @@ WS-108 的共享工作流调整已通过最终全仓检查和独立复核，并�
 
 ## 工作区契约通知
 
+- 2026-08-21：WS-309 在本地分支增加车型系列、销售版本、不可变字符串事实修订和任务锁定快照。Agent 仍只能通过任务作用域领域工具读取已锁定快照，不新增 SQL 或通用数据库工具；`factsText` 随任务快照提供给 Agent，校验索引和正文哈希由服务端强制一致。本轮按用户要求不推送 `main`。
+
 - 2026-08-18：WS-002 已通过 `5b21d7e` 进入 `main`。`VideoTask` 的任务上下文字段包括 `tenantId`、`batchProjectId`、`ownerAccountId`、`currentStage`、`revision` 和可选 `vehicleSnapshotId`；AG-002/AG-003 不应创建平行类型，最终冻结仍需双方评审。
 - 2026-08-18：WS-003 已通过 `e664b30` 进入 `main`。任务上下文后续应只引用 `assetSnapshotId`，资产详情从 `TaskAssetSnapshot` 读取；公司资产和本地上传统一使用 `AssetReference`，不得把 Provider 私有字段或下载地址加入上下文契约。
 - 2026-08-18：WS-004 通过 `86414a1` 随本次账本提交进入 `origin/main`。对话区只展示 `StageArtifactVersion`、`StageConfirmation`、`StageRollbackRecord` 和 `StageArtifactInvalidation` 的只读摘要；回退操作卡片使用 `RollbackStageRequest`，下游失效由服务端计算，Agent 不得提交确认记录或伪造失效列表。
