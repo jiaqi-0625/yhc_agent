@@ -31,6 +31,10 @@ import {
 } from "../src/batch-project-store.ts";
 import { BusinessRuntimeError } from "../src/business-runtime.ts";
 import {
+  MediaArtifactRuntimeError,
+  type StageMediaArtifactVerifier,
+} from "../src/media-artifact-runtime.ts";
+import {
   LocalProjectAssetCoordinator,
   type ProjectAssetCoordinator,
 } from "../src/project-asset-coordinator.ts";
@@ -1548,6 +1552,120 @@ test("rollback replay atomically persists recursive invalidations and stage audi
   );
   assert.equal(selectedHistory.activeStrategyDraft?.id, selectedDraft.id);
   assert.equal(selectedHistory.confirmationRequest?.strategyDraftId, selectedDraft.id);
+});
+
+test("video preview confirmation verifies registered media after replay checks and before mutation", async () => {
+  const value = await fixture();
+  await prepareRollbackGraph(value);
+  const current = await value.tasks.load(value.taskId);
+  assert.ok(current);
+  const vehicleSnapshotId = current.videoTask.vehicleSnapshotId;
+  assert.ok(vehicleSnapshotId);
+  const lockedAssetSnapshot: TaskAssetSnapshot = {
+    id: "task_asset_snapshot_media_verification",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: value.taskId,
+    version: 1,
+    sourceProjectAssetPoolRevision: assetPool.revision,
+    vehicleSnapshotId,
+    assets: structuredClone(assetPool.assets),
+    createdAt: "2026-08-19T16:34:30.000Z",
+    createdBy: value.creator.actorAccountId,
+  };
+  await value.tasks.save({
+    ...structuredClone(current),
+    videoTask: {
+      ...structuredClone(current.videoTask),
+      stageStatus: "awaiting_confirmation",
+      assetSnapshotId: lockedAssetSnapshot.id,
+    },
+    taskAssetSnapshots: [
+      ...structuredClone(current.taskAssetSnapshots),
+      lockedAssetSnapshot,
+    ],
+    stageArtifactVersions: current.stageArtifactVersions.map((version) =>
+      version.id === current.activeStageArtifactVersionIds.asset_matching
+        ? {
+            ...structuredClone(version),
+            dependencies: [
+              ...structuredClone(version.dependencies),
+              { kind: "asset_snapshot" as const, assetSnapshotId: lockedAssetSnapshot.id },
+            ],
+          }
+        : structuredClone(version)
+    ),
+  });
+
+  let shouldReject = true;
+  let verificationCount = 0;
+  const verifier: StageMediaArtifactVerifier = {
+    async verifyStageArtifact(input) {
+      verificationCount += 1;
+      assert.deepEqual(
+        [input.tenantId, input.batchProjectId, input.videoTaskId, input.stage],
+        [tenantId, project.id, value.taskId, "video_preview"],
+      );
+      if (shouldReject) {
+        throw new MediaArtifactRuntimeError(
+          "AIC-MEDIA-ARTIFACT-NOT_READY",
+          "The media artifact is not ready for this operation.",
+          409,
+        );
+      }
+    },
+  };
+  const stages = new VideoTaskStageRuntime(
+    value.administration,
+    value.projects,
+    value.tasks,
+    () => "2026-08-19T16:35:00.000Z",
+    (kind) => `${kind}_media_verification`,
+    undefined,
+    verifier,
+  );
+  const input = {
+    requestId: "request_confirm_registered_video_preview",
+    expectedTaskRevision: 8,
+    artifact: {
+      artifactId: "artifact_registered_video_preview",
+      schemaName: "media_artifact",
+      schemaVersion: 1,
+      contentHashSha256: "a".repeat(64),
+    },
+  } as const;
+
+  await assert.rejects(
+    stages.confirmStage(project.id, value.taskId, "video_preview", input, value.creator),
+    (error: unknown) =>
+      error instanceof MediaArtifactRuntimeError
+      && error.code === "AIC-MEDIA-ARTIFACT-NOT_READY",
+  );
+  assert.equal(verificationCount, 1);
+  assert.equal((await value.tasks.load(value.taskId))?.videoTask.revision, 8);
+
+  shouldReject = false;
+  const confirmed = await stages.confirmStage(
+    project.id,
+    value.taskId,
+    "video_preview",
+    input,
+    value.creator,
+  );
+  assert.equal(confirmed.replayed, false);
+  assert.equal(verificationCount, 2);
+
+  shouldReject = true;
+  const replay = await stages.confirmStage(
+    project.id,
+    value.taskId,
+    "video_preview",
+    input,
+    value.creator,
+  );
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.receipt, confirmed.receipt);
+  assert.equal(verificationCount, 2);
 });
 
 test("failed confirmation and rollback saves leave every stage audit unchanged", async () => {

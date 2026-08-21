@@ -13,6 +13,8 @@ Local-first Agent framework built on Pi Agent Core for the automotive informatio
 - Persistent local conversations, transcript recovery, reset, cancellation, and normalized lifecycle events.
 - Interactive CLI, local browser acceptance page, and HTTP session endpoints.
 - Persistent business works stored separately from Agent transcripts.
+- PostgreSQL-backed Workspace V2 authority with immutable media-artifact metadata.
+- Optional private S3-compatible media storage with checksum verification and short-lived authenticated playback/download URLs.
 - A built-in fictional golden vehicle sample with sourced fixed/extended claims and prohibited expressions.
 - Versioned strategy generation, validation, human editing/locking, regeneration, approval request, rejection, and approval.
 - Agent tools propose strategy generation or approval through explicit action cards; only read-only validation runs directly, and the model has no approval-decision tool.
@@ -25,7 +27,8 @@ The default chat runtime still has no domain tools and does not call a paid mode
 
 - Node.js 22.19 or newer.
 - npm 10 or newer.
-- PostgreSQL 18 only when exercising the retained PostgreSQL adapter (CI uses PostgreSQL 18.4).
+- PostgreSQL 18 for the Workspace V2 authority path (CI uses PostgreSQL 18.4).
+- A private S3-compatible bucket only when real media-object storage is enabled.
 
 ## Install
 
@@ -74,6 +77,8 @@ npm run dev:api
 
 PostgreSQL is the Workspace V2 production persistence path. For local verification, provide a disposable database, apply migrations explicitly, and bootstrap persisted administration data; ordinary reads do not inject demo brands, vehicles or grants.
 
+Workspace V2 also stores immutable media-artifact metadata in PostgreSQL; video bytes remain in private object storage and never enter the database.
+
 Create an ignored `.env`, set a private `POSTGRES_PASSWORD`, and set `DATABASE_URL` to the matching connection URI. Docker exposes the local PostgreSQL 18.4 service only on loopback:
 
 ```powershell
@@ -87,6 +92,27 @@ npm run db:status
 PostgreSQL startup never applies DDL. Run `npm run db:migrate` as an explicit deployment step; the adapter fails closed when the database cannot be reached or its required schema is incompatible. Missing administration bootstrap data remains an empty, unauthorized business state instead of being silently filled from process constants. `NODE_ENV=production` requires an explicit `PERSISTENCE_BACKEND=postgres`, completed migrations, identity bootstrap and release validation. `GET /health` is liveness-only. With PostgreSQL selected, `GET /ready` verifies the database and schema without returning connection details.
 
 Production identity-provider wiring is separate from database persistence. Development-account session issuance remains disabled under `NODE_ENV=production`. V2 project/task selection and `TaskContext` integration are verified independently; they must not recover business state by reading `.data/works`.
+
+### Configure private media object storage
+
+Media files are stored as private objects, while PostgreSQL stores their tenant/task scope, immutable object locator, version, byte checksum, dimensions, duration, and audit metadata. The application never stores a presigned URL: an authenticated request creates a fresh short-lived playback or download URL after rechecking workspace authorization.
+
+Object storage is disabled by default so existing simulated preview flows remain usable. To enable the S3-compatible adapter, set the following in the ignored `.env`:
+
+```dotenv
+OBJECT_STORAGE_BACKEND=s3
+OBJECT_STORAGE_S3_REGION=your-region
+OBJECT_STORAGE_S3_BUCKET=your-private-bucket
+OBJECT_STORAGE_SIGNED_GET_TTL_SECONDS=300
+```
+
+For AWS S3, leave `OBJECT_STORAGE_S3_ENDPOINT` empty and prefer the server workload identity/instance role. For another S3-compatible private service, set its HTTPS origin in `OBJECT_STORAGE_S3_ENDPOINT`; `OBJECT_STORAGE_S3_FORCE_PATH_STYLE=true` is available for providers that require path-style addressing. When a provider requires static access-key variables, inject them from the deployment secret store and keep them outside Git, logs, and ordinary configuration files. Production custom endpoints must use HTTPS; development HTTP endpoints are limited to loopback.
+
+Enabling the adapter makes startup and `GET /ready` verify both PostgreSQL and the private bucket. Uploads are create-only and SHA-256 checked. The authenticated access endpoint is:
+
+- `POST /v1/workspace/batch-projects/{projectId}/video-tasks/{videoTaskId}/media-artifacts/{artifactId}/access` with `{ "purpose": "playback" }` or `{ "purpose": "download" }`
+
+The response contains public media metadata plus `access.method`, `access.url`, and `access.expiresAt`; it never exposes the bucket, object key, object version, or cloud credentials. The Seedance/video-generation provider is still a separate integration: this object-storage foundation does not claim that a real video provider is connected.
 
 Interactive CLI:
 

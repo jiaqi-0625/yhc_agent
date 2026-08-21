@@ -28,6 +28,10 @@ import {
 import { PostgresAccountBudgetStore } from "./postgres-account-budget-store.ts";
 import { PostgresAccountRunLockStore } from "./postgres-account-run-lock-store.ts";
 import { PostgresBatchProjectStore } from "./postgres-batch-project-store.ts";
+import { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
+import type { MediaObjectStorage } from "./media-object-storage.ts";
+import { parseObjectStorageConfig } from "./object-storage-config.ts";
+import { PostgresMediaArtifactStore } from "./postgres-media-artifact-store.ts";
 import type { PostgresTransactionProvider } from "./postgres-contract.ts";
 import {
   createPostgresDatabase,
@@ -36,6 +40,7 @@ import { PostgresTemporaryAssetStore } from "./postgres-temporary-asset-store.ts
 import { PostgresVideoTaskProductionStore } from "./postgres-video-task-store.ts";
 import { PostgresWorkspaceAdminStore } from "./postgres-workspace-admin-store.ts";
 import { PostgresWorkspaceSessionStore } from "./postgres-workspace-session-store.ts";
+import { createS3MediaObjectStorage } from "./s3-media-object-storage.ts";
 import {
   type ProjectAssetCoordinator,
 } from "./project-asset-coordinator.ts";
@@ -121,6 +126,7 @@ export interface PostgresApiRuntime {
   readonly projectCreation: ProjectCreationRuntime;
   readonly videoTasks: VideoTaskRuntime;
   readonly videoTaskStages: VideoTaskStageRuntime;
+  readonly mediaArtifacts: MediaArtifactRuntime | undefined;
   readonly projectLibrary: ProjectLibraryRuntime;
   readonly agentActionCommands: AgentActionCommandRuntime;
   readonly projectAssets: ProjectAssetRuntime;
@@ -152,6 +158,8 @@ export interface PostgresApiRuntime {
 export interface CreatePostgresApiRuntimeOptions {
   readonly database?: PostgresApiDatabase;
   readonly migrations?: readonly DatabaseMigration[];
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly mediaObjectStorage?: MediaObjectStorage;
 }
 
 function unavailablePricingProvider() {
@@ -167,11 +175,21 @@ export async function createPostgresApiRuntime(
   options: Readonly<CreatePostgresApiRuntimeOptions> = {},
 ): Promise<PostgresApiRuntime> {
   const database: PostgresApiDatabase = options.database ?? createPostgresDatabase(config);
+  let mediaObjectStorage: MediaObjectStorage | undefined;
   try {
+    const objectStorageConfig = options.mediaObjectStorage === undefined
+      ? parseObjectStorageConfig(options.environment ?? process.env)
+      : undefined;
+    mediaObjectStorage = options.mediaObjectStorage ?? (
+      objectStorageConfig?.backend === "s3"
+        ? createS3MediaObjectStorage(objectStorageConfig)
+        : undefined
+    );
     const migrations = options.migrations ?? await loadDatabaseMigrations();
     const readiness = async (): Promise<void> => {
       await database.ping();
       await verifyDatabaseSchema(database, migrations);
+      if (mediaObjectStorage !== undefined) await mediaObjectStorage.ping();
     };
     await readiness();
 
@@ -180,6 +198,7 @@ export async function createPostgresApiRuntime(
     const budgetStore = new PostgresAccountBudgetStore(database);
     const projectStore = new PostgresBatchProjectStore(database);
     const videoTaskStore = new PostgresVideoTaskProductionStore(database);
+    const mediaArtifactStore = new PostgresMediaArtifactStore(database);
     const temporaryAssetStore = new PostgresTemporaryAssetStore(database);
     const runLockStore = new PostgresAccountRunLockStore(database);
     const companyAssets = new MockCompanyAssetProvider();
@@ -232,6 +251,15 @@ export async function createPostgresApiRuntime(
       temporaryAssetStore,
       assetCoordinator,
     );
+    const mediaArtifacts = mediaObjectStorage === undefined
+      ? undefined
+      : new MediaArtifactRuntime(
+          administrationStore,
+          projectStore,
+          videoTaskStore,
+          mediaArtifactStore,
+          mediaObjectStorage,
+        );
     const videoTaskStages = new VideoTaskStageRuntime(
       administrationStore,
       projectStore,
@@ -239,6 +267,7 @@ export async function createPostgresApiRuntime(
       undefined,
       undefined,
       projectAssets,
+      mediaArtifacts,
     );
     const assetMatching = new AssetMatchingRuntime(
       administrationStore,
@@ -266,6 +295,7 @@ export async function createPostgresApiRuntime(
       projectCreation,
       videoTasks,
       videoTaskStages,
+      mediaArtifacts,
       projectLibrary,
       agentActionCommands,
       projectAssets,
@@ -345,10 +375,22 @@ export async function createPostgresApiRuntime(
           })
         : undefined,
       readiness,
-      close: () => database.close(),
+      close: async () => {
+        const results = await Promise.allSettled([
+          database.close(),
+          mediaObjectStorage?.close() ?? Promise.resolve(),
+        ]);
+        const failure = results.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (failure !== undefined) throw failure.reason;
+      },
     });
   } catch (error) {
-    await database.close().catch(() => undefined);
+    await Promise.allSettled([
+      database.close(),
+      mediaObjectStorage?.close() ?? Promise.resolve(),
+    ]);
     throw error;
   }
 }

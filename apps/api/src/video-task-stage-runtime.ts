@@ -30,6 +30,7 @@ import type {
 
 import type { BatchProjectStore } from "./batch-project-store.ts";
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import type { StageMediaArtifactVerifier } from "./media-artifact-runtime.ts";
 import type {
   ProjectAssetRuntime,
   TaskAssetSelectionResolver,
@@ -162,6 +163,7 @@ export class VideoTaskStageRuntime {
     private readonly createId: (kind: StageRuntimeIdKind) => string =
       (kind) => `${kind}_${randomUUID()}`,
     private readonly projectAssets?: ProjectAssetRuntime,
+    private readonly mediaArtifacts?: StageMediaArtifactVerifier,
   ) {}
 
   #currentScope(
@@ -653,6 +655,18 @@ export class VideoTaskStageRuntime {
             "A non-strategy stage confirmation requires a persisted artifact reference.",
             409,
           );
+        }
+        if (
+          this.mediaArtifacts !== undefined
+          && (stage === "video_preview" || stage === "delivery")
+        ) {
+          await this.mediaArtifacts.verifyStageArtifact({
+            tenantId: scope.tenantId,
+            batchProjectId: project.id,
+            videoTaskId,
+            stage,
+            artifact,
+          });
         }
         const confirmed = confirmVideoTaskStage(
           confirmationRecord,

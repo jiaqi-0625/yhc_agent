@@ -326,8 +326,16 @@ test("migration loader reads the append-only Workspace V2 schemas with stable ch
   assert.equal(loaded[1]?.version, 2);
   assert.equal(loaded[1]?.name, "media_artifacts");
   assert.match(loaded[1]?.sql ?? "", /CREATE TABLE media_artifacts/u);
+  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_locator_key\s+UNIQUE/u);
   assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_task_fkey/u);
   assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_key_check/u);
+  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_stage_role_check/u);
+  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_version_size_check/u);
+  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_hash_check/u);
+  assert.match(loaded[1]?.sql ?? "", /octet_length\(storage_object_key\).*1024/su);
+  assert.match(loaded[1]?.sql ?? "", /string_to_array\(storage_object_key, '\/'\)/u);
+  assert.match(loaded[1]?.sql ?? "", /artifact - ARRAY\[/u);
+  assert.doesNotMatch(loaded[1]?.sql ?? "", /CREATE TABLE video_task_aggregates/u);
   assert.equal(loaded[1]?.checksum, computeMigrationChecksum(loaded[1]?.sql ?? ""));
   assert.equal(loaded[2]?.version, 3);
   assert.equal(loaded[2]?.name, "vehicle_catalog");
@@ -601,6 +609,24 @@ test("Workspace V2 schema verification rejects a check with a mismatched definit
     verifyDatabaseSchema(database, [workspaceV2Migration]),
     (error: unknown) => error instanceof DatabaseMigrationError
       && error.message === "Workspace V2 schema has a missing or invalid required check workspace_admin_states_check on table workspace_admin_states.",
+  );
+});
+
+test("Workspace V2 schema verification fails closed on media table or locator uniqueness drift", async () => {
+  const missingTable = new MigrationDatabase();
+  recordAppliedMigrations(missingTable, [workspaceV2Migration]);
+  missingTable.missingWorkspaceTable = "media_artifacts";
+  await assert.rejects(
+    verifyDatabaseSchema(missingTable, [workspaceV2Migration]),
+    /missing required table media_artifacts/u,
+  );
+
+  const invalidLocatorKey = new MigrationDatabase();
+  recordAppliedMigrations(invalidLocatorKey, [workspaceV2Migration]);
+  invalidLocatorKey.invalidWorkspaceConstraint = "media_artifacts_object_locator_key";
+  await assert.rejects(
+    verifyDatabaseSchema(invalidLocatorKey, [workspaceV2Migration]),
+    /missing or invalid required constraint media_artifacts_object_locator_key/u,
   );
 });
 

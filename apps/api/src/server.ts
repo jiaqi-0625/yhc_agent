@@ -45,6 +45,11 @@ import {
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import {
+  handleMediaArtifactRoute,
+  matchMediaArtifactAccessPath,
+} from "./media-artifact-routes.ts";
+import type { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
+import {
   createPostgresApiRuntime,
   type PostgresApiRuntime,
 } from "./postgres-api-runtime.ts";
@@ -172,6 +177,7 @@ async function handleRequest(
   assetMatching: AssetMatchingRuntime | undefined,
   accountRunLocks: AccountRunLockRuntime | undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -287,6 +293,26 @@ async function handleRequest(
       response,
       url,
       projectCreation,
+      workspaceSessions,
+    )
+  ) return;
+  if (
+    mediaArtifacts === undefined &&
+    matchMediaArtifactAccessPath(url.pathname) !== undefined
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-MEDIA-ARTIFACT-RUNTIME_NOT_CONFIGURED",
+      "Media artifact access is not configured for this workspace runtime.",
+      503,
+    );
+  }
+  if (
+    mediaArtifacts !== undefined &&
+    await handleMediaArtifactRoute(
+      request,
+      response,
+      url,
+      mediaArtifacts,
       workspaceSessions,
     )
   ) return;
@@ -450,6 +476,7 @@ export function createApiServer(
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -471,7 +498,8 @@ export function createApiServer(
       agentActionCommands !== undefined ||
       videoTaskStages !== undefined ||
       projectLibrary !== undefined ||
-      accountRunLocks !== undefined
+      accountRunLocks !== undefined ||
+      mediaArtifacts !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -744,6 +772,7 @@ export function createApiServer(
       activeAssetMatching,
       activeAccountRunLocks,
       developmentCompanyAssetMedia,
+      mediaArtifacts,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -772,6 +801,7 @@ export async function startApiServer(
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -797,6 +827,7 @@ export async function startApiServer(
       assetMatching,
       accountRunLocks,
       developmentCompanyAssetMedia,
+      mediaArtifacts,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -923,9 +954,10 @@ export async function startConfiguredApiServer(
     );
   }
 
-  const postgres = await (options.createPostgresRuntime ?? createPostgresApiRuntime)(
-    parsePostgresDatabaseConfig(environment),
-  );
+  const databaseConfig = parsePostgresDatabaseConfig(environment);
+  const postgres = options.createPostgresRuntime === undefined
+    ? await createPostgresApiRuntime(databaseConfig, { environment })
+    : await options.createPostgresRuntime(databaseConfig);
   const business = options.business ?? new LocalBusinessRuntime();
   let server: Server | undefined;
   try {
@@ -974,6 +1006,7 @@ export async function startConfiguredApiServer(
       postgres.assetMatching,
       postgres.accountRunLocks,
       createDevelopmentCompanyAssetMediaStore(host, environment),
+      postgres.mediaArtifacts,
     );
     attachPostgresLifecycle(
       server,

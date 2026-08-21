@@ -27,6 +27,7 @@ import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import { MediaArtifactRuntimeError } from "./media-artifact-runtime.ts";
 import { ProjectAssetRuntimeError } from "./project-asset-runtime.ts";
 import { TemporaryAssetRuntimeError } from "./temporary-asset-runtime.ts";
 import {
@@ -112,6 +113,7 @@ export function errorStatus(error: Error): number {
     return 503;
   }
   if (error instanceof BusinessRuntimeError) return error.statusCode;
+  if (error instanceof MediaArtifactRuntimeError) return error.statusCode;
   if (error instanceof ProjectAssetRuntimeError) {
     switch (error.code) {
       case "AIC-ASSET-POOL-NOT-FOUND":
@@ -186,6 +188,7 @@ export function requestErrorBody(error: Error): RequestErrorBody {
   return {
     code:
       error instanceof BusinessRuntimeError ||
+      error instanceof MediaArtifactRuntimeError ||
       error instanceof ProjectAssetRuntimeError ||
       error instanceof RevisionConflictError ||
       error instanceof AccountBudgetError ||
@@ -211,7 +214,7 @@ export function requestErrorBody(error: Error): RequestErrorBody {
         ? error.code
         : "AIC-API-INVALID_REQUEST",
     message: error.message,
-    retryable: false,
+    retryable: error instanceof MediaArtifactRuntimeError ? error.retryable : false,
     charged: false,
   };
 }
