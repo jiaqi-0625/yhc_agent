@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { pathToFileURL } from "node:url";
 
 import type {
   Brand,
@@ -36,10 +37,10 @@ import type { WorkspaceAdminState } from "./workspace-admin-store.ts";
 const importedAt = "2026-08-21T00:00:00.000Z";
 const administratorId = "account_admin";
 const creatorIds = ["account_creator_a", "account_creator_b"] as const;
-const c10ProjectId = "batch_project_leapmotor_c10_assets_v1";
-const c10AssetPoolId = "project_asset_pool_leapmotor_c10_assets_v1";
-const c10ProjectRequestId = "request_import_leapmotor_c10_assets_v1";
-const c10TaskRequestId = "request_import_leapmotor_c10_acceptance_task_v1";
+const c10ProjectId = "batch_project_leapmotor_c10_assets_v2";
+const c10AssetPoolId = "project_asset_pool_leapmotor_c10_assets_v2";
+const c10ProjectRequestId = "request_import_leapmotor_c10_assets_v2";
+const c10TaskRequestId = "request_import_leapmotor_c10_acceptance_task_v2";
 
 const c10Brand: Brand = {
   id: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
@@ -54,39 +55,101 @@ const c10Brand: Brand = {
   updatedBy: administratorId,
 };
 
-const c10Vehicle: Vehicle = {
+const c10FactEvidence = {
+  sourceName: "用户提供的 C10 策略卖点资料（本地测试）",
+  sourceReference: "策略卖点.md",
+  effectiveFrom: "2026-08-21",
+} as const;
+
+function c10Claim(
+  id: string,
+  name: string,
+  statement: string,
+  riskNotes: readonly string[] = [],
+): Vehicle["optionalClaims"][number] {
+  return {
+    id,
+    kind: "extended",
+    name,
+    statement,
+    evidence: c10FactEvidence,
+    requiredInVoiceover: false,
+    requiredInSubtitle: false,
+    mayRephrase: true,
+    riskNotes: [...riskNotes, "当前资料用于本地流程测试，正式投放前须由内容管理员复核官方来源与适用配置"],
+  };
+}
+
+const c10CommonClaims: Vehicle["optionalClaims"] = [
+  c10Claim("claim_c10_body", "车身尺寸", "零跑 C10 车身尺寸为 4739×1900×1680mm，轴距为 2825mm，采用大五座布局。"),
+  c10Claim("claim_c10_architecture", "车型架构", "零跑 C10 采用 LEAP 3.0 零跑自研架构。"),
+  c10Claim("claim_c10_space", "家用空间", "零跑 C10 后排空间宽裕，后排座椅可放倒以拓展后备箱装载空间。"),
+  c10Claim("claim_c10_display", "智能座舱屏幕", "零跑 C10 配备 14.6 英寸 2.5K 中控屏，并使用 Leapmotor OS 交互系统和 AI 大模型语音助手。"),
+  c10Claim("claim_c10_audio", "座舱音响", "适用配置的零跑 C10 配备 18 扬声器、2088W、7.1 声道音响及主驾头枕私享音区。", ["仅可用于实际配备该音响系统的配置版本"]),
+  c10Claim("claim_c10_seat", "舒适座椅", "适用配置的零跑 C10 主副驾支持通风、加热和 10 点按摩，主驾配备 4 向气动腰托。", ["不得表述为全系标配"]),
+  c10Claim("claim_c10_material", "环保内饰", "零跑 C10 使用 Oeko-Tex 环保内饰面料。", ["不得把材料认证扩展为医疗、母婴安全或绝对无害承诺"]),
+  c10Claim("claim_c10_body_safety", "车身与电池安全技术", "零跑 C10 采用 CTC 2.0 电池底盘一体化技术、2000MPa 热成型钢及 AI-BMS 电池热管理系统。", ["不得使用“核潜艇级”等无法独立验证的类比作为安全结论"]),
+  c10Claim("claim_c10_chassis", "底盘稳定控制", "零跑 C10 采用 LMC 一体化运动融合底盘，并具备爆胎稳定控制能力。", ["不得扩展为绝对安全或零事故承诺"]),
+];
+
+export const c10PureElectricVehicle: Vehicle = {
   id: LEAPMOTOR_C10_MOCK_ASSET_BINDING.vehicleId,
   tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
   brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
-  version: 1,
+  version: 2,
   status: "active",
   series: "零跑 C10",
   modelYear: 2026,
-  trim: "素材测试版",
-  parameters: {
-    factCompleteness: "pending_admin_verification",
-  },
+  trim: "2026 焕新版纯电 660km（本地资料版）",
+  parameters: {},
   fixedClaims: [{
     id: "claim_leapmotor_c10_model_identity",
     kind: "fixed",
     name: "车型标识",
-    statement: "本项目车型标识为零跑 C10",
+    statement: "本项目车型为零跑 C10 2026 焕新版纯电 660km 版本。",
     evidence: {
       sourceName: "工作区管理员车型目录",
-      sourceReference: "workspace-admin/vehicle_leapmotor_c10_demo#identity",
+      sourceReference: "策略卖点.md#纯电版",
       effectiveFrom: "2026-08-21",
     },
     requiredInVoiceover: false,
     requiredInSubtitle: false,
     mayRephrase: false,
-    riskNotes: ["除车型标识外，任何参数或卖点均须由管理员补充官方证据后使用"],
+    riskNotes: ["当前资料用于本地流程测试，正式投放前须复核准确的官方配置名称"],
   }],
-  optionalClaims: [],
-  prohibitedClaims: ["不得根据图片推断配置、性能、续航、价格、安全或排名"],
+  optionalClaims: [
+    ...c10CommonClaims,
+    c10Claim("claim_c10_ev_range", "纯电续航与电池", "该版本 CLTC 续航为 660km，电池容量为 81.9kWh。"),
+    c10Claim("claim_c10_ev_charge", "800V 与快速充电", "该版本采用 800V 高压平台和 3C 快充，资料标注电量从 30% 充至 80% 需 16 分钟。", ["充电时间须同时保留 30% 至 80% 的测试区间"]),
+    c10Claim("claim_c10_ev_power", "纯电动力", "该版本采用后置单电机，最大功率 230kW、最大扭矩 360N·m，资料标注 0 至 100km/h 加速时间为 6.02 秒。"),
+    c10Claim("claim_c10_ev_adas", "高阶辅助驾驶", "仅激光雷达配置搭载 128 线禾赛激光雷达，并支持城市 NAP、高速领航、记忆泊车和遥控泊车。", ["必须明确限定为激光雷达配置，不得称为自动驾驶"]),
+    c10Claim("claim_c10_ev_cockpit_chip", "高阶座舱芯片", "高阶配置搭载高通 8295 座舱芯片。", ["不得表述为全系标配"]),
+  ],
+  prohibitedClaims: ["自动驾驶", "全系标配", "绝对安全", "零事故", "全国最低价"],
   createdAt: importedAt,
   createdBy: administratorId,
   updatedAt: importedAt,
   updatedBy: administratorId,
+};
+
+export const c10ExtendedRangeVehicle: Vehicle = {
+  ...structuredClone(c10PureElectricVehicle),
+  id: "vehicle_leapmotor_c10_2026_erev_290",
+  version: 1,
+  trim: "2026 焕新版增程 290km（本地资料版）",
+  fixedClaims: [{
+    ...structuredClone(c10PureElectricVehicle.fixedClaims[0]!),
+    id: "claim_c10_erev_identity",
+    statement: "本项目车型为零跑 C10 2026 焕新版增程 290km 版本。",
+    evidence: { ...c10FactEvidence, sourceReference: "策略卖点.md#增程版" },
+  }],
+  optionalClaims: [
+    ...structuredClone(c10CommonClaims),
+    c10Claim("claim_c10_erev_range", "增程续航", "该版本 CLTC 纯电续航为 290km，资料标注综合续航为 1300km。", ["纯电续航与综合续航必须分别表述"]),
+    c10Claim("claim_c10_erev_power", "增程动力", "该版本采用 200kW 后置驱动电机，可油可电。", ["不得扩展为无续航焦虑等绝对化承诺"]),
+    c10Claim("claim_c10_erev_adas", "高阶辅助驾驶", "仅激光雷达配置搭载 128 线禾赛激光雷达，并支持城市 NAP、高速领航、记忆泊车和遥控泊车。", ["必须明确限定为激光雷达配置，不得称为自动驾驶"]),
+    c10Claim("claim_c10_erev_cockpit_chip", "高阶座舱芯片", "高阶配置搭载高通 8295 座舱芯片。", ["不得表述为全系标配"]),
+  ],
 };
 
 const c10References: CompanyAssetReference[] = mockCompanyAssetMediaManifest.map((entry) => ({
@@ -120,6 +183,25 @@ const c10Association: VehicleAssetAssociation = {
   updatedBy: administratorId,
 };
 
+const c10ExtendedRangeAssociation: VehicleAssetAssociation = {
+  id: "vehicle_asset_association_leapmotor_c10_erev_290_v1",
+  tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
+  brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
+  vehicleId: c10ExtendedRangeVehicle.id,
+  revision: 1,
+  assets: [{
+    assetId: "asset_style_global_clean",
+    version: 1,
+    source: "company_catalog",
+    sourceProvider: "mock_company_assets",
+    category: "visual_style",
+  }],
+  createdAt: importedAt,
+  createdBy: administratorId,
+  updatedAt: importedAt,
+  updatedBy: administratorId,
+};
+
 const c10Grants: WorkspaceAccessGrant[] = [
   {
     id: "grant_admin_leapmotor_c10",
@@ -133,22 +215,40 @@ const c10Grants: WorkspaceAccessGrant[] = [
     updatedAt: importedAt,
     updatedBy: administratorId,
   },
-  ...creatorIds.map((accountId): WorkspaceAccessGrant => ({
-    id: `grant_${accountId}_leapmotor_c10`,
-    tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
-    accountId,
-    access: {
-      kind: "vehicle_project",
-      brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
-      vehicleId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.vehicleId,
+  ...creatorIds.flatMap((accountId): WorkspaceAccessGrant[] => [
+    {
+      id: `grant_${accountId}_leapmotor_c10`,
+      tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
+      accountId,
+      access: {
+        kind: "vehicle_project",
+        brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
+        vehicleId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.vehicleId,
+      },
+      status: "active",
+      revision: 1,
+      createdAt: importedAt,
+      createdBy: administratorId,
+      updatedAt: importedAt,
+      updatedBy: administratorId,
     },
-    status: "active",
-    revision: 1,
-    createdAt: importedAt,
-    createdBy: administratorId,
-    updatedAt: importedAt,
-    updatedBy: administratorId,
-  })),
+    {
+      id: `grant_${accountId}_leapmotor_c10_erev_290`,
+      tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
+      accountId,
+      access: {
+        kind: "vehicle_project",
+        brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
+        vehicleId: c10ExtendedRangeVehicle.id,
+      },
+      status: "active",
+      revision: 1,
+      createdAt: importedAt,
+      createdBy: administratorId,
+      updatedAt: importedAt,
+      updatedBy: administratorId,
+    },
+  ]),
 ];
 
 function mergeByIdentity<RecordType>(
@@ -184,12 +284,12 @@ function bootstrapAdministration(current: Readonly<WorkspaceAdminState>): Worksp
     ),
     vehicleVersions: mergeByIdentity(
       current.vehicleVersions,
-      [...DEFAULT_ADMIN_VEHICLES, c10Vehicle],
+      [...DEFAULT_ADMIN_VEHICLES, c10PureElectricVehicle, c10ExtendedRangeVehicle],
       (record) => `${record.id}:${record.version}`,
     ),
     vehicleAssetAssociations: mergeByIdentity(
       current.vehicleAssetAssociations,
-      [...DEFAULT_VEHICLE_ASSET_ASSOCIATIONS, c10Association],
+      [...DEFAULT_VEHICLE_ASSET_ASSOCIATIONS, c10Association, c10ExtendedRangeAssociation],
       (record) => record.vehicleId,
     ),
     accessGrants: mergeByIdentity(
@@ -230,9 +330,9 @@ async function main(): Promise<void> {
     const project = await projectCreation.create(
       {
         requestId: c10ProjectRequestId,
-        vehicleId: c10Vehicle.id,
+        vehicleId: c10PureElectricVehicle.id,
         expectedBrandRevision: c10Brand.revision,
-        expectedVehicleVersion: c10Vehicle.version,
+        expectedVehicleVersion: c10PureElectricVehicle.version,
         expectedAssetAssociationRevision: c10Association.revision,
         selectedAssets: c10References,
         aspectRatio: "9:16",
@@ -281,7 +381,11 @@ async function main(): Promise<void> {
     process.stdout.write(JSON.stringify({
       tenantId: state.tenantId,
       brandId: c10Brand.id,
-      vehicleId: c10Vehicle.id,
+      vehicleId: c10PureElectricVehicle.id,
+      availableVehicleVersions: [
+        { vehicleId: c10PureElectricVehicle.id, version: c10PureElectricVehicle.version, trim: c10PureElectricVehicle.trim },
+        { vehicleId: c10ExtendedRangeVehicle.id, version: c10ExtendedRangeVehicle.version, trim: c10ExtendedRangeVehicle.trim },
+      ],
       projectId: project.project.id,
       projectName: project.project.name,
       importedC10Assets: c10References.length,
@@ -295,7 +399,9 @@ async function main(): Promise<void> {
   }
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write((error instanceof Error ? error.message : "C10 bootstrap failed.") + "\n");
-  process.exitCode = 1;
-});
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  void main().catch((error: unknown) => {
+    process.stderr.write((error instanceof Error ? error.message : "C10 bootstrap failed.") + "\n");
+    process.exitCode = 1;
+  });
+}
