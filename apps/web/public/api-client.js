@@ -42,15 +42,3 @@ export async function api(path, options) {
   if (response.status === 204) return null;
   return response.json();
 }
-
-export async function authenticatedBlob(path, options) {
-  const response = await authenticatedFetch(path, options);
-  if (!response.ok) {
-    let payload;
-    try {
-      payload = await response.json();
-    } catch {}
-    throw new ApiError(payload, response.status);
-  }
-  return response.blob();
-}

@@ -38,10 +38,6 @@ import {
 } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { parsePostgresDatabaseConfig, type PostgresDatabaseConfig } from "./database-config.ts";
-import {
-  DevelopmentCompanyAssetMediaStore,
-  type DevelopmentCompanyAssetMediaReader,
-} from "./development-company-asset-media.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import {
@@ -67,7 +63,6 @@ import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
 import { LocalTemporaryAssetStore } from "./temporary-asset-store.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { sendWebAsset } from "./web-assets.ts";
-import { handleMockCompanyAssetMediaRoute } from "./mock-company-asset-routes.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
   DEFAULT_ADMIN_BRANDS,
@@ -137,20 +132,6 @@ function developmentAccountsAllowed(
   return environment.FIREFLY_ENABLE_DEVELOPMENT_ACCOUNTS === "true";
 }
 
-export function createDevelopmentCompanyAssetMediaStore(
-  host: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): DevelopmentCompanyAssetMediaStore | undefined {
-  if (environment.NODE_ENV === "production") return undefined;
-  const loopback = ["127.0.0.1", "::1", "localhost"].includes(host);
-  if (!loopback && environment.FIREFLY_ENABLE_DEVELOPMENT_ASSET_MEDIA !== "true") {
-    return undefined;
-  }
-  return new DevelopmentCompanyAssetMediaStore(
-    environment.MOCK_COMPANY_ASSET_MEDIA_DIRECTORY ?? ".data/mock-company-assets",
-  );
-}
-
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -171,7 +152,6 @@ async function handleRequest(
   readiness: ApiReadinessProbe,
   assetMatching: AssetMatchingRuntime | undefined,
   accountRunLocks: AccountRunLockRuntime | undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -235,16 +215,6 @@ async function handleRequest(
       url,
       workspaceSessions,
       developmentAccountsEnabled,
-    )
-  ) return;
-  if (
-    developmentCompanyAssetMedia !== undefined &&
-    await handleMockCompanyAssetMediaRoute(
-      request,
-      response,
-      url,
-      developmentCompanyAssetMedia,
-      workspaceSessions,
     )
   ) return;
   if (
@@ -448,7 +418,6 @@ export function createApiServer(
   readiness: ApiReadinessProbe = alwaysReady,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -742,7 +711,6 @@ export function createApiServer(
       readiness,
       activeAssetMatching,
       activeAccountRunLocks,
-      developmentCompanyAssetMedia,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -770,7 +738,6 @@ export async function startApiServer(
   forceLegacyWritesDisabled = false,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -795,7 +762,6 @@ export async function startApiServer(
       readiness,
       assetMatching,
       accountRunLocks,
-      developmentCompanyAssetMedia,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -916,9 +882,6 @@ export async function startConfiguredApiServer(
       undefined,
       undefined,
       true,
-      undefined,
-      undefined,
-      createDevelopmentCompanyAssetMediaStore(host, environment),
     );
   }
 
@@ -972,7 +935,6 @@ export async function startConfiguredApiServer(
       true,
       postgres.assetMatching,
       postgres.accountRunLocks,
-      createDevelopmentCompanyAssetMediaStore(host, environment),
     );
     attachPostgresLifecycle(
       server,

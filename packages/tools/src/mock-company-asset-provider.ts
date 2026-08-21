@@ -17,10 +17,6 @@ import type {
   CompanyAssetReference,
   CompanyAssetResolveResult,
 } from "./company-asset-provider.ts";
-import {
-  mockCompanyAssetMediaManifest,
-  type MockCompanyAssetMediaManifestEntry,
-} from "./mock-company-asset-manifest.ts";
 
 type ReusableAssetCategory = Exclude<AssetCategory, "vehicle">;
 
@@ -80,43 +76,12 @@ export class CompanyAssetProviderAbortedError extends Error {
   }
 }
 
-interface PreviewOptions {
-  readonly version: number;
-  readonly mediaType?: string;
-  readonly width?: number;
-  readonly height?: number;
-}
-
-function preview(assetId: string, options: Readonly<PreviewOptions>): CompanyAssetPreview {
+function preview(assetId: string, width = 1920, height = 1080): CompanyAssetPreview {
   return {
-    mediaType: options.mediaType ?? "image/webp",
-    width: options.width ?? 1920,
-    height: options.height ?? 1080,
-    thumbnailUrl: `/v1/mock-company-assets/${assetId}/versions/${options.version}/thumbnail`,
-  };
-}
-
-function mediaManifestRecord(
-  entry: Readonly<MockCompanyAssetMediaManifestEntry>,
-): MockVehicleAssetRecord {
-  return {
-    tenantId: entry.tenantId,
-    assetId: entry.assetId,
-    version: entry.version,
-    category: "vehicle",
-    vehicleId: entry.vehicleId,
-    displayName: entry.displayName,
-    description: `${entry.visualDescription}（文本仅描述该图可见内容，不构成官方车型事实或配置声明。）`,
-    brandIds: [entry.brandId],
-    tags: [...entry.tags],
-    preview: preview(entry.assetId, {
-      version: entry.version,
-      mediaType: entry.mediaType,
-      width: entry.width,
-      height: entry.height,
-    }),
-    updatedAt: entry.updatedAt,
-    internalSortWeight: 90,
+    mediaType: "image/webp",
+    width,
+    height,
+    thumbnailUrl: `/v1/mock-company-assets/${assetId}/thumbnail`,
   };
 }
 
@@ -131,7 +96,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "开发管理中心使用的白色棚拍前侧视角",
     brandIds: ["brand_firefly_demo"],
     tags: ["hero", "front", "studio"],
-    preview: preview("asset_firefly_demo_e5_hero", { version: 1 }),
+    preview: preview("asset_firefly_demo_e5_hero"),
     updatedAt: "2026-08-19T00:00:00.000Z",
     internalSortWeight: 120,
   },
@@ -144,7 +109,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "开发品牌默认视觉预设",
     brandIds: ["brand_firefly_demo"],
     tags: ["brand", "clean", "technology"],
-    preview: preview("asset_style_firefly_demo_clean", { version: 1 }),
+    preview: preview("asset_style_firefly_demo_clean"),
     updatedAt: "2026-08-19T00:00:00.000Z",
     internalSortWeight: 120,
   },
@@ -157,7 +122,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "可作为新品牌初始化视觉预设的通用模拟风格。",
     brandIds: [],
     tags: ["global", "clean", "product"],
-    preview: preview("asset_style_global_clean", { version: 1 }),
+    preview: preview("asset_style_global_clean"),
     updatedAt: "2026-08-19T00:00:00.000Z",
     internalSortWeight: 50,
   },
@@ -171,7 +136,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "白色棚拍前侧视角",
     brandIds: ["brand_firefly"],
     tags: ["hero", "front", "studio"],
-    preview: preview("asset_e5_hero", { version: 1 }),
+    preview: preview("asset_e5_hero_v1"),
     updatedAt: "2026-07-01T08:00:00.000Z",
     internalSortWeight: 80,
   },
@@ -185,7 +150,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "白色棚拍前侧视角，已更新车身高光",
     brandIds: ["brand_firefly"],
     tags: ["hero", "front", "studio"],
-    preview: preview("asset_e5_hero", { version: 2 }),
+    preview: preview("asset_e5_hero_v2"),
     updatedAt: "2026-08-16T08:00:00.000Z",
     internalSortWeight: 100,
   },
@@ -199,7 +164,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "前排座舱与中控屏全景",
     brandIds: ["brand_firefly"],
     tags: ["interior", "cockpit"],
-    preview: preview("asset_e5_interior", { version: 1 }),
+    preview: preview("asset_e5_interior"),
     updatedAt: "2026-08-12T08:00:00.000Z",
     internalSortWeight: 90,
   },
@@ -212,7 +177,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     displayName: "E6 英雄图",
     brandIds: ["brand_firefly"],
     tags: ["hero", "front"],
-    preview: preview("asset_e6_hero", { version: 1 }),
+    preview: preview("asset_e6_hero"),
     updatedAt: "2026-08-15T08:00:00.000Z",
     internalSortWeight: 100,
   },
@@ -225,7 +190,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "适合家庭出行和周末露营主题",
     brandIds: ["brand_firefly"],
     tags: ["family", "camping", "warm"],
-    preview: preview("asset_person_family", { version: 1, width: 1440, height: 1920 }),
+    preview: preview("asset_person_family", 1440, 1920),
     updatedAt: "2026-08-11T08:00:00.000Z",
     internalSortWeight: 80,
   },
@@ -238,7 +203,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "全品牌可复用的人物形象",
     brandIds: [],
     tags: ["young", "city", "driver"],
-    preview: preview("asset_person_young_driver", { version: 2, width: 1440, height: 1920 }),
+    preview: preview("asset_person_young_driver", 1440, 1920),
     updatedAt: "2026-08-10T08:00:00.000Z",
     internalSortWeight: 70,
   },
@@ -251,7 +216,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "傍晚湖边、帐篷和暖色灯串",
     brandIds: ["brand_firefly"],
     tags: ["camping", "lake", "sunset"],
-    preview: preview("asset_scene_camping", { version: 3 }),
+    preview: preview("asset_scene_camping"),
     updatedAt: "2026-08-14T08:00:00.000Z",
     internalSortWeight: 95,
   },
@@ -264,7 +229,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "全品牌可复用的城市夜间道路",
     brandIds: [],
     tags: ["city", "night", "road"],
-    preview: preview("asset_scene_city_night", { version: 1 }),
+    preview: preview("asset_scene_city_night"),
     updatedAt: "2026-08-09T08:00:00.000Z",
     internalSortWeight: 60,
   },
@@ -277,7 +242,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     description: "品牌蓝、通透高光与克制科技线条",
     brandIds: ["brand_firefly"],
     tags: ["brand", "clean", "technology"],
-    preview: preview("asset_style_firefly_clean", { version: 4 }),
+    preview: preview("asset_style_firefly_clean"),
     updatedAt: "2026-08-18T08:00:00.000Z",
     internalSortWeight: 110,
   },
@@ -289,7 +254,7 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     displayName: "其他品牌豪华风",
     brandIds: ["brand_other"],
     tags: ["brand", "luxury"],
-    preview: preview("asset_style_other_luxury", { version: 1 }),
+    preview: preview("asset_style_other_luxury"),
     updatedAt: "2026-08-17T08:00:00.000Z",
     internalSortWeight: 100,
   },
@@ -301,11 +266,10 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     displayName: "其他租户场景",
     brandIds: ["brand_firefly"],
     tags: ["private"],
-    preview: preview("asset_other_tenant_scene", { version: 1 }),
+    preview: preview("asset_other_tenant_scene"),
     updatedAt: "2026-08-18T08:00:00.000Z",
     internalSortWeight: 999,
   },
-  ...mockCompanyAssetMediaManifest.map(mediaManifestRecord),
 ];
 
 function recordsForScope(
@@ -333,7 +297,7 @@ function recordsForScope(
         description: "为管理中心新建车型提供的确定性模拟公司资产。",
         brandIds: [],
         tags: ["vehicle", "mock", "reference"],
-        preview: preview(assetId, { version: 1 }),
+        preview: preview(assetId),
         updatedAt: "2026-08-19T00:00:00.000Z",
         internalSortWeight: 10,
       };

@@ -195,30 +195,6 @@ const workspaceV2ColumnExpectations = [
   ["account_run_lock_states", "revision", "bigint", true],
   ["account_run_lock_states", "envelope", "jsonb", true],
   ["account_run_lock_states", "updated_at", timestamptz, true],
-
-  ["media_artifacts", "artifact_id", varchar128, true],
-  ["media_artifacts", "tenant_id", varchar128, true],
-  ["media_artifacts", "batch_project_id", varchar128, true],
-  ["media_artifacts", "video_task_id", varchar128, true],
-  ["media_artifacts", "stage", "character varying(32)", true],
-  ["media_artifacts", "role", "character varying(32)", true],
-  ["media_artifacts", "artifact_version", "bigint", true],
-  ["media_artifacts", "media_type", varchar128, true],
-  ["media_artifacts", "byte_size", "bigint", true],
-  ["media_artifacts", "checksum_sha256", "character(64)", true],
-  ["media_artifacts", "width", "integer", true],
-  ["media_artifacts", "height", "integer", true],
-  ["media_artifacts", "duration_ms", "bigint", true],
-  ["media_artifacts", "created_at", timestamptz, true],
-  ["media_artifacts", "created_by", varchar128, true],
-  ["media_artifacts", "storage_provider_id", varchar128, true],
-  ["media_artifacts", "storage_bucket_name", "character varying(255)", true],
-  ["media_artifacts", "storage_object_key", "character varying(1024)", true],
-  ["media_artifacts", "storage_object_version", "character varying(1024)", false],
-  ["media_artifacts", "creation_actor_account_id", varchar128, true],
-  ["media_artifacts", "creation_request_id", varchar128, true],
-  ["media_artifacts", "creation_payload_hash", "character(64)", true],
-  ["media_artifacts", "artifact", "jsonb", true],
 ] as const;
 const workspaceV2ConstraintExpectations = [
   ["workspace_admin_states_pkey", "p", "tenant_id", null, null],
@@ -237,11 +213,6 @@ const workspaceV2ConstraintExpectations = [
   ["account_run_lock_states_pkey", "p", "tenant_id,account_id", null, null],
   ["account_run_lock_states_lock_id_key", "u", "lock_id", null, null],
   ["account_run_lock_states_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
-  ["media_artifacts_pkey", "p", "artifact_id", null, null],
-  ["media_artifacts_task_stage_role_version_key", "u", "tenant_id,batch_project_id,video_task_id,stage,role,artifact_version", null, null],
-  ["media_artifacts_creation_request_key", "u", "tenant_id,batch_project_id,video_task_id,creation_actor_account_id,creation_request_id", null, null],
-  ["media_artifacts_object_locator_key", "u", "storage_provider_id,storage_bucket_name,storage_object_key", null, null],
-  ["media_artifacts_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
 ] as const;
 
 function recordAppliedMigrations(
@@ -253,10 +224,10 @@ function recordAppliedMigrations(
   );
 }
 
-test("migration loader reads the append-only Workspace V2 schemas with stable checksums", async () => {
+test("migration loader reads the versioned Workspace V2 schema with a stable checksum", async () => {
   const loaded = await loadDatabaseMigrations();
 
-  assert.equal(loaded.length, 2);
+  assert.equal(loaded.length, 1);
   assert.equal(loaded[0]?.version, 1);
   assert.equal(loaded[0]?.name, "workspace_v2");
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE workspace_admin_states/);
@@ -266,12 +237,6 @@ test("migration loader reads the append-only Workspace V2 schemas with stable ch
   assert.match(loaded[0]?.sql ?? "", /jsonb_typeof\(aggregate\) = 'object'\) IS TRUE/u);
   assert.match(loaded[0]?.sql ?? "", /FOREIGN KEY \(tenant_id, project_id\)/u);
   assert.equal(loaded[0]?.checksum, computeMigrationChecksum(loaded[0]?.sql ?? ""));
-  assert.equal(loaded[1]?.version, 2);
-  assert.equal(loaded[1]?.name, "media_artifacts");
-  assert.match(loaded[1]?.sql ?? "", /CREATE TABLE media_artifacts/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_task_fkey/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_key_check/u);
-  assert.equal(loaded[1]?.checksum, computeMigrationChecksum(loaded[1]?.sql ?? ""));
 });
 test("migration runner serializes, applies, records, and idempotently skips migrations", async () => {
   const database = new MigrationDatabase();
@@ -367,7 +332,6 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
     "video_task_aggregates",
     "temporary_asset_project_states",
     "account_run_lock_states",
-    "media_artifacts",
   ]);
   const columnCall = database.calls.find(
     (call) => call.sql.includes("workspace_v2_required_columns"),
@@ -424,7 +388,6 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
   const requiredCheckNames = checkCall?.parameters?.[1] as readonly string[] | undefined;
   assert.ok(requiredCheckNames?.includes("workspace_admin_states_check"));
   assert.ok(requiredCheckNames?.includes("workspace_sessions_check2"));
-  assert.ok(requiredCheckNames?.includes("media_artifacts_envelope_check"));
   assert.ok(requiredCheckNames?.includes("account_budget_states_check"));
   assert.ok(requiredCheckNames?.includes("batch_project_aggregates_check"));
   assert.ok(requiredCheckNames?.includes("video_task_aggregates_check"));

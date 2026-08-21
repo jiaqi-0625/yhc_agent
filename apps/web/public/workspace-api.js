@@ -1,4 +1,4 @@
-import { api, authenticatedBlob } from "./api-client.js";
+import { api } from "./api-client.js";
 
 function jsonOptions(method, body) {
   return {
@@ -9,7 +9,6 @@ function jsonOptions(method, body) {
 }
 
 export const workspaceApi = {
-  getCompanyAssetPreview: function (path) { return authenticatedBlob(path); },
   getOwnBudget: function () { return api("/v1/workspace/me/budget"); },
   getProductionStatus: function () { return api("/v1/workspace/me/production-status"); },
   listAdminBrands: function () { return api("/v1/admin/brands"); },

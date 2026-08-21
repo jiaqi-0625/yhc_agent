@@ -275,13 +275,6 @@ function clearWorkflowError() {
 
 function refreshAgentInteractionControls() {
   const interactionBusy = state.busy || state.workflowBusy || workspaceStagesPanel?.isBusy();
-  elements.prompt.placeholder = !state.modelReady
-    ? "请先配置模型服务"
-    : !currentSelectedVideoTaskId()
-      ? "请先选择视频任务"
-      : !state.sessionId
-        ? "正在准备任务会话"
-        : "输入消息，与当前视频任务协作";
   elements.prompt.disabled = interactionBusy || !state.modelReady || !state.sessionId;
   elements.send.disabled = interactionBusy || !state.modelReady || !state.sessionId;
   elements.send.hidden = state.busy;

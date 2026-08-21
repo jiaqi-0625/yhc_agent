@@ -57,7 +57,6 @@ class FakeClassList {
 }
 
 class FakeElement {
-  constructor(readonly tagName = "") {}
   textContent = "";
   hidden = false;
   disabled = false;
@@ -158,8 +157,8 @@ function installFakeDocument(context: { after(callback: () => void): void }): vo
   Object.defineProperty(globalThis, "document", {
     configurable: true,
     value: {
-      createElement(tagName: string) {
-        return new FakeElement(tagName.toUpperCase());
+      createElement() {
+        return new FakeElement();
       },
       createElementNS() {
         return new FakeElement();
@@ -203,7 +202,6 @@ function matchingView(stageStatus: "in_progress" | "awaiting_confirmation") {
         selected: true,
         recommended: true,
         replacementAllowed: false,
-        preview: { thumbnailUrl: "/v1/mock-company-assets/leapmotor-c10/v1/vehicle-01.jpg" },
       },
       {
         reference: person,
@@ -306,9 +304,6 @@ test("confirmation locks an editable selection and retries a stable person/scene
     matchingLocked: true,
   };
   const api = {
-    async getCompanyAssetPreview() {
-      return new Blob(["preview"], { type: "image/jpeg" });
-    },
     async getAssetMatching() {
       getCalls += 1;
       return structuredClone(currentView);
@@ -338,18 +333,6 @@ test("confirmation locks an editable selection and retries a stable person/scene
     true,
   );
   await waitFor(() => getCalls === 1, "initial asset-matching view");
-  await waitFor(
-    () => elements.grid.children.some((card) =>
-      card.children[0]?.children.some((child) => child.tagName === "IMG") ?? false),
-    "authenticated company asset thumbnail",
-  );
-
-  const vehicleCard = elements.grid.children.find(
-    (card) => card.getAttribute("aria-label")?.includes("萤火 E5") ?? false,
-  );
-  const vehicleImage = vehicleCard?.children[0]?.children.find((child) => child.tagName === "IMG");
-  assert.match(vehicleImage?.getAttribute("src") ?? "", /^blob:/u);
-  assert.equal(vehicleImage?.getAttribute("alt"), "萤火 E5 缩略图");
 
   assert.equal(elements.confirm.disabled, false);
   const temporaryStyleCard = elements.grid.children.find(

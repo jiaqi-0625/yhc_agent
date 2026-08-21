@@ -60,40 +60,6 @@ export function createAssetMatchingPanel(options) {
   let confirmationRequestId = null;
   let busy = false;
   let requestSequence = 0;
-  let previewGeneration = 0;
-  const previewCache = new Map();
-
-  function releasePreviewCache() {
-    previewGeneration += 1;
-    for (const entry of previewCache.values()) {
-      if (entry.objectUrl) URL.revokeObjectURL(entry.objectUrl);
-    }
-    previewCache.clear();
-  }
-
-  function companyAssetPreview(path) {
-    if (typeof path !== "string" || !path || typeof options.api.getCompanyAssetPreview !== "function") {
-      return Promise.resolve(null);
-    }
-    const cached = previewCache.get(path);
-    if (cached) return cached.promise;
-    const generation = previewGeneration;
-    const entry = { objectUrl: null, promise: null };
-    entry.promise = options.api.getCompanyAssetPreview(path).then(function (blob) {
-      const objectUrl = URL.createObjectURL(blob);
-      if (generation !== previewGeneration) {
-        URL.revokeObjectURL(objectUrl);
-        return null;
-      }
-      entry.objectUrl = objectUrl;
-      return objectUrl;
-    }).catch(function () {
-      if (previewCache.get(path) === entry) previewCache.delete(path);
-      return null;
-    });
-    previewCache.set(path, entry);
-    return entry.promise;
-  }
 
   function allItems() {
     if (!view) return [];
@@ -107,7 +73,6 @@ export function createAssetMatchingPanel(options) {
         recommended: item.recommended,
         replacementAllowed: item.replacementAllowed,
         source: "company",
-        preview: item.preview || null,
       };
     });
     const temporary = view.temporaryAssets
@@ -174,19 +139,6 @@ export function createAssetMatchingPanel(options) {
     const preview = document.createElement("span");
     preview.className = "asset-card-preview " + item.category;
     preview.append(iconUse(item.category === "vehicle" ? "#i-car" : item.category === "person" ? "#i-message" : "#i-image"));
-    const thumbnailPath = item.preview?.thumbnailUrl;
-    if (thumbnailPath) {
-      const generation = previewGeneration;
-      void companyAssetPreview(thumbnailPath).then(function (objectUrl) {
-        if (!objectUrl || generation !== previewGeneration) return;
-        const image = document.createElement("img");
-        image.className = "asset-card-thumbnail";
-        image.setAttribute("src", objectUrl);
-        image.setAttribute("alt", item.name + " 缩略图");
-        image.addEventListener("load", function () { preview.classList.add("has-image"); });
-        preview.append(image);
-      });
-    }
     const body = document.createElement("span");
     body.className = "asset-card-body";
     const title = document.createElement("span");
@@ -386,7 +338,6 @@ export function createAssetMatchingPanel(options) {
       taskId = nextTaskId;
       if (nextKey === contextKey) return;
       contextKey = nextKey;
-      releasePreviewCache();
       confirmationRequestId = null;
       void load();
     },
