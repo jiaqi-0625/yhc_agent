@@ -172,6 +172,7 @@
 
 | 日期 | 更新人 | 说明 |
 |---|---|---|
+| 2026-08-21 | Codex | 阶段产物/对话同步修复 `e6153cd` 与验收账本 `0a56331` 已非强制推送并核验到达 `origin/codex/db-assets-connect`；远端 `main` 仍为 `cf23799`，未推送、未修改。 |
 | 2026-08-21 | Codex | WS-210 前端回归修复 `e6153cd`：脚本阶段生成返回的待确认产物现在立即渲染脚本草稿，同一任务 revision 回写不再清空临时产物；中央工作区更新时，对话区即时显示派生自权威任务状态的同步节点，后台只刷新 Agent Session/TaskContext，不再重复下载并重绘未变化的 transcript。全仓 671 项中 670 通过、1 项真实 PostgreSQL 用例按未配置 `TEST_DATABASE_URL` 的安全门跳过、0 失败，TypeScript 与凭据扫描通过。目标仍仅为 `codex/db-assets-connect`，不推送 `main`。当前真实数据库测试任务仍为策略进行中 revision 2，须先完成人工策略确认后才能进入脚本。 |
 | 2026-08-21 | Codex | 反向同步功能 `3e0f0f6` 与验收记录 `4c900ce` 已非强制推送到 `origin/codex/db-assets-connect`；远端 `main` 未推送、未修改。 |
 | 2026-08-21 | Codex | 根据用户截图继续修复反向同步，功能提交 `3e0f0f6`：中央工作区人工确认改变任务 revision 后，客户端会并行重新授权/读取 Agent Session 与 transcript，核验仍属于当前账号、任务和 scope generation 后同时更新任务上下文与消息时间线；不额外触发模型调用、不自动确认或执行下一阶段。全仓 669 项中 668 通过、1 项真实 PostgreSQL 用例按门禁跳过、0 失败，类型检查与凭据扫描通过；Browser 已加载 `task-sync-ws210-v2`，页面日志零 warning/error。 |
