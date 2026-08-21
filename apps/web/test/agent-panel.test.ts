@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, reloadAgentWorkspaceSession, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, reloadAgentWorkspaceSession, resolveAgentPanelWidth, strategyApprovalContinuationCard, unavailableAgentTaskMessage } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -419,6 +419,24 @@ test("workspace session reload avoids repainting an unchanged transcript", async
   assert.equal(transcriptCalls, 0);
 });
 
+test("a server-visible strategy draft produces the next approval card without another user message", () => {
+  const task = {
+    id: "task_sync", revision: 2, currentStage: "strategy", stageStatus: "in_progress",
+  };
+  const card = strategyApprovalContinuationCard(task, {
+    activeStrategyDraft: { id: "strategy_draft_1" },
+  });
+  assert.equal(parseAgentActionCard(card)?.action, "request_strategy_approval");
+  assert.equal(card?.expectedRevision, 2);
+  assert.equal(strategyApprovalContinuationCard(task, {
+    activeStrategyDraft: { id: "strategy_draft_1" },
+    confirmationRequest: { id: "confirmation_request_1" },
+  }), null);
+  assert.equal(strategyApprovalContinuationCard({ ...task, currentStage: "script" }, {
+    activeStrategyDraft: { id: "strategy_draft_1" },
+  }), null);
+});
+
 test("application wiring keeps action commands task-scoped and disabled during Agent runs", async () => {
   const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function currentAgentActionContext()");
@@ -483,6 +501,9 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
   assert.match(workspaceSync, /reloadAgentWorkspaceSession\(agentApi, sessionId, task\.id\)/u);
   assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(task\)/u);
+  assert.match(source, /synchronizeAgentWorkflowContinuation\(body\.session\.taskContext\?\.videoTask\)/u);
+  assert.match(source, /await synchronizeAgentWorkflowContinuation\(state\.taskContext\?\.videoTask\)/u);
+  assert.match(source, /无需再向 Agent 发送“已确认”/u);
   assert.doesNotMatch(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);
   assert.match(workspaceSync, /refreshed\.taskContext\.videoTask\.revision < task\.revision/u);
   assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);

@@ -12,8 +12,9 @@ import {
   executeAgentActionCommand,
   extractAgentActionCard,
   reloadAgentWorkspaceSession,
+  strategyApprovalContinuationCard,
   unavailableAgentTaskMessage,
-} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v3";
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v4";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -1142,6 +1143,43 @@ async function refreshAgentContextAfterCommand(sessionId, videoTaskId, expectedS
     ) return;
     updateSession(body.session);
     refreshActionProposalAvailability();
+    await synchronizeAgentWorkflowContinuation(body.session.taskContext?.videoTask);
+  } catch {}
+}
+
+async function synchronizeAgentWorkflowContinuation(videoTask) {
+  if (
+    !videoTask
+    || videoTask.id !== state.sessionVideoTaskId
+    || videoTask.id !== currentSelectedVideoTaskId()
+    || !state.sessionId
+  ) return;
+  if (videoTask.currentStage !== "strategy" || videoTask.stageStatus !== "in_progress") return;
+  const scope = captureWorkspaceScope();
+  const sessionId = state.sessionId;
+  const projectId = state.taskContext?.batchProject?.id;
+  if (!projectId) return;
+  try {
+    const stageView = await workspaceApi.getStageVersions(projectId, videoTask.id, "strategy");
+    if (
+      !isCurrentWorkspaceScope(scope)
+      || state.sessionId !== sessionId
+      || currentSelectedVideoTaskId() !== videoTask.id
+      || stageView?.videoTask?.revision !== videoTask.revision
+    ) return;
+    const proposal = strategyApprovalContinuationCard(videoTask, stageView);
+    if (!proposal) return;
+    const duplicate = Array.from(elements.messages.querySelectorAll(".agent-action-card")).some(function (card) {
+      return card.dataset.action === proposal.action
+        && Number(card.dataset.expectedRevision) === proposal.expectedRevision
+        && card.dataset.videoTaskId === proposal.videoTaskId;
+    });
+    if (duplicate) return;
+    if (elements.welcome) elements.welcome.hidden = true;
+    const turn = createAgentTurn(false);
+    const sourceId = "workflow_strategy_approval_" + proposal.expectedRevision;
+    appendActionProposal(turn, proposal, sourceId);
+    elements.messages.scrollTop = elements.messages.scrollHeight;
   } catch {}
 }
 
@@ -1748,6 +1786,8 @@ async function activateSession(sessionId, scope = captureWorkspaceScope()) {
   const transcript = await agentApi.getTranscript(sessionId, selectedVideoTaskId);
   if (!isCurrentWorkspaceScope(scope) || state.sessionId !== sessionId || currentSelectedVideoTaskId() !== selectedVideoTaskId) return false;
   restoreTranscriptTimeline(transcript.messages);
+  appendWorkspaceTaskSyncEvent(state.taskContext?.videoTask);
+  await synchronizeAgentWorkflowContinuation(state.taskContext?.videoTask);
   return true;
 }
 
@@ -1917,6 +1957,7 @@ async function refreshAgentContextForWorkspaceTask(task) {
 }
 
 function appendWorkspaceTaskSyncEvent(task) {
+  if (!task || !Number.isSafeInteger(task.revision) || task.revision <= 1) return;
   const revision = String(task.revision);
   if (elements.messages.querySelector(`[data-workspace-task-revision="${revision}"]`)) return;
   if (elements.welcome) elements.welcome.hidden = true;
@@ -1939,7 +1980,17 @@ function appendWorkspaceTaskSyncEvent(task) {
   copy.append(eyebrow, title);
   header.appendChild(copy);
   const detail = document.createElement("p");
-  detail.textContent = "任务版本 " + revision + " 已同步，无需刷新页面。";
+  const nextSteps = {
+    "strategy:in_progress": "策略草稿状态已同步；如已生成草稿，审批操作卡会自动出现，无需发送“已确认”。",
+    "strategy:awaiting_confirmation": "策略已提交人工审批，请在中央工作区确认；无需再向 Agent 发送“已确认”。",
+    "script:in_progress": "营销策略已确认，任务已自动进入脚本阶段；可在中央工作区生成脚本产物。",
+    "asset_matching:in_progress": "脚本已确认，任务已进入资产匹配阶段。",
+    "storyboard:in_progress": "资产匹配已确认，任务已进入分镜阶段。",
+    "video_preview:in_progress": "分镜已确认，任务已进入视频预览阶段。",
+    "delivery:in_progress": "视频预览已确认，任务已进入交付阶段。",
+  };
+  detail.textContent = nextSteps[task.currentStage + ":" + task.stageStatus]
+    || "任务版本 " + revision + " 已同步，无需刷新页面。";
   event.append(header, detail);
   content.appendChild(event);
   elements.messages.scrollTop = elements.messages.scrollHeight;

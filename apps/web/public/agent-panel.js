@@ -164,6 +164,30 @@ export async function reloadAgentWorkspaceSession(api, sessionId, videoTaskId) {
   return body.session;
 }
 
+export function strategyApprovalContinuationCard(videoTask, stageView) {
+  if (
+    !isRecord(videoTask)
+    || !isIdentifier(videoTask.id)
+    || !Number.isSafeInteger(videoTask.revision)
+    || videoTask.currentStage !== "strategy"
+    || videoTask.stageStatus !== "in_progress"
+    || !isRecord(stageView?.activeStrategyDraft)
+    || !isIdentifier(stageView.activeStrategyDraft.id)
+    || stageView.confirmationRequest !== undefined
+  ) return null;
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId: videoTask.id,
+    action: "request_strategy_approval",
+    label: "提交卖点策略人工审批",
+    summary: "策略草稿已经生成并通过服务端读取，下一步由负责人点击提交人工审批。",
+    expectedRevision: videoTask.revision,
+    cost: { kind: "free" },
+    payload: { schemaVersion: 1 },
+  };
+}
+
 function uncertainCommandResponse() {
   const error = new Error("服务端返回的操作结果无法安全核验。");
   error.mayHaveExecuted = true;
