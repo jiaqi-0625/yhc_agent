@@ -130,9 +130,10 @@ test("configured local backend resolves newly-created V2 tasks without V1 fallba
   });
   assert.equal(agentSessionResponse.status, 201);
   const agentSession = (await agentSessionResponse.json()) as {
-    session: { taskContext: { videoTask: { id: string } } };
+    session: { taskContext: { videoTask: { id: string } }; toolNames: string[] };
   };
   assert.equal(agentSession.session.taskContext.videoTask.id, videoTaskId);
+  assert.equal(agentSession.session.toolNames.includes("get_current_strategy_draft"), true);
 
   assert.equal(business.legacyReadCount, 0);
 });

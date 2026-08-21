@@ -10,6 +10,7 @@ import type {
   ProjectAssetPool,
   TaskContext,
   VehicleSnapshot,
+  VideoTaskStrategyDraft,
 } from "@firefly/schemas";
 import {
   createVehicleTools,
@@ -38,6 +39,7 @@ import {
 } from "../src/workspace-session-runtime.ts";
 import { LocalWorkspaceSessionStore } from "../src/workspace-session-store.ts";
 import {
+  createWorkspaceStrategyDraftReader,
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -278,6 +280,64 @@ test("V2 Agent vehicle tools return and validate only the task's exact locked sn
     VehicleAccessError,
   );
   assert.equal(reads, 4);
+});
+
+test("V2 Agent reads only the active persisted strategy draft bound to its task snapshot", async () => {
+  const { creator, locked, resolver } = await fixture();
+  const context = await resolver.resolve(locked.videoTask.id, creator);
+  const draft: VideoTaskStrategyDraft = {
+    schemaVersion: 1,
+    id: "strategy_draft_ws503_postgres",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: locked.videoTask.id,
+    vehicleSnapshotId: locked.videoTask.vehicleSnapshotId!,
+    version: 1,
+    status: "draft",
+    audience: "城市家庭",
+    theme: "可靠通勤",
+    items: [{
+      id: "strategy_item_ws503_postgres",
+      claimId: "claim_family_space",
+      kind: "fixed",
+      title: "家庭空间",
+      statement: "提供五座乘坐空间。",
+      rationale: "匹配家庭出行。",
+      order: 1,
+      locked: false,
+    }],
+    validation: { valid: true, issues: [] },
+    generation: { kind: "vehicle_fact_projection", templateVersion: "v1" },
+    createdAt: occurredAt,
+    createdBy: creator.actorAccountId,
+    updatedAt: occurredAt,
+    updatedBy: creator.actorAccountId,
+  };
+  const withDraft = structuredClone(locked);
+  withDraft.strategyDrafts = [draft];
+  withDraft.activeStrategyDraftId = draft.id;
+  const reader = createWorkspaceStrategyDraftReader(
+    { async load() { return structuredClone(withDraft); } },
+    context,
+    {
+      actorId: creator.actorAccountId,
+      tenantId: creator.tenantId,
+      projectId: project.id,
+      videoTaskId: locked.videoTask.id,
+    },
+  );
+
+  const result = await reader.read();
+  assert.equal(result.taskRevision, locked.videoTask.revision);
+  assert.equal(result.vehicleSnapshotId, locked.videoTask.vehicleSnapshotId);
+  assert.deepEqual(result.draft.items, draft.items);
+  assert.equal("tenantId" in result.draft, false);
+  assert.equal("createdBy" in result.draft, false);
+  assert.equal("generation" in result.draft, false);
+  assert.equal("createdAt" in result.draft, false);
+
+  withDraft.videoTask.revision += 1;
+  await assert.rejects(() => reader.read(), /no longer matches/u);
 });
 
 test("migration-mode Agent runtime refuses implicit V1 status or vehicle readers", () => {

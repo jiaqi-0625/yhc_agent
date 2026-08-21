@@ -12,10 +12,12 @@ import {
 } from "@firefly/schemas";
 import {
   SnapshotNotFoundError,
+  StrategyDraftAccessError,
   validateClaimsAgainstSnapshot,
   VehicleAccessError,
   VehicleNotFoundError,
   type ToolExecutionScope,
+  type StrategyDraftReader,
   type VehicleServicePort,
 } from "@firefly/tools";
 import { Value } from "typebox/value";
@@ -85,6 +87,87 @@ export async function readWorkspaceTaskPolicyStatus(
     throw invalidContext("The Agent task context no longer matches its V2 project scope.");
   }
   return workspaceTaskPolicyStatus(record.videoTask);
+}
+
+/**
+ * Exposes only the active strategy draft bound to the current authenticated
+ * V2 task. The underlying aggregate may be backed by local files or the
+ * existing PostgreSQL adapter; the Agent never receives database access.
+ */
+export function createWorkspaceStrategyDraftReader(
+  tasks: Pick<VideoTaskProductionStore, "load">,
+  taskContext: Readonly<TaskContext>,
+  binding: Readonly<WorkspaceAgentTaskBinding>,
+): StrategyDraftReader {
+  const videoTaskId = taskContext.videoTask.id;
+  if (
+    binding.videoTaskId !== videoTaskId ||
+    binding.projectId !== taskContext.batchProject.id
+  ) {
+    throw new StrategyDraftAccessError();
+  }
+  return {
+    videoTaskId,
+    async read(signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      const record = await tasks.load(videoTaskId);
+      signal?.throwIfAborted();
+      if (
+        record === undefined ||
+        record.videoTask.id !== videoTaskId ||
+        record.videoTask.tenantId !== binding.tenantId ||
+        record.videoTask.batchProjectId !== binding.projectId ||
+        record.videoTask.status !== "active" ||
+        record.videoTask.currentStage !== "strategy" ||
+        record.videoTask.revision !== taskContext.videoTask.revision
+      ) {
+        throw new StrategyDraftAccessError(
+          "The current strategy draft no longer matches the server-resolved task context.",
+        );
+      }
+      const draftId = record.activeStrategyDraftId;
+      const vehicleSnapshotId = record.videoTask.vehicleSnapshotId;
+      const draft = draftId === undefined
+        ? undefined
+        : record.strategyDrafts.find((candidate) => candidate.id === draftId);
+      if (
+        draft === undefined ||
+        vehicleSnapshotId === undefined ||
+        draft.tenantId !== binding.tenantId ||
+        draft.batchProjectId !== binding.projectId ||
+        draft.videoTaskId !== videoTaskId ||
+        draft.vehicleSnapshotId !== vehicleSnapshotId
+      ) {
+        throw new StrategyDraftAccessError();
+      }
+      return {
+        schemaVersion: 1,
+        kind: "current_strategy_draft",
+        videoTaskId,
+        taskRevision: record.videoTask.revision,
+        vehicleSnapshotId,
+        draft: {
+          schemaVersion: draft.schemaVersion,
+          id: draft.id,
+          videoTaskId: draft.videoTaskId,
+          vehicleSnapshotId: draft.vehicleSnapshotId,
+          version: draft.version,
+          status: draft.status,
+          audience: draft.audience,
+          theme: draft.theme,
+          items: structuredClone(draft.items),
+          validation: structuredClone(draft.validation),
+        },
+        readBoundary: {
+          taskScoped: true,
+          immutableVehicleFacts: true,
+          mayMutateDraft: false,
+          mayRequestApproval: false,
+          mayApprove: false,
+        },
+      };
+    },
+  };
 }
 
 /**

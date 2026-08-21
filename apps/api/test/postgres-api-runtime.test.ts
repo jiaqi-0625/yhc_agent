@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
+import type { TaskContext } from "@firefly/schemas";
+
 import type { PostgresDatabaseConfig } from "../src/database-config.ts";
 import { LocalBusinessRuntime } from "../src/business-runtime.ts";
 import type {
@@ -124,6 +126,36 @@ test("postgres composition injects one database coordinator into every asset mut
   assert.ok(runtime.taskContexts);
   assert.equal(typeof runtime.resolveWorkStatus, "function");
   assert.equal(typeof runtime.resolveVehicleService, "function");
+  assert.equal(typeof runtime.resolveStrategyDraftReader, "function");
+
+  const strategyContext = {
+    batchProject: { id: "project_strategy_reader" },
+    videoTask: { id: "task_strategy_reader", currentStage: "strategy" },
+  } as unknown as TaskContext;
+  const strategyScope = {
+    actorId: "account_creator_a",
+    tenantId: "tenant_firefly",
+    projectId: "project_strategy_reader",
+    videoTaskId: "task_strategy_reader",
+  };
+  assert.equal(
+    runtime.resolveStrategyDraftReader(strategyContext, strategyScope)?.videoTaskId,
+    "task_strategy_reader",
+  );
+  assert.equal(
+    runtime.resolveStrategyDraftReader({
+      ...strategyContext,
+      videoTask: { ...strategyContext.videoTask, currentStage: "script" },
+    }, strategyScope),
+    undefined,
+  );
+  assert.throws(
+    () => runtime.resolveStrategyDraftReader(strategyContext, {
+      ...strategyScope,
+      projectId: "project_other",
+    }),
+    /strategy draft/iu,
+  );
   await runtime.close();
 });
 

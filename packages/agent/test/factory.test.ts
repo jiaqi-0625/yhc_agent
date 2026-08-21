@@ -119,7 +119,7 @@ test("business assembly adds strategy tools without exposing an approval decisio
   );
 });
 
-test("V2 task-bound assembly adds only strategy proposal tools from the server context", async () => {
+test("V2 task-bound assembly adds strategy draft read and proposal tools from server context", async () => {
   const taskContext = taskContextWithoutAssetSnapshot();
   let revisionReads = 0;
   const strategyProposal = {
@@ -129,6 +129,10 @@ test("V2 task-bound assembly adds only strategy proposal tools from the server c
       return taskContext.videoTask.revision;
     },
   };
+  const strategyDraftReader = {
+    videoTaskId: taskContext.videoTask.id,
+    async read() { throw new Error("not called"); },
+  };
   const agent = createAdvertisingAgent({
     model,
     streamFn,
@@ -137,16 +141,32 @@ test("V2 task-bound assembly adds only strategy proposal tools from the server c
     getWorkStatus: () => "strategy_draft",
     vehicleService: new InMemoryVehicleService([]),
     strategyProposal,
+    strategyDraftReader,
   });
   const toolNames = agent.state.tools.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
+    "get_current_strategy_draft",
     "propose_strategy_generation",
     "propose_strategy_approval",
   ]);
   assert.equal(toolNames.includes("validate_strategy"), false);
   assert.doesNotMatch(toolNames.join(","), /approve_strategy|generate_strategy|request_strategy_approval/u);
+
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "strategy_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      strategyProposal,
+      strategyDraftReader: { ...strategyDraftReader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
 
   const generation = agent.state.tools.find((tool) => tool.name === "propose_strategy_generation");
   assert.ok(generation);

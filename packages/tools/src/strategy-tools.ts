@@ -6,7 +6,9 @@ import {
   ValidateStrategyRequestSchema,
   type ProposeStrategyApprovalRequest,
   type ProposeStrategyGenerationRequest,
+  type VideoTaskStrategyDraft,
 } from "@firefly/schemas";
+import { Type } from "typebox";
 
 import type { StrategyWorkflowPort } from "./strategy-service.ts";
 
@@ -17,6 +19,63 @@ function textResult<T>(details: T) {
 export interface StrategyProposalPort {
   readonly videoTaskId: string;
   currentRevision(): number | Promise<number>;
+}
+
+const GetCurrentStrategyDraftRequestSchema = Type.Object({}, { additionalProperties: false });
+
+export interface StrategyDraftContextView {
+  readonly schemaVersion: 1;
+  readonly kind: "current_strategy_draft";
+  readonly videoTaskId: string;
+  readonly taskRevision: number;
+  readonly vehicleSnapshotId: string;
+  readonly draft: Pick<
+    VideoTaskStrategyDraft,
+    | "schemaVersion"
+    | "id"
+    | "videoTaskId"
+    | "vehicleSnapshotId"
+    | "version"
+    | "status"
+    | "audience"
+    | "theme"
+    | "items"
+    | "validation"
+  >;
+  readonly readBoundary: {
+    readonly taskScoped: true;
+    readonly immutableVehicleFacts: true;
+    readonly mayMutateDraft: false;
+    readonly mayRequestApproval: false;
+    readonly mayApprove: false;
+  };
+}
+
+export interface StrategyDraftReader {
+  readonly videoTaskId: string;
+  read(signal?: AbortSignal): Promise<StrategyDraftContextView>;
+}
+
+export class StrategyDraftAccessError extends Error {
+  readonly code = "AIC-STRATEGY-DRAFT-UNAVAILABLE";
+
+  constructor(message = "The current task does not expose a readable active strategy draft.") {
+    super(message);
+    this.name = "StrategyDraftAccessError";
+  }
+}
+
+export function createStrategyDraftTools(reader: StrategyDraftReader): readonly AgentTool[] {
+  const getCurrentStrategyDraft: AgentTool<typeof GetCurrentStrategyDraftRequestSchema> = {
+    name: "get_current_strategy_draft",
+    label: "读取当前策略草稿",
+    description: "读取当前任务服务端已持久化的策略草稿正文、卖点、校验结果和锁定车型快照引用。提交策略人工审批前必须先读取；本工具只读，不能修改草稿、提交审批或代替人工确认。",
+    parameters: GetCurrentStrategyDraftRequestSchema,
+    async execute(_toolCallId, _params, signal) {
+      return textResult(await reader.read(signal));
+    },
+  };
+  return [getCurrentStrategyDraft];
 }
 
 export function createStrategyProposalTools(service: StrategyProposalPort) {

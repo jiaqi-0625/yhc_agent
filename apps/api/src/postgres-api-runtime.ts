@@ -3,6 +3,7 @@ import {
   createScopedTaskAssetSnapshotReader,
   MockCompanyAssetProvider,
   type StageSuggestionContextReader,
+  type StrategyDraftReader,
   type TaskAssetSnapshotReader,
 } from "@firefly/tools";
 import type { AgentSessionScope } from "@firefly/agent";
@@ -48,6 +49,7 @@ import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
 import { WorkspaceAdminRuntime } from "./workspace-admin-runtime.ts";
 import { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 import {
+  createWorkspaceStrategyDraftReader,
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -145,6 +147,10 @@ export interface PostgresApiRuntime {
     taskContext: Readonly<TaskContext>,
     sessionScope: Readonly<AgentSessionScope>,
   ) => StageSuggestionContextReader | undefined;
+  readonly resolveStrategyDraftReader: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => StrategyDraftReader | undefined;
   readiness(): Promise<void>;
   close(): Promise<void>;
 }
@@ -343,6 +349,12 @@ export async function createPostgresApiRuntime(
                   }),
                 }),
           })
+        : undefined,
+      resolveStrategyDraftReader: (
+        taskContext: Readonly<TaskContext>,
+        sessionScope: Readonly<AgentSessionScope>,
+      ) => taskContext.videoTask.currentStage === "strategy"
+        ? createWorkspaceStrategyDraftReader(videoTaskStore, taskContext, sessionScope)
         : undefined,
       readiness,
       close: () => database.close(),

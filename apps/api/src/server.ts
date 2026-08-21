@@ -87,6 +87,7 @@ import {
   WorkspaceProductionStatusPath,
 } from "./workspace-production-status-routes.ts";
 import {
+  createWorkspaceStrategyDraftReader,
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -685,6 +686,16 @@ export function createApiServer(
                         }),
                   })
                 : undefined,
+            resolveStrategyDraftReader: videoTaskStore === undefined
+              ? () => undefined
+              : (taskContext, sessionScope) =>
+                  taskContext.videoTask.currentStage === "strategy"
+                    ? createWorkspaceStrategyDraftReader(
+                        videoTaskStore,
+                        taskContext,
+                        sessionScope,
+                      )
+                    : undefined,
           }
         : {}),
     },
@@ -906,6 +917,7 @@ export async function startConfiguredApiServer(
         resolveVehicleService: postgres.resolveVehicleService,
         resolveTaskAssetReader: postgres.resolveTaskAssetReader,
         resolveStageSuggestionReader: postgres.resolveStageSuggestionReader,
+        resolveStrategyDraftReader: postgres.resolveStrategyDraftReader,
       },
     );
     const resolvePostgresTaskContext: AgentTaskContextResolver = async (request, videoTaskId) => {

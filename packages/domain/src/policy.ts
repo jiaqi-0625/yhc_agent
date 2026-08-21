@@ -95,6 +95,11 @@ export const toolPolicies: Readonly<Record<string, ToolPolicy>> = {
     ],
     allowedRoles: ["creator", "reviewer", "content_admin"],
   },
+  get_current_strategy_draft: {
+    risk: "read",
+    allowedStatuses: ["strategy_draft", "awaiting_strategy_approval", "strategy_approved"],
+    allowedRoles: ["creator", "reviewer", "content_admin"],
+  },
   validate_strategy: {
     risk: "read",
     allowedStatuses: ["strategy_draft", "awaiting_strategy_approval", "strategy_approved"],
