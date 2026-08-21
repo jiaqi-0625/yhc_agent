@@ -11,8 +11,9 @@ import {
   createStableAgentActionRequestId,
   executeAgentActionCommand,
   extractAgentActionCard,
+  reloadAgentWorkspaceConversation,
   unavailableAgentTaskMessage,
-} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1";
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v2";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -1884,15 +1885,21 @@ async function refreshAgentContextForWorkspaceTask(task) {
   const scope = captureWorkspaceScope();
   if (!sessionId || state.sessionVideoTaskId !== task.id) return;
   try {
-    const body = await agentApi.getSession(sessionId, task.id);
+    const refreshed = await reloadAgentWorkspaceConversation(agentApi, sessionId, task.id);
     if (
       !isCurrentWorkspaceScope(scope) ||
       currentSelectedVideoTaskId() !== task.id ||
       state.sessionId !== sessionId ||
-      body.session?.taskContext?.videoTask?.id !== task.id ||
-      body.session.taskContext.videoTask.revision < task.revision
+      refreshed.session?.taskContext?.videoTask?.id !== task.id ||
+      refreshed.session.taskContext.videoTask.revision < task.revision
     ) return;
-    updateSession(body.session);
+    updateSession(refreshed.session);
+    if (
+      !isCurrentWorkspaceScope(scope) ||
+      currentSelectedVideoTaskId() !== task.id ||
+      state.sessionId !== sessionId
+    ) return;
+    restoreTranscriptTimeline(refreshed.messages);
     refreshActionProposalAvailability();
   } catch (error) {
     if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== task.id) return;

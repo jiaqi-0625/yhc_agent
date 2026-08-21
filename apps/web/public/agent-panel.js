@@ -139,6 +139,20 @@ export function agentActionRequestBody(proposal, requestId) {
   return { requestId, card };
 }
 
+export async function reloadAgentWorkspaceConversation(api, sessionId, videoTaskId) {
+  if (!api || !isIdentifier(sessionId) || !isIdentifier(videoTaskId)) {
+    throw new Error("无法刷新当前任务的智能助手会话。");
+  }
+  const [sessionBody, transcriptBody] = await Promise.all([
+    api.getSession(sessionId, videoTaskId),
+    api.getTranscript(sessionId, videoTaskId),
+  ]);
+  if (!isRecord(sessionBody?.session) || !Array.isArray(transcriptBody?.messages)) {
+    throw new Error("服务端返回的智能助手会话无法安全核验。");
+  }
+  return { session: sessionBody.session, messages: transcriptBody.messages };
+}
+
 function uncertainCommandResponse() {
   const error = new Error("服务端返回的操作结果无法安全核验。");
   error.mayHaveExecuted = true;

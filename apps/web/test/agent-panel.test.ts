@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -386,6 +386,28 @@ test("Agent action command responses bind receipt metadata to the current accoun
   }
 });
 
+test("workspace conversation reload reads session context and transcript together", async () => {
+  const calls: string[] = [];
+  const session = { id: "agent_session_sync", taskContext: { videoTask: { id: "task_sync" } } };
+  const messages = [{ role: "assistant", content: "下一步内容" }];
+  const result = await reloadAgentWorkspaceConversation({
+    async getSession(sessionId: string, videoTaskId: string) {
+      calls.push(`session:${sessionId}:${videoTaskId}`);
+      return { session };
+    },
+    async getTranscript(sessionId: string, videoTaskId: string) {
+      calls.push(`transcript:${sessionId}:${videoTaskId}`);
+      return { messages };
+    },
+  }, "agent_session_sync", "task_sync");
+  assert.deepEqual(calls.sort(), [
+    "session:agent_session_sync:task_sync",
+    "transcript:agent_session_sync:task_sync",
+  ]);
+  assert.equal(result.session, session);
+  assert.equal(result.messages, messages);
+});
+
 test("application wiring keeps action commands task-scoped and disabled during Agent runs", async () => {
   const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function currentAgentActionContext()");
@@ -448,7 +470,9 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /state\.taskContext = null/u);
   assert.match(workspaceSync, /restoreSessionForCurrentWork\(scope\)/u);
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
-  assert.match(workspaceSync, /body\.session\.taskContext\.videoTask\.revision < task\.revision/u);
+  assert.match(workspaceSync, /reloadAgentWorkspaceConversation\(agentApi, sessionId, task\.id\)/u);
+  assert.match(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);
+  assert.match(workspaceSync, /refreshed\.session\.taskContext\.videoTask\.revision < task\.revision/u);
   assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);
   assert.match(
     source,
