@@ -111,9 +111,13 @@ test("real video progress uses the supported multi-shot plan", () => {
   assert.equal(expectedVideoShotCount(30), 6);
   assert.equal(expectedVideoShotCount(20), 0);
   assert.deepEqual(remainingVideoShotIndices(3, [
-    { shotIndex: 0, status: "succeeded", output: { artifactId: "shot_1" } },
+    { shotIndex: 0, audioEnabled: true, status: "succeeded", output: { artifactId: "shot_1" } },
     { shotIndex: 1, status: "failed" },
   ]), [1, 2]);
+  assert.deepEqual(remainingVideoShotIndices(2, [
+    { shotIndex: 0, status: "succeeded", output: { artifactId: "legacy_silent_shot" } },
+    { shotIndex: 1, audioEnabled: true, status: "succeeded", output: { artifactId: "shot_with_audio" } },
+  ]), [0]);
   assert.deepEqual(latestVideoGenerationForShot([
     { id: "old", shotIndex: 0, status: "failed" },
     { id: "new", shotIndex: 0, status: "succeeded" },

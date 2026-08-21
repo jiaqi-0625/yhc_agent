@@ -66,6 +66,18 @@ export function videoGenerationShotDurations(durationSeconds: number): readonly 
   }
 }
 
+export function selectAudioEnabledGenerationsForComposition(
+  records: readonly Readonly<VideoGenerationRecord>[],
+  shotCount: number,
+): Array<VideoGenerationRecord | undefined> {
+  return Array.from({ length: shotCount }, (_value, shotIndex) => [...records].reverse().find((candidate) =>
+    candidate.audioEnabled === true
+    && candidate.shotIndex === shotIndex
+    && candidate.status === "succeeded"
+    && candidate.output !== undefined
+  ));
+}
+
 function error(code: string, message: string, statusCode: number): BusinessRuntimeError {
   return new BusinessRuntimeError(code, message, statusCode);
 }
@@ -99,6 +111,7 @@ function presenterSelected(task: Readonly<VideoTaskProductionRecord>): boolean {
 function publicView(record: Readonly<VideoGenerationRecord>) {
   return {
     id: record.id,
+    audioEnabled: record.audioEnabled === true,
     videoTaskId: record.videoTaskId,
     sourceTaskRevision: record.sourceTaskRevision,
     shotIndex: record.shotIndex,
@@ -117,7 +130,7 @@ function publicView(record: Readonly<VideoGenerationRecord>) {
       },
     }),
     ...(record.failure === undefined ? {} : { failure: record.failure }),
-    ...(record.compositeOutput === undefined ? {} : {
+    ...(record.audioEnabled !== true || record.compositeOutput === undefined ? {} : {
       composite: {
         artifactId: record.compositeOutput.artifactId,
         mediaType: record.compositeOutput.mediaType,
@@ -226,6 +239,7 @@ export class VideoGenerationRuntime {
       const idempotencyKey = createHash("sha256").update(`${scope.tenantId}:${videoTaskId}:${input.requestId}`).digest("hex");
       const initial: VideoGenerationRecord = {
         schemaVersion: 1,
+        audioEnabled: true,
         id,
         tenantId: scope.tenantId,
         batchProjectId: projectId,
@@ -364,11 +378,13 @@ export class VideoGenerationRuntime {
     })
       .map((shot) => shot.durationSeconds);
     const records = await this.jobs.listForTask(scope.tenantId, projectId, videoTaskId);
-    const replay = records.find((candidate) => candidate.compositeRequestId === input.requestId && candidate.compositeOutput !== undefined);
+    const replay = records.find((candidate) =>
+      candidate.audioEnabled === true
+      && candidate.compositeRequestId === input.requestId
+      && candidate.compositeOutput !== undefined
+    );
     if (replay) return { generation: publicView(replay), generations: records.map(publicView) };
-    const selected = durations.map((_duration, shotIndex) => [...records].reverse().find((candidate) =>
-      candidate.shotIndex === shotIndex && candidate.status === "succeeded" && candidate.output !== undefined
-    ));
+    const selected = selectAudioEnabledGenerationsForComposition(records, durations.length);
     if (selected.some((candidate) => candidate === undefined)) {
       throw error("AIC-VIDEO-COMPOSITION-SHOTS-NOT-READY", "Every storyboard shot must finish successfully before composition.", 409);
     }

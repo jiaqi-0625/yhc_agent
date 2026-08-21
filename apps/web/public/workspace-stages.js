@@ -360,7 +360,7 @@ export function expectedVideoShotCount(durationSeconds) {
 
 export function remainingVideoShotIndices(shotCount, generations) {
   const completed = new Set((generations || []).filter(function (item) {
-    return item.status === "succeeded" && item.output;
+    return item.audioEnabled === true && item.status === "succeeded" && item.output;
   }).map(function (item) { return item.shotIndex; }));
   return Array.from({ length: shotCount }, function (_value, shotIndex) { return shotIndex; })
     .filter(function (shotIndex) { return !completed.has(shotIndex); });
@@ -375,9 +375,10 @@ export function latestVideoGenerationForShot(generations, shotIndex) {
 function previewBody(task, view, project, generation, generations, mediaObjectUrl) {
   const version = activeVersion(view);
   const ratio = project?.project?.aspectRatio || "9:16";
-  const composite = (generations || []).find(function (item) { return item.composite; })?.composite || generation?.composite;
+  const composite = (generations || []).find(function (item) { return item.audioEnabled === true && item.composite; })?.composite
+    || (generation?.audioEnabled === true ? generation.composite : null);
   const completedShots = new Set((generations || []).filter(function (item) {
-    return item.status === "succeeded" && item.output;
+    return item.audioEnabled === true && item.status === "succeeded" && item.output;
   }).map(function (item) { return item.shotIndex; })).size;
   const expectedShots = expectedVideoShotCount(task.durationSeconds);
   const mediaLabel = composite ? "完整广告成片" : "当前已完成镜头片段";
@@ -398,11 +399,13 @@ function generationStatusBody(generation, generations, expectedCount) {
   const cards = [...latest.values()].sort(function (left, right) { return left.shotIndex - right.shotIndex; }).map(function (item) {
     const itemStatus = { queued: "已排队", running: "生成中", succeeded: "生成完成", failed: "生成失败", cancelled: "已取消" }[item.status] || item.status;
     const failure = item.failure ? `<p class="production-error" role="alert">${escapeHtml(item.failure.message)}</p>` : "";
-    return `<article class="production-card"><header><h3>真实视频 · 第 ${item.shotIndex + 1} 镜头</h3><span class="stage-mini-status ${item.status === "succeeded" ? "success" : ""}">${escapeHtml(itemStatus)}</span></header><p>进度 ${item.progressPercent}% · 预估 ${(item.estimate.amountMinor / 100).toFixed(2)} ${escapeHtml(item.estimate.currency)}</p>${failure}</article>`;
+    const audioStatus = item.audioEnabled === true && item.status === "succeeded" && item.output ? " · 音轨已校验" : "";
+    return `<article class="production-card"><header><h3>真实视频 · 第 ${item.shotIndex + 1} 镜头</h3><span class="stage-mini-status ${item.status === "succeeded" ? "success" : ""}">${escapeHtml(itemStatus)}</span></header><p>进度 ${item.progressPercent}% · 预估 ${(item.estimate.amountMinor / 100).toFixed(2)} ${escapeHtml(item.estimate.currency)}${audioStatus}</p>${failure}</article>`;
   }).join("");
-  const composite = (generations || []).find(function (item) { return item.composite; })?.composite || generation?.composite;
+  const composite = (generations || []).find(function (item) { return item.audioEnabled === true && item.composite; })?.composite
+    || (generation?.audioEnabled === true ? generation.composite : null);
   const completedCount = [...latest.values()].filter(function (item) {
-    return item.status === "succeeded" && item.output;
+    return item.audioEnabled === true && item.status === "succeeded" && item.output;
   }).length;
   const progress = composite
     ? "全部镜头已合成，完整广告可在播放器中验收。"
@@ -417,7 +420,7 @@ function deliveryBody(task, views) {
     ["成片 MP4", "video_preview"], ["字幕", "video_preview"], ["最终脚本", "script"],
     ["分镜", "storyboard"], ["素材清单", "asset_matching"], ["剪映草稿", "delivery"],
   ];
-  return `<div class="delivery-summary"><section><span>${task.status === "completed" ? "交付完成" : "交付准备"}</span><strong>${files.filter(function (entry) { return activeVersion(views[entry[1]]); }).length} / ${files.length}</strong><small>文件就绪</small></section><p>可逐镜头调用真实视频模型，并在全部完成后合成为一条无音轨 MP4 广告。</p></div>
+  return `<div class="delivery-summary"><section><span>${task.status === "completed" ? "交付完成" : "交付准备"}</span><strong>${files.filter(function (entry) { return activeVersion(views[entry[1]]); }).length} / ${files.length}</strong><small>文件就绪</small></section><p>可逐镜头调用真实视频模型，并在全部完成后合成为一条 H.264 + AAC 有声 MP4 广告。</p></div>
     <div class="delivery-grid">${files.map(function ([name, stage]) {
       const ready = Boolean(activeVersion(views[stage]));
       return `<article class="production-card"><span class="delivery-file-icon"><svg class="icon" aria-hidden="true"><use href="${name.includes("成片") ? "#i-film" : name.includes("素材") ? "#i-package" : "#i-file"}" /></svg></span><div><h3>${name}</h3><p>${ready ? "版本已确认" : "尚未生成"}</p></div><span class="stage-mini-status ${ready ? "success" : ""}">${ready ? "就绪" : "等待"}</span></article>`;
@@ -604,8 +607,9 @@ export function createWorkspaceStagesPanel(options) {
   }
 
   async function loadGenerationMedia() {
-    const composite = videoGenerations.find(function (item) { return item.composite; })?.composite || videoGeneration?.composite;
-    const output = composite || videoGeneration?.output;
+    const composite = videoGenerations.find(function (item) { return item.audioEnabled === true && item.composite; })?.composite
+      || (videoGeneration?.audioEnabled === true ? videoGeneration.composite : null);
+    const output = composite || (videoGeneration?.audioEnabled === true ? videoGeneration.output : null);
     if (!output || output.artifactId === videoMediaArtifactId) return;
     const generation = contextGeneration;
     const blob = await options.api.getVideoGenerationMedia(output.mediaUrl);
@@ -620,7 +624,7 @@ export function createWorkspaceStagesPanel(options) {
     const generation = contextGeneration;
     try {
       const completed = videoGenerations.filter(function (item) {
-        return item.status === "succeeded" && item.output;
+        return item.audioEnabled === true && item.status === "succeeded" && item.output;
       });
       const loaded = await Promise.all(completed.map(async function (item) {
         const existing = storyboardShotMedia.get(item.shotIndex);
@@ -693,14 +697,16 @@ export function createWorkspaceStagesPanel(options) {
       const generationSummary = remainingIndices.length
         ? `将调用真实视频模型生成剩余 ${remainingIndices.length} 个分镜镜头，并在全部完成后合成为完整广告。\n剩余镜头时长：${remainingDurations.join(" + ")} 秒\n本次预估费用：${(remainingAmountMinor / 100).toFixed(2)} ${estimate.currency}`
         : "全部分镜镜头均已生成，本次只进行本地完整广告合成，不再调用视频模型。";
-      const confirmed = window.confirm(`${generationSummary}\n成片暂不包含音轨。\n\n是否继续？`);
+      const confirmed = window.confirm(`${generationSummary}\n所有镜头与最终成片都必须通过音轨校验。\n\n是否继续？`);
       if (!confirmed || generation !== contextGeneration) return;
       for (let shotIndex = 0; shotIndex < plan.shotCount; shotIndex += 1) {
         if (generation !== contextGeneration) return;
-        let shot = [...(latestResult.generations || [])].reverse().find(function (item) { return item.shotIndex === shotIndex; });
+        let shot = [...(latestResult.generations || [])].reverse().find(function (item) {
+          return item.audioEnabled === true && item.shotIndex === shotIndex;
+        });
         if (!shot || !["queued", "running", "succeeded"].includes(shot.status)) {
           const started = await options.api.startVideoGeneration(projectId, task.id, {
-            requestId: requestId("video_generation_shot_" + shotIndex),
+            requestId: requestId("video_generation_shot_audio_v1_" + shotIndex),
             expectedTaskRevision: task.revision,
             shotIndex: shotIndex,
           });
@@ -722,7 +728,7 @@ export function createWorkspaceStagesPanel(options) {
         render();
       }
       const composed = await options.api.composeVideoGeneration(projectId, task.id, {
-        requestId: requestId("video_composition"),
+        requestId: requestId("video_composition_audio_v1"),
         expectedTaskRevision: task.revision,
       });
       if (generation !== contextGeneration) return;
@@ -850,7 +856,10 @@ export function createWorkspaceStagesPanel(options) {
       task = { ...task, ...view.videoTask };
       render();
       if (stage === "storyboard" && videoGenerations.some(function (item) { return item.output; })) void loadStoryboardShotMedia();
-      else if (videoGeneration?.output || videoGeneration?.composite || videoGenerations.some(function (item) { return item.composite; })) void loadGenerationMedia();
+      else if (
+        (videoGeneration?.audioEnabled === true && (videoGeneration.output || videoGeneration.composite))
+        || videoGenerations.some(function (item) { return item.audioEnabled === true && item.composite; })
+      ) void loadGenerationMedia();
       scheduleVideoPoll();
     } catch (error) {
       if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;

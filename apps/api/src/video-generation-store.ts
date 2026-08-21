@@ -11,6 +11,8 @@ import type {
 
 export interface VideoGenerationRecord {
   readonly schemaVersion: 1;
+  /** Present and true for generations whose imported output must contain a validated audio track. */
+  readonly audioEnabled?: boolean;
   readonly id: string;
   readonly tenantId: string;
   readonly batchProjectId: string;

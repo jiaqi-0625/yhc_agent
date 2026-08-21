@@ -8,8 +8,13 @@ import { SEEDANCE_2_5_MODEL, type VideoGenerationProvider } from "@firefly/tools
 import type { AccountBudgetRuntime } from "../src/account-budget-runtime.ts";
 import type { AccountRunLockRuntime } from "../src/account-run-lock-runtime.ts";
 import type { BatchProjectStore } from "../src/batch-project-store.ts";
-import { MemoryVideoGenerationStore } from "../src/video-generation-store.ts";
-import { VideoGenerationRuntime, seedanceRequestDurationSeconds, videoGenerationShotDurations } from "../src/video-generation-runtime.ts";
+import { MemoryVideoGenerationStore, type VideoGenerationRecord } from "../src/video-generation-store.ts";
+import {
+  VideoGenerationRuntime,
+  seedanceRequestDurationSeconds,
+  selectAudioEnabledGenerationsForComposition,
+  videoGenerationShotDurations,
+} from "../src/video-generation-runtime.ts";
 import type { VideoTaskProductionStore } from "../src/video-task-store.ts";
 import type { WorkspaceAdminStore } from "../src/workspace-admin-store.ts";
 import { DEVELOPMENT_ACCESS_GRANTS } from "../src/workspace-session-runtime.ts";
@@ -87,6 +92,40 @@ test("short editorial shots request Seedance's minimum duration and are trimmed 
   assert.equal(seedanceRequestDurationSeconds(8), 8);
 });
 
+test("composition selects only successful shots from the audio-enabled generation version", () => {
+  const base = {
+    schemaVersion: 1,
+    tenantId: project.tenantId,
+    batchProjectId: project.id,
+    videoTaskId: task.videoTask.id,
+    actorAccountId: session.actorAccountId,
+    requestId: "request",
+    sourceTaskRevision: 11,
+    storyboardArtifactVersionId: "storyboard_version_1",
+    assetSnapshotId: "snapshot_locked",
+    providerId: "mock_seedance",
+    providerJobId: "provider_job",
+    idempotencyKey: "idempotency",
+    status: "succeeded",
+    progressPercent: 100,
+    estimatedAmountMinor: 1000,
+    currency: "CNY",
+    reservation: {} as VideoGenerationRecord["reservation"],
+    runLock: {} as VideoGenerationRecord["runLock"],
+    output: { artifactId: "artifact", storageKey: "video.mp4", mediaType: "video/mp4", width: 1080, height: 1920, durationSeconds: 4, checksumSha256: "a".repeat(64) },
+    createdAt: "2026-08-21T01:00:00.000Z",
+    updatedAt: "2026-08-21T01:00:00.000Z",
+    revision: 1,
+  } satisfies Omit<VideoGenerationRecord, "id" | "shotIndex">;
+  const legacy = { ...base, id: "legacy_silent", shotIndex: 0 };
+  const withAudio = { ...base, id: "with_audio", shotIndex: 1, audioEnabled: true };
+
+  assert.deepEqual(
+    selectAudioEnabledGenerationsForComposition([legacy, withAudio], 2).map((record) => record?.id),
+    [undefined, "with_audio"],
+  );
+});
+
 test("real video generation requires a human start then persists and polls the provider job", async () => {
   let createCalls = 0;
   let released = 0;
@@ -135,6 +174,7 @@ test("real video generation requires a human start then persists and polls the p
 
   const started = await runtime.start(project.id, task.videoTask.id, { requestId: "request_1", expectedTaskRevision: 11, shotIndex: 0 }, session);
   assert.equal(started.generation.status, "queued");
+  assert.equal(started.generation.audioEnabled, true);
   const replay = await runtime.start(project.id, task.videoTask.id, { requestId: "request_1", expectedTaskRevision: 11, shotIndex: 0 }, session);
   assert.equal(replay.generation.id, started.generation.id);
   assert.equal(createCalls, 1);
