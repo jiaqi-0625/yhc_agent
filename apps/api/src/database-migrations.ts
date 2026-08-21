@@ -83,6 +83,7 @@ const workspaceV2RequiredTables = Object.freeze([
   "video_task_aggregates",
   "temporary_asset_project_states",
   "account_run_lock_states",
+  "media_artifacts",
 ]);
 
 function requiredWorkspaceV2Column(
@@ -189,6 +190,30 @@ const workspaceV2RequiredColumns: readonly WorkspaceV2ColumnRequirement[] = Obje
   requiredWorkspaceV2Column("account_run_lock_states", "revision", "bigint"),
   requiredWorkspaceV2Column("account_run_lock_states", "envelope", "jsonb"),
   requiredWorkspaceV2Column("account_run_lock_states", "updated_at", timestamptz),
+
+  requiredWorkspaceV2Column("media_artifacts", "artifact_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "batch_project_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "video_task_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "stage", "character varying(32)"),
+  requiredWorkspaceV2Column("media_artifacts", "role", "character varying(32)"),
+  requiredWorkspaceV2Column("media_artifacts", "artifact_version", "bigint"),
+  requiredWorkspaceV2Column("media_artifacts", "media_type", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "byte_size", "bigint"),
+  requiredWorkspaceV2Column("media_artifacts", "checksum_sha256", "character(64)"),
+  requiredWorkspaceV2Column("media_artifacts", "width", "integer"),
+  requiredWorkspaceV2Column("media_artifacts", "height", "integer"),
+  requiredWorkspaceV2Column("media_artifacts", "duration_ms", "bigint"),
+  requiredWorkspaceV2Column("media_artifacts", "created_at", timestamptz),
+  requiredWorkspaceV2Column("media_artifacts", "created_by", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "storage_provider_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "storage_bucket_name", "character varying(255)"),
+  requiredWorkspaceV2Column("media_artifacts", "storage_object_key", "character varying(1024)"),
+  requiredWorkspaceV2Column("media_artifacts", "storage_object_version", "character varying(1024)", false),
+  requiredWorkspaceV2Column("media_artifacts", "creation_actor_account_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "creation_request_id", varchar128),
+  requiredWorkspaceV2Column("media_artifacts", "creation_payload_hash", "character(64)"),
+  requiredWorkspaceV2Column("media_artifacts", "artifact", "jsonb"),
 ]);
 
 const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[] = Object.freeze(([
@@ -208,6 +233,11 @@ const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[
   { tableName: "account_run_lock_states", constraintName: "account_run_lock_states_pkey", constraintType: "p", columns: ["tenant_id", "account_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "account_run_lock_states", constraintName: "account_run_lock_states_lock_id_key", constraintType: "u", columns: ["lock_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "account_run_lock_states", constraintName: "account_run_lock_states_task_fkey", constraintType: "f", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: "video_task_aggregates", referencedColumns: ["tenant_id", "project_id", "task_id"] },
+  { tableName: "media_artifacts", constraintName: "media_artifacts_pkey", constraintType: "p", columns: ["artifact_id"], referencedTableName: null, referencedColumns: null },
+  { tableName: "media_artifacts", constraintName: "media_artifacts_task_stage_role_version_key", constraintType: "u", columns: ["tenant_id", "batch_project_id", "video_task_id", "stage", "role", "artifact_version"], referencedTableName: null, referencedColumns: null },
+  { tableName: "media_artifacts", constraintName: "media_artifacts_creation_request_key", constraintType: "u", columns: ["tenant_id", "batch_project_id", "video_task_id", "creation_actor_account_id", "creation_request_id"], referencedTableName: null, referencedColumns: null },
+  { tableName: "media_artifacts", constraintName: "media_artifacts_object_locator_key", constraintType: "u", columns: ["storage_provider_id", "storage_bucket_name", "storage_object_key"], referencedTableName: null, referencedColumns: null },
+  { tableName: "media_artifacts", constraintName: "media_artifacts_task_fkey", constraintType: "f", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: "video_task_aggregates", referencedColumns: ["tenant_id", "project_id", "task_id"] },
 ] satisfies readonly WorkspaceV2ConstraintRequirement[]).map((requirement) => Object.freeze({
   ...requirement,
   columns: Object.freeze(requirement.columns),
@@ -356,6 +386,17 @@ const workspaceV2RequiredChecks: readonly WorkspaceV2CheckRequirement[] = Object
       "AND (((envelope ->> 'acquiredAt'::text)::timestamp with time zone) = acquired_at) IS TRUE",
     ),
   ),
+
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_bucket_check", checkDefinition("length(storage_bucket_name::text) >= 3 AND length(storage_bucket_name::text) <= 255 AND storage_bucket_name::text ~ '^[A-Za-z0-9][A-Za-z0-9._-]*[A-Za-z0-9]$'::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_creation_actor_check", checkDefinition("created_by::text = creation_actor_account_id::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_hash_check", checkDefinition("checksum_sha256 ~ '^[0-9a-f]{64}$'::text AND creation_payload_hash ~ '^[0-9a-f]{64}$'::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_identifier_check", checkDefinition("artifact_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND tenant_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND batch_project_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND video_task_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND created_by::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND storage_provider_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND creation_actor_account_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND creation_request_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_media_type_check", checkDefinition("media_type::text = ANY (ARRAY['video/mp4'::character varying, 'video/webm'::character varying]::text[])")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_object_key_check", checkDefinition("octet_length(storage_object_key::text) >= 1 AND octet_length(storage_object_key::text) <= 1024 AND storage_object_key::text ~ '^[A-Za-z0-9][A-Za-z0-9._/-]*$'::text AND \"right\"(storage_object_key::text, 1) <> '/'::text AND storage_object_key::text !~~ '%//%'::text AND storage_object_key::text = concat('v1/tenants/', tenant_id, '/projects/', batch_project_id, '/tasks/', video_task_id, '/artifacts/', artifact_id, '/media') AND NOT string_to_array(storage_object_key::text, '/'::text) && ARRAY['.'::text, '..'::text]")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_object_version_check", checkDefinition("storage_object_version IS NULL OR length(storage_object_version::text) >= 1 AND length(storage_object_version::text) <= 1024 AND storage_object_version::text ~ '^[A-Za-z0-9+_.=/~-]+$'::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_stage_role_check", checkDefinition("stage::text = 'video_preview'::text AND role::text = 'preview'::text OR stage::text = 'delivery'::text AND role::text = 'delivery'::text")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_version_size_check", checkDefinition("artifact_version >= 1 AND artifact_version <= '9007199254740991'::bigint AND byte_size >= 1 AND byte_size <= '9007199254740991'::bigint AND width >= 1 AND width <= 32768 AND height >= 1 AND height <= 32768 AND duration_ms >= 1 AND duration_ms <= '9007199254740991'::bigint")),
+  requiredWorkspaceV2Check("media_artifacts", "media_artifacts_envelope_check", checkDefinition("(jsonb_typeof(artifact) = 'object'::text) IS TRUE AND artifact ?& ARRAY['schemaVersion'::text, 'id'::text, 'tenantId'::text, 'batchProjectId'::text, 'videoTaskId'::text, 'stage'::text, 'role'::text, 'version'::text, 'mediaType'::text, 'byteSize'::text, 'checksumSha256'::text, 'width'::text, 'height'::text, 'durationMs'::text, 'createdAt'::text, 'createdBy'::text] AND (artifact - ARRAY['schemaVersion'::text, 'id'::text, 'tenantId'::text, 'batchProjectId'::text, 'videoTaskId'::text, 'stage'::text, 'role'::text, 'version'::text, 'mediaType'::text, 'byteSize'::text, 'checksumSha256'::text, 'width'::text, 'height'::text, 'durationMs'::text, 'createdAt'::text, 'createdBy'::text]) = '{}'::jsonb AND ((artifact ->> 'schemaVersion'::text) = '1'::text) IS TRUE AND ((artifact ->> 'id'::text) = artifact_id::text) IS TRUE AND ((artifact ->> 'tenantId'::text) = tenant_id::text) IS TRUE AND ((artifact ->> 'batchProjectId'::text) = batch_project_id::text) IS TRUE AND ((artifact ->> 'videoTaskId'::text) = video_task_id::text) IS TRUE AND ((artifact ->> 'stage'::text) = stage::text) IS TRUE AND ((artifact ->> 'role'::text) = role::text) IS TRUE AND (((artifact ->> 'version'::text)::bigint) = artifact_version) IS TRUE AND ((artifact ->> 'mediaType'::text) = media_type::text) IS TRUE AND (((artifact ->> 'byteSize'::text)::bigint) = byte_size) IS TRUE AND ((artifact ->> 'checksumSha256'::text) = checksum_sha256::text) IS TRUE AND (((artifact ->> 'width'::text)::integer) = width) IS TRUE AND (((artifact ->> 'height'::text)::integer) = height) IS TRUE AND (((artifact ->> 'durationMs'::text)::bigint) = duration_ms) IS TRUE AND (((artifact ->> 'createdAt'::text)::timestamp with time zone) = created_at) IS TRUE AND ((artifact ->> 'createdBy'::text) = created_by::text) IS TRUE")),
 ]);
 const workspaceV2RequiredIndexes: readonly WorkspaceV2IndexRequirement[] = Object.freeze([
   Object.freeze({

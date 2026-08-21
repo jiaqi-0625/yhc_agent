@@ -421,6 +421,8 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(interactionWiring, /elements\.send\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.newSession\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.sessionSelect\.disabled = interactionBusy/u);
+  assert.match(interactionWiring, /"正在准备任务会话"/u);
+  assert.match(interactionWiring, /"输入消息，与当前视频任务协作"/u);
   assert.equal(interactionWiring.match(/refreshAgentInteractionControls\(\);/gu)?.length, 2);
 
   const sendStart = source.indexOf("async function sendMessage(");

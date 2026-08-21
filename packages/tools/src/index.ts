@@ -1,6 +1,7 @@
 export * from "./agent-tools.ts";
 export * from "./automatic-editing-provider.ts";
 export * from "./company-asset-provider.ts";
+export * from "./mock-company-asset-manifest.ts";
 export * from "./mock-company-asset-provider.ts";
 export * from "./production-provider.ts";
 export * from "./strategy-service.ts";

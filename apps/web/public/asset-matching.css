@@ -29,6 +29,10 @@
 html:not([data-theme="light"]) .asset-card-preview.person,
 html:not([data-theme="light"]) .asset-card-preview.scene { background: linear-gradient(145deg, var(--secondary), var(--muted)); }
 .asset-card-preview .icon { width: 24px; height: 24px; }
+.asset-card-thumbnail { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .16s ease; }
+.asset-card-preview { position: relative; overflow: hidden; }
+.asset-card-preview.has-image .asset-card-thumbnail { opacity: 1; }
+.asset-card-preview.has-image .icon { visibility: hidden; }
 .asset-card-body { display: grid; min-width: 0; align-content: start; gap: 5px; padding: 10px 34px 10px 10px; }
 .asset-card-title { display: flex; min-width: 0; align-items: center; gap: 6px; }
 .asset-card-title strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
