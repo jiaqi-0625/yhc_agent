@@ -31,6 +31,12 @@ import type { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
 import type { MediaObjectStorage } from "./media-object-storage.ts";
 import type { ArkVideoGenerationConfig } from "./video-generation-config.ts";
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
+import {
+  videoGenerationPromptSha256,
+  type VideoGenerationProviderStatus,
+  type VideoGenerationRequestRecord,
+  type VideoGenerationRequestStore,
+} from "./video-generation-request-store.ts";
 import type { WorkspaceAdminState, WorkspaceAdminStore } from "./workspace-admin-store.ts";
 
 const maximumVideoBytes = 500_000_000;
@@ -51,6 +57,22 @@ export interface VideoProductionResult {
 
 function runtimeError(code: string, message: string, statusCode: number): BusinessRuntimeError {
   return new BusinessRuntimeError(code, message, statusCode);
+}
+
+function failureCode(error: unknown): string {
+  if (
+    typeof error === "object" && error !== null && "code" in error
+    && typeof error.code === "string" && error.code.trim().length > 0
+  ) return error.code.trim().slice(0, 200);
+  return "AIC-VIDEO-GENERATION_FAILED";
+}
+
+function generationAspectRatio(value: string): VideoGenerationRequestRecord["aspectRatio"] {
+  switch (value) {
+    case "16:9": case "4:3": case "1:1": case "3:4": case "9:16": case "21:9":
+      return value;
+    default: throw runtimeError("AIC-VIDEO-ASPECT-RATIO_INVALID", "The project aspect ratio is unsupported.", 409);
+  }
 }
 
 function currentScope(
@@ -184,6 +206,7 @@ export class VideoProductionRuntime {
     private readonly projects: BatchProjectStore,
     private readonly tasks: VideoTaskProductionStore,
     private readonly mediaStore: MediaArtifactStore,
+    private readonly generationRequests: VideoGenerationRequestStore,
     private readonly mediaRuntime: MediaArtifactRuntime,
     private readonly storage: MediaObjectStorage,
     private readonly highCost: HighCostOperationRuntime,
@@ -266,6 +289,54 @@ export class VideoProductionRuntime {
     }
     const authorized = await this.#authorized(projectId, taskId, session);
     const { record, project, scope } = authorized;
+    const replay = await this.generationRequests.loadByActorRequest(
+      scope.tenantId,
+      project.id,
+      taskId,
+      scope.actorAccountId,
+      input.requestId,
+    );
+    if (replay !== undefined) {
+      if (replay.taskRevision !== input.expectedTaskRevision) {
+        throw runtimeError(
+          "AIC-VIDEO-REQUEST_ID_CONFLICT",
+          "The video generation request ID is already bound to another task revision.",
+          409,
+        );
+      }
+      if (
+        replay.outcomeStatus !== "succeeded"
+        || replay.mediaArtifactId === undefined
+        || replay.providerJobId === undefined
+      ) {
+        throw runtimeError(
+          "AIC-VIDEO-PREVIOUS_REQUEST_FAILED",
+          "The previous video generation attempt failed; submit a new explicit request.",
+          409,
+        );
+      }
+      const replayedMedia = await this.mediaStore.load(
+        scope.tenantId,
+        project.id,
+        taskId,
+        replay.mediaArtifactId,
+      );
+      if (!replayedMedia) {
+        throw runtimeError(
+          "AIC-VIDEO-AUDIT_MEDIA_MISSING",
+          "The recorded generated video is unavailable.",
+          500,
+        );
+      }
+      return {
+        videoTask: structuredClone(record.videoTask),
+        artifact: mediaArtifactContentReference(replayedMedia.artifact),
+        mediaArtifactId: replay.mediaArtifactId,
+        providerJobId: replay.providerJobId,
+        chargedAmountMinor: replay.chargedAmountMinor,
+        currency: replay.currency,
+      };
+    }
     if (
       record.videoTask.revision !== input.expectedTaskRevision
       || record.videoTask.status !== "active"
@@ -281,6 +352,10 @@ export class VideoProductionRuntime {
     if (!storyboardArtifactVersionId || !assetSnapshotId || !vehicleSnapshot) {
       throw runtimeError("AIC-VIDEO-INPUT_NOT_CONFIRMED", "Confirmed storyboard, assets, and vehicle facts are required.", 409);
     }
+    const lockedVehicleSnapshotId = vehicleSnapshot.id;
+    const lockedAssetSnapshotId = assetSnapshotId;
+    const lockedStoryboardArtifactVersionId = storyboardArtifactVersionId;
+    const aspectRatio = generationAspectRatio(project.aspectRatio);
     const prompt = [
       `Create a polished ${record.videoTask.durationSeconds}-second ${project.aspectRatio} automotive information-feed advertising video.`,
       `Audience: ${record.videoTask.audience}. Theme: ${record.videoTask.theme}.`,
@@ -288,6 +363,11 @@ export class VideoProductionRuntime {
       `Official locked vehicle facts (do not add unsupported claims):\n${vehicleSnapshot.factsText ?? "Use only the locked vehicle snapshot."}`,
       "Use the confirmed storyboard and locked project assets as the production plan. No fabricated specifications, prices, endorsements, or comparative claims.",
     ].join("\n\n").slice(0, 20_000);
+    const requestedAt = this.now();
+    const generationRequestId = `video_generation_request_${randomUUID().replaceAll("-", "")}`;
+    let providerJobId: string | undefined;
+    let providerStatus: VideoGenerationProviderStatus = "request_failed";
+    let mediaArtifactId: string | undefined;
     const providerScope: ProductionProviderScope = {
       tenantId: scope.tenantId,
       actorAccountId: scope.actorAccountId,
@@ -295,12 +375,14 @@ export class VideoProductionRuntime {
       videoTaskId: taskId,
       taskRevision: record.videoTask.revision,
     };
-    const execution = await this.highCost.execute(
-      record.videoTask,
-      project,
-      "video_generation",
-      scope,
-      async (authorization) => {
+    let execution;
+    try {
+      execution = await this.highCost.execute(
+        record.videoTask,
+        project,
+        "video_generation",
+        scope,
+        async (authorization) => {
         let job = await this.provider.createGeneration({
           idempotencyKey: input.requestId,
           model: this.provider.targetModel,
@@ -310,16 +392,20 @@ export class VideoProductionRuntime {
           aspectRatio: project.aspectRatio,
           durationSeconds: record.videoTask.durationSeconds,
         }, providerScope, { ...(signal === undefined ? {} : { signal }) });
+        providerJobId = job.providerJobId;
+        providerStatus = job.status;
         const deadline = Date.now() + this.config.timeoutMs;
         while (job.status === "queued" || job.status === "running") {
           if (Date.now() >= deadline) {
-            await this.provider.cancelGeneration(job.providerJobId, providerScope).catch(() => undefined);
+            job = await this.provider.cancelGeneration(job.providerJobId, providerScope).catch(() => job);
+            providerStatus = job.status;
             throw runtimeError("AIC-VIDEO-TIMEOUT", "Video generation timed out before completion.", 504);
           }
           await wait(this.config.pollIntervalMs, signal);
           job = await this.provider.getGeneration(job.providerJobId, providerScope, {
             ...(signal === undefined ? {} : { signal }),
           });
+          providerStatus = job.status;
         }
         if (job.status !== "succeeded" || !job.output) {
           throw runtimeError(job.failure?.code ?? "AIC-VIDEO-GENERATION_FAILED", "Video generation did not produce an output.", 502);
@@ -391,6 +477,7 @@ export class VideoProductionRuntime {
           candidate,
           scope,
         );
+        mediaArtifactId = registered.artifact.id;
         const updated = await this.tasks.transact(taskId, (current) => {
           if (!current || current.videoTask.revision !== input.expectedTaskRevision) {
             throw runtimeError("AIC-VIDEO-TASK_CHANGED", "The video task changed during generation.", 409);
@@ -423,8 +510,68 @@ export class VideoProductionRuntime {
           operationResultId: registered.artifact.id,
           actualAmountMinor: authorization.estimate.amountMinor,
         };
-      },
-    );
+        },
+      );
+    } catch (error: unknown) {
+      const failedRecord: VideoGenerationRequestRecord = {
+        id: generationRequestId,
+        tenantId: scope.tenantId,
+        batchProjectId: project.id,
+        videoTaskId: taskId,
+        actorAccountId: scope.actorAccountId,
+        requestId: input.requestId,
+        taskRevision: record.videoTask.revision,
+        vehicleSnapshotId: lockedVehicleSnapshotId,
+        assetSnapshotId: lockedAssetSnapshotId,
+        storyboardArtifactVersionId: lockedStoryboardArtifactVersionId,
+        providerId: this.provider.providerId,
+        ...(providerJobId === undefined ? {} : { providerJobId }),
+        providerStatus,
+        outcomeStatus: "failed",
+        modelId: this.provider.targetModel,
+        resolution: this.config.resolution,
+        aspectRatio,
+        durationSeconds: record.videoTask.durationSeconds,
+        promptText: prompt,
+        promptSha256: videoGenerationPromptSha256(prompt),
+        requestedAt,
+        completedAt: this.now(),
+        chargedAmountMinor: 0,
+        currency: "CNY",
+        ...(mediaArtifactId === undefined ? {} : { mediaArtifactId }),
+        failureCode: failureCode(error),
+      };
+      await this.generationRequests.create(failedRecord);
+      throw error;
+    }
+    const succeededRecord: VideoGenerationRequestRecord = {
+      id: generationRequestId,
+      tenantId: scope.tenantId,
+      batchProjectId: project.id,
+      videoTaskId: taskId,
+      actorAccountId: scope.actorAccountId,
+      requestId: input.requestId,
+      taskRevision: record.videoTask.revision,
+      vehicleSnapshotId: lockedVehicleSnapshotId,
+      assetSnapshotId: lockedAssetSnapshotId,
+      storyboardArtifactVersionId: lockedStoryboardArtifactVersionId,
+      providerId: this.provider.providerId,
+      providerJobId: execution.value.providerJobId,
+      providerStatus: "succeeded",
+      outcomeStatus: "succeeded",
+      modelId: this.provider.targetModel,
+      resolution: this.config.resolution,
+      aspectRatio,
+      durationSeconds: record.videoTask.durationSeconds,
+      promptText: prompt,
+      promptSha256: videoGenerationPromptSha256(prompt),
+      requestedAt,
+      completedAt: this.now(),
+      chargedAmountMinor: execution.actualAmountMinor,
+      currency: "CNY",
+      mediaArtifactId: execution.value.mediaArtifactId,
+    };
+    await this.generationRequests.create(succeededRecord);
     return {
       ...execution.value,
       chargedAmountMinor: execution.actualAmountMinor,

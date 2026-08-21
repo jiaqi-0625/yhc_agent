@@ -263,6 +263,32 @@ const workspaceV2ColumnExpectations = [
   ["video_task_vehicle_snapshots", "validation_index", "jsonb", true],
   ["video_task_vehicle_snapshots", "locked_at", timestamptz, true],
   ["video_task_vehicle_snapshots", "locked_by", varchar128, true],
+  ["video_generation_requests", "generation_request_id", varchar128, true],
+  ["video_generation_requests", "tenant_id", varchar128, true],
+  ["video_generation_requests", "batch_project_id", varchar128, true],
+  ["video_generation_requests", "video_task_id", varchar128, true],
+  ["video_generation_requests", "actor_account_id", varchar128, true],
+  ["video_generation_requests", "request_id", varchar128, true],
+  ["video_generation_requests", "task_revision", "bigint", true],
+  ["video_generation_requests", "vehicle_snapshot_id", varchar128, true],
+  ["video_generation_requests", "asset_snapshot_id", varchar128, true],
+  ["video_generation_requests", "storyboard_artifact_version_id", varchar128, true],
+  ["video_generation_requests", "provider_id", varchar128, true],
+  ["video_generation_requests", "provider_job_id", "character varying(256)", false],
+  ["video_generation_requests", "provider_status", "character varying(32)", true],
+  ["video_generation_requests", "outcome_status", "character varying(16)", true],
+  ["video_generation_requests", "model_id", "character varying(256)", true],
+  ["video_generation_requests", "resolution", "character varying(16)", true],
+  ["video_generation_requests", "aspect_ratio", "character varying(16)", true],
+  ["video_generation_requests", "duration_seconds", "integer", true],
+  ["video_generation_requests", "prompt_text", "text", true],
+  ["video_generation_requests", "prompt_sha256", "character(64)", true],
+  ["video_generation_requests", "requested_at", timestamptz, true],
+  ["video_generation_requests", "completed_at", timestamptz, true],
+  ["video_generation_requests", "charged_amount_minor", "bigint", true],
+  ["video_generation_requests", "currency", "character(3)", true],
+  ["video_generation_requests", "media_artifact_id", varchar128, false],
+  ["video_generation_requests", "failure_code", "character varying(200)", false],
 ] as const;
 const workspaceV2ConstraintExpectations = [
   ["workspace_admin_states_pkey", "p", "tenant_id", null, null],
@@ -299,6 +325,10 @@ const workspaceV2ConstraintExpectations = [
   ["video_task_vehicle_snapshots_pkey", "p", "tenant_id,batch_project_id,video_task_id", null, null],
   ["video_task_vehicle_snapshots_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
   ["video_task_vehicle_snapshots_fact_fkey", "f", "tenant_id,variant_id,fact_version", "vehicle_fact_versions", "tenant_id,variant_id,fact_version"],
+  ["video_generation_requests_pkey", "p", "generation_request_id", null, null],
+  ["video_generation_requests_actor_request_key", "u", "tenant_id,batch_project_id,video_task_id,actor_account_id,request_id", null, null],
+  ["video_generation_requests_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
+  ["video_generation_requests_media_fkey", "f", "media_artifact_id", "media_artifacts", "artifact_id"],
 ] as const;
 
 function recordAppliedMigrations(
@@ -313,7 +343,7 @@ function recordAppliedMigrations(
 test("migration loader reads the append-only Workspace V2 schemas with stable checksums", async () => {
   const loaded = await loadDatabaseMigrations();
 
-  assert.equal(loaded.length, 3);
+  assert.equal(loaded.length, 4);
   assert.equal(loaded[0]?.version, 1);
   assert.equal(loaded[0]?.name, "workspace_v2");
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE workspace_admin_states/);
@@ -345,6 +375,13 @@ test("migration loader reads the append-only Workspace V2 schemas with stable ch
   assert.match(loaded[2]?.sql ?? "", /CREATE TABLE video_task_vehicle_snapshots/u);
   assert.match(loaded[2]?.sql ?? "", /facts_text text NOT NULL/u);
   assert.equal(loaded[2]?.checksum, computeMigrationChecksum(loaded[2]?.sql ?? ""));
+  assert.equal(loaded[3]?.version, 4);
+  assert.equal(loaded[3]?.name, "video_generation_requests");
+  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE video_generation_requests/u);
+  assert.match(loaded[3]?.sql ?? "", /prompt_text text NOT NULL/u);
+  assert.match(loaded[3]?.sql ?? "", /video_generation_requests_reject_update/u);
+  assert.match(loaded[3]?.sql ?? "", /video_generation_requests_reject_delete/u);
+  assert.equal(loaded[3]?.checksum, computeMigrationChecksum(loaded[3]?.sql ?? ""));
 });
 test("migration runner serializes, applies, records, and idempotently skips migrations", async () => {
   const database = new MigrationDatabase();
@@ -445,6 +482,7 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
     "vehicle_variants",
     "vehicle_fact_versions",
     "video_task_vehicle_snapshots",
+    "video_generation_requests",
   ]);
   const columnCall = database.calls.find(
     (call) => call.sql.includes("workspace_v2_required_columns"),
@@ -509,6 +547,9 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
   assert.ok(requiredCheckNames?.includes("account_run_lock_states_check"));
   assert.ok(requiredCheckNames?.includes("account_run_lock_states_operation_check"));
   assert.ok(requiredCheckNames?.includes("account_run_lock_states_revision_check"));
+  assert.ok(requiredCheckNames?.includes("video_generation_requests_identifier_check"));
+  assert.ok(requiredCheckNames?.includes("video_generation_requests_values_check"));
+  assert.ok(requiredCheckNames?.includes("video_generation_requests_status_check"));
   const checkDefinitions = checkCall?.parameters?.[2] as readonly string[] | undefined;
   const adminStateCheckIndex = requiredCheckNames?.indexOf("workspace_admin_states_check") ?? -1;
   assert.equal(
@@ -531,10 +572,13 @@ test("Workspace V2 schema verification accepts all required tables, columns, con
     (call) => call.sql.includes("workspace_v2_required_indexes"),
   );
   assert.deepEqual(indexCall?.parameters?.slice(1, 5), [
-    ["video_task_aggregates_creation_request_key"],
-    ["tenant_id,project_id,creation_actor_account_id,creation_request_id"],
-    [4],
-    ["creation_request_idisnotnull"],
+    ["video_task_aggregates_creation_request_key", "video_generation_requests_task_time_idx"],
+    [
+      "tenant_id,project_id,creation_actor_account_id,creation_request_id",
+      "tenant_id,batch_project_id,video_task_id,requested_at,generation_request_id",
+    ],
+    [4, 5],
+    ["creation_request_idisnotnull", ""],
   ]);
   assert.match(indexCall?.sql ?? "", /index_record\.indkey/u);
   assert.match(indexCall?.sql ?? "", /index_record\.indpred/u);

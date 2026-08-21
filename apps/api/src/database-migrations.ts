@@ -88,6 +88,7 @@ const workspaceV2RequiredTables = Object.freeze([
   "vehicle_variants",
   "vehicle_fact_versions",
   "video_task_vehicle_snapshots",
+  "video_generation_requests",
 ]);
 
 function requiredWorkspaceV2Column(
@@ -265,6 +266,33 @@ const workspaceV2RequiredColumns: readonly WorkspaceV2ColumnRequirement[] = Obje
   requiredWorkspaceV2Column("video_task_vehicle_snapshots", "validation_index", "jsonb"),
   requiredWorkspaceV2Column("video_task_vehicle_snapshots", "locked_at", timestamptz),
   requiredWorkspaceV2Column("video_task_vehicle_snapshots", "locked_by", varchar128),
+
+  requiredWorkspaceV2Column("video_generation_requests", "generation_request_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "tenant_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "batch_project_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "video_task_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "actor_account_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "request_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "task_revision", "bigint"),
+  requiredWorkspaceV2Column("video_generation_requests", "vehicle_snapshot_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "asset_snapshot_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "storyboard_artifact_version_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "provider_id", varchar128),
+  requiredWorkspaceV2Column("video_generation_requests", "provider_job_id", "character varying(256)", false),
+  requiredWorkspaceV2Column("video_generation_requests", "provider_status", "character varying(32)"),
+  requiredWorkspaceV2Column("video_generation_requests", "outcome_status", "character varying(16)"),
+  requiredWorkspaceV2Column("video_generation_requests", "model_id", "character varying(256)"),
+  requiredWorkspaceV2Column("video_generation_requests", "resolution", "character varying(16)"),
+  requiredWorkspaceV2Column("video_generation_requests", "aspect_ratio", "character varying(16)"),
+  requiredWorkspaceV2Column("video_generation_requests", "duration_seconds", "integer"),
+  requiredWorkspaceV2Column("video_generation_requests", "prompt_text", "text"),
+  requiredWorkspaceV2Column("video_generation_requests", "prompt_sha256", "character(64)"),
+  requiredWorkspaceV2Column("video_generation_requests", "requested_at", timestamptz),
+  requiredWorkspaceV2Column("video_generation_requests", "completed_at", timestamptz),
+  requiredWorkspaceV2Column("video_generation_requests", "charged_amount_minor", "bigint"),
+  requiredWorkspaceV2Column("video_generation_requests", "currency", "character(3)"),
+  requiredWorkspaceV2Column("video_generation_requests", "media_artifact_id", varchar128, false),
+  requiredWorkspaceV2Column("video_generation_requests", "failure_code", "character varying(200)", false),
 ]);
 
 const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[] = Object.freeze(([
@@ -302,6 +330,10 @@ const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[
   { tableName: "video_task_vehicle_snapshots", constraintName: "video_task_vehicle_snapshots_pkey", constraintType: "p", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "video_task_vehicle_snapshots", constraintName: "video_task_vehicle_snapshots_task_fkey", constraintType: "f", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: "video_task_aggregates", referencedColumns: ["tenant_id", "project_id", "task_id"] },
   { tableName: "video_task_vehicle_snapshots", constraintName: "video_task_vehicle_snapshots_fact_fkey", constraintType: "f", columns: ["tenant_id", "variant_id", "fact_version"], referencedTableName: "vehicle_fact_versions", referencedColumns: ["tenant_id", "variant_id", "fact_version"] },
+  { tableName: "video_generation_requests", constraintName: "video_generation_requests_pkey", constraintType: "p", columns: ["generation_request_id"], referencedTableName: null, referencedColumns: null },
+  { tableName: "video_generation_requests", constraintName: "video_generation_requests_actor_request_key", constraintType: "u", columns: ["tenant_id", "batch_project_id", "video_task_id", "actor_account_id", "request_id"], referencedTableName: null, referencedColumns: null },
+  { tableName: "video_generation_requests", constraintName: "video_generation_requests_task_fkey", constraintType: "f", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: "video_task_aggregates", referencedColumns: ["tenant_id", "project_id", "task_id"] },
+  { tableName: "video_generation_requests", constraintName: "video_generation_requests_media_fkey", constraintType: "f", columns: ["media_artifact_id"], referencedTableName: "media_artifacts", referencedColumns: ["artifact_id"] },
 ] satisfies readonly WorkspaceV2ConstraintRequirement[]).map((requirement) => Object.freeze({
   ...requirement,
   columns: Object.freeze(requirement.columns),
@@ -471,6 +503,9 @@ const workspaceV2RequiredChecks: readonly WorkspaceV2CheckRequirement[] = Object
   requiredWorkspaceV2Check("video_task_vehicle_snapshots", "video_task_vehicle_snapshots_identifier_check", checkDefinition("snapshot_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND tenant_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND batch_project_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND video_task_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND variant_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND locked_by::text ~ '^[A-Za-z0-9_-]{1,128}$'::text")),
   requiredWorkspaceV2Check("video_task_vehicle_snapshots", "video_task_vehicle_snapshots_values_check", checkDefinition("fact_version >= 1 AND fact_version <= '9007199254740991'::bigint AND length(btrim(facts_text)) >= 1 AND length(btrim(facts_text)) <= 100000 AND facts_sha256 ~ '^[0-9a-f]{64}$'::text")),
   requiredWorkspaceV2Check("video_task_vehicle_snapshots", "video_task_vehicle_snapshots_validation_index_check", checkDefinition("(jsonb_typeof(validation_index) = 'object'::text) IS TRUE AND (jsonb_typeof(validation_index -> 'fixedClaims'::text) = 'array'::text) IS TRUE AND (jsonb_typeof(validation_index -> 'optionalClaims'::text) = 'array'::text) IS TRUE AND (jsonb_typeof(validation_index -> 'prohibitedClaims'::text) = 'array'::text) IS TRUE")),
+  requiredWorkspaceV2Check("video_generation_requests", "video_generation_requests_identifier_check", "CHECK (generation_request_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND tenant_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND batch_project_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND video_task_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND actor_account_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND request_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND vehicle_snapshot_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND asset_snapshot_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND storyboard_artifact_version_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND provider_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text AND (provider_job_id IS NULL OR provider_job_id::text ~ '^[A-Za-z0-9_-]{1,256}$'::text) AND (media_artifact_id IS NULL OR media_artifact_id::text ~ '^[A-Za-z0-9_-]{1,128}$'::text))"),
+  requiredWorkspaceV2Check("video_generation_requests", "video_generation_requests_values_check", "CHECK (task_revision >= 0 AND task_revision <= '9007199254740991'::bigint AND length(btrim(model_id::text)) >= 1 AND length(btrim(model_id::text)) <= 256 AND (resolution::text = ANY (ARRAY['480p'::character varying, '720p'::character varying, '1080p'::character varying]::text[])) AND (aspect_ratio::text = ANY (ARRAY['16:9'::character varying, '4:3'::character varying, '1:1'::character varying, '3:4'::character varying, '9:16'::character varying, '21:9'::character varying, 'adaptive'::character varying]::text[])) AND duration_seconds >= 1 AND duration_seconds <= 3600 AND length(btrim(prompt_text)) >= 1 AND length(btrim(prompt_text)) <= 20000 AND prompt_sha256 ~ '^[0-9a-f]{64}$'::text AND completed_at >= requested_at AND charged_amount_minor >= 0 AND charged_amount_minor <= '9007199254740991'::bigint AND currency = 'CNY'::bpchar)"),
+  requiredWorkspaceV2Check("video_generation_requests", "video_generation_requests_status_check", "CHECK ((provider_status::text = ANY (ARRAY['request_failed'::character varying, 'queued'::character varying, 'running'::character varying, 'succeeded'::character varying, 'failed'::character varying, 'cancelled'::character varying]::text[])) AND (outcome_status::text = ANY (ARRAY['succeeded'::character varying, 'failed'::character varying]::text[])) AND (outcome_status::text = 'succeeded'::text AND provider_status::text = 'succeeded'::text AND provider_job_id IS NOT NULL AND media_artifact_id IS NOT NULL AND charged_amount_minor > 0 AND failure_code IS NULL OR outcome_status::text = 'failed'::text AND charged_amount_minor = 0 AND failure_code IS NOT NULL AND length(btrim(failure_code::text)) >= 1 AND length(btrim(failure_code::text)) <= 200))"),
 ]);
 const workspaceV2RequiredIndexes: readonly WorkspaceV2IndexRequirement[] = Object.freeze([
   Object.freeze({
@@ -483,6 +518,18 @@ const workspaceV2RequiredIndexes: readonly WorkspaceV2IndexRequirement[] = Objec
       "creation_request_id",
     ]),
     normalizedPredicate: "creation_request_idisnotnull",
+  }),
+  Object.freeze({
+    tableName: "video_generation_requests",
+    indexName: "video_generation_requests_task_time_idx",
+    columns: Object.freeze([
+      "tenant_id",
+      "batch_project_id",
+      "video_task_id",
+      "requested_at",
+      "generation_request_id",
+    ]),
+    normalizedPredicate: "",
   }),
 ]);
 
@@ -844,12 +891,12 @@ async function verifyWorkspaceV2SchemaObjects(
                  AND attribute.attnum = key.attribute_number
                 WHERE key.ordinality <= index_record.indnkeyatts
               ) = required.column_names
-              AND lower(regexp_replace(
-                pg_catalog.pg_get_expr(index_record.indpred, index_record.indrelid),
-                '[[:space:]()]',
-                '',
-                'g'
-              )) = required.normalized_predicate AS present
+              AND coalesce(lower(regexp_replace(
+                    pg_catalog.pg_get_expr(index_record.indpred, index_record.indrelid),
+                    '[[:space:]()]',
+                    '',
+                    'g'
+                  )), '') = required.normalized_predicate AS present
      FROM unnest($1::text[], $2::text[], $3::text[], $4::integer[], $5::text[])
        AS required(table_name, index_name, column_names, column_count, normalized_predicate)
      LEFT JOIN pg_catalog.pg_namespace AS namespace

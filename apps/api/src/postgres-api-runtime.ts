@@ -40,6 +40,7 @@ import {
 } from "./postgres-database.ts";
 import { PostgresTemporaryAssetStore } from "./postgres-temporary-asset-store.ts";
 import { PostgresVideoTaskProductionStore } from "./postgres-video-task-store.ts";
+import { PostgresVideoGenerationRequestStore } from "./postgres-video-generation-request-store.ts";
 import { PostgresWorkspaceAdminStore } from "./postgres-workspace-admin-store.ts";
 import { PostgresWorkspaceSessionStore } from "./postgres-workspace-session-store.ts";
 import { createS3MediaObjectStorage } from "./s3-media-object-storage.ts";
@@ -211,6 +212,7 @@ export async function createPostgresApiRuntime(
     const projectStore = new PostgresBatchProjectStore(database);
     const videoTaskStore = new PostgresVideoTaskProductionStore(database);
     const mediaArtifactStore = new PostgresMediaArtifactStore(database);
+    const videoGenerationRequestStore = new PostgresVideoGenerationRequestStore(database);
     const temporaryAssetStore = new PostgresTemporaryAssetStore(database);
     const runLockStore = new PostgresAccountRunLockStore(database);
     const companyAssets = new MockCompanyAssetProvider();
@@ -287,6 +289,7 @@ export async function createPostgresApiRuntime(
           projectStore,
           videoTaskStore,
           mediaArtifactStore,
+          videoGenerationRequestStore,
           mediaArtifacts,
           mediaObjectStorage,
           new HighCostOperationRuntime(accountRunLocks, accountBudgets),

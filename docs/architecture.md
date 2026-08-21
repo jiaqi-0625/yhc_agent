@@ -27,7 +27,7 @@ PostgreSQL 技术方案记录于 [ADR-001](./decisions/adr-001-postgresql-persis
 
 首期表使用关系型信封列保存 `tenant_id`、实体 ID、revision、规范化名称、幂等元数据与时间戳，版本化业务聚合存入 JSONB 并继续通过共享 schema 校验。数据库唯一约束、行锁和 revision 条件用于抵御跨实例竞争，但认证身份、权限、状态机、人工确认和预算规则仍由服务端领域层重新校验。
 
-八个在线 Store 使用 PostgreSQL：Workspace 管理状态、Workspace Session、账号额度、账号高消耗运行锁、批次项目/项目资产池、项目临时资产、视频任务和媒体产物元数据。媒体视频字节不进入 PostgreSQL；数据库只保存租户作用域、不可变对象定位符、媒体属性、内容哈希和创建幂等信息。项目资产的跨 Store 服务操作由根事务和 PostgreSQL advisory lock 跨实例串行，同一异步调用链的嵌套 Store 复用该连接并整体提交或回滚；需要新的跨聚合原子写入命令时仍须由显式协调器建立根事务。旧 `.data/works` 只可由 WS-307 显式迁移读取，不能用来恢复或推断 Workspace V2 业务状态；Agent transcript 继续是隔离的本地对话存储。
+九个在线 Store 使用 PostgreSQL：Workspace 管理状态、Workspace Session、账号额度、账号高消耗运行锁、批次项目/项目资产池、项目临时资产、视频任务、媒体产物元数据和视频生成请求审计。媒体视频字节不进入 PostgreSQL；数据库保存租户作用域、不可变对象定位符、媒体属性、内容哈希、创建幂等信息，以及实际发送给视频 Provider 的终态不可变 prompt/哈希、输入版本、Provider Job/状态、费用和最终媒体关联。项目资产的跨 Store 服务操作由根事务和 PostgreSQL advisory lock 跨实例串行，同一异步调用链的嵌套 Store 复用该连接并整体提交或回滚；需要新的跨聚合原子写入命令时仍须由显式协调器建立根事务。旧 `.data/works` 只可由 WS-307 显式迁移读取，不能用来恢复或推断 Workspace V2 业务状态；Agent transcript 继续是隔离的本地对话存储。
 
 媒体访问遵循 [ADR-002](./decisions/adr-002-private-media-object-storage.md)：对象存储 Bucket 保持私有，阶段聚合只引用稳定 `artifactId` 和内容元数据哈希。API 每次从 Workspace Session 重新解析租户、项目和任务权限，再按数据库中的服务端对象定位符生成短期签名 URL；公开 URL、签名查询参数、Bucket、对象键和云凭据不会进入业务聚合、Agent 上下文或对话记录。S3-compatible 是可替换的基础设施适配器，不是业务层对某个云厂商的依赖。
 
