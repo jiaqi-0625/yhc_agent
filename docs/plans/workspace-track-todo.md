@@ -172,6 +172,7 @@
 
 | 日期 | 更新人 | 说明 |
 |---|---|---|
+| 2026-08-21 | Codex | 反向同步功能 `3e0f0f6` 与验收记录 `4c900ce` 已非强制推送到 `origin/codex/db-assets-connect`；远端 `main` 未推送、未修改。 |
 | 2026-08-21 | Codex | 根据用户截图继续修复反向同步，功能提交 `3e0f0f6`：中央工作区人工确认改变任务 revision 后，客户端会并行重新授权/读取 Agent Session 与 transcript，核验仍属于当前账号、任务和 scope generation 后同时更新任务上下文与消息时间线；不额外触发模型调用、不自动确认或执行下一阶段。全仓 669 项中 668 通过、1 项真实 PostgreSQL 用例按门禁跳过、0 失败，类型检查与凭据扫描通过；Browser 已加载 `task-sync-ws210-v2`，页面日志零 warning/error。 |
 | 2026-08-21 | Codex | 工作区/对话区同步修复 `d3a27ce` 与验收账本 `056200d` 已非强制推送并核验到达 `origin/codex/db-assets-connect`；`main` 未推送、未改写。WS-210 继续进行真实视频付费验收与跨进程作业恢复收口。 |
 | 2026-08-21 | Codex | 修复统一命令完成后工作区仍需整页刷新的同步回归，功能提交 `d3a27ce`：阶段面板和资产匹配面板不再只比较项目/任务 ID，而会把任务 revision、当前阶段、阶段状态和任务状态纳入上下文键；同一任务被 Agent 命令更新后会自动失效旧视图并只重新拉取当前面板。全仓 668 项中 667 通过、1 项真实 PostgreSQL 用例按未配置 `TEST_DATABASE_URL` 的安全门跳过、0 失败；类型检查、凭据扫描通过，目标项目 Browser 深链加载正常且零 warning/error。仅推送 `codex/db-assets-connect`。 |

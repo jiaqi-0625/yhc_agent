@@ -210,6 +210,7 @@ WS-108 的共享工作流调整已通过最终全仓检查和独立复核，并�
 
 | 日期 | 更新人 | 说明 |
 |---|---|---|
+| 2026-08-21 | Codex | 人工确认后 Session/transcript 双刷新功能 `3e0f0f6` 与验收记录 `4c900ce` 已进入 `origin/codex/db-assets-connect`；未进入 `main`。 |
 | 2026-08-21 | Codex | 用户截图确认剩余问题是“中央人工确认 → 右侧对话区”的反向同步。`3e0f0f6` 将同一任务 revision 更新后的 Session TaskContext 与 transcript 一起刷新，并在账号/会话/任务/scope 漂移时丢弃旧响应；不会把人工确认伪装成 Agent 自批，也不会自动产生模型费用。聚焦测试 22/22、全仓 668 通过/1 跳过，Browser 页面资源与日志验收通过。 |
 | 2026-08-21 | Codex | 对话到工作区同步修复 `d3a27ce` 与验收记录 `056200d` 已进入 `origin/codex/db-assets-connect`，未进入 `main`。Agent 仍只能提出需人工点击的动作，执行结果以服务端任务聚合和中央工作区刷新结果为准。 |
 | 2026-08-21 | Codex | 功能提交 `d3a27ce` 修复 Agent 操作卡执行完成后对话区已显示 receipt、中央工作区却仍需整页刷新的同步回归。工作区面板现在识别同一任务的 revision/阶段/状态变化并自动重新拉取当前权威视图；未增加模型审批能力、自动执行或跨任务轮询。全仓 667 通过、1 项按门禁跳过，Browser 目标任务零 warning/error；仅集成到 `codex/db-assets-connect`，不进入 `main`。 |
