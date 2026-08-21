@@ -20,6 +20,11 @@ import {
   loadDatabaseMigrations,
   verifyDatabaseSchema,
 } from "../src/database-migrations.ts";
+import {
+  mediaArtifactObjectKey,
+  type MediaArtifactCreateCandidate,
+  type MediaArtifactCreationMetadata,
+} from "../src/media-artifact-store.ts";
 import { PostgresBatchProjectStore } from "../src/postgres-batch-project-store.ts";
 import {
   createPostgresDatabase,
@@ -28,6 +33,7 @@ import {
 } from "../src/postgres-database.ts";
 import { PostgresAccountBudgetStore } from "../src/postgres-account-budget-store.ts";
 import { PostgresAccountRunLockStore } from "../src/postgres-account-run-lock-store.ts";
+import { PostgresMediaArtifactStore } from "../src/postgres-media-artifact-store.ts";
 import {
   createPostgresApiRuntime,
   PostgresProjectAssetCoordinator,
@@ -226,6 +232,53 @@ function temporaryAsset(id = "temporary_asset_integration"): TemporaryAsset {
   };
 }
 
+function mediaArtifactCandidate(
+  id: string,
+  createdAt: string,
+): MediaArtifactCreateCandidate {
+  return {
+    artifact: {
+      schemaVersion: 1,
+      id,
+      tenantId: "tenant_integration",
+      batchProjectId: "project_integration",
+      videoTaskId: "task_integration",
+      stage: "video_preview",
+      role: "preview",
+      mediaType: "video/mp4",
+      byteSize: 12_345_678,
+      checksumSha256: "a".repeat(64),
+      width: 1920,
+      height: 1080,
+      durationMs: 30_000,
+      createdAt,
+      createdBy: "account_creator",
+    },
+    storage: {
+      providerId: "s3_primary",
+      bucketName: "firefly-private-test",
+      objectKey: mediaArtifactObjectKey({
+        tenantId: "tenant_integration",
+        batchProjectId: "project_integration",
+        videoTaskId: "task_integration",
+        artifactId: id,
+      }),
+      objectVersion: `object-${id}`,
+    },
+  };
+}
+
+function mediaArtifactCreation(
+  requestId: string,
+  payloadHashCharacter: string,
+): MediaArtifactCreationMetadata {
+  return {
+    actorAccountId: "account_creator",
+    requestId,
+    payloadHash: payloadHashCharacter.repeat(64),
+  };
+}
+
 function accountRunLock(id: string): AccountHighCostTaskRunLock {
   return {
     id,
@@ -271,6 +324,13 @@ test(
     const migrations = await loadDatabaseMigrations();
 
     await context.test("an empty database migrates, remigrates idempotently, and verifies", async () => {
+      assert.deepEqual(
+        migrations.map(({ version, name }) => ({ version, name })),
+        [
+          { version: 1, name: "workspace_v2" },
+          { version: 2, name: "media_artifacts" },
+        ],
+      );
       await assert.rejects(
         verifyDatabaseSchema(firstDatabase, migrations),
         /schema is not initialized/u,
@@ -452,6 +512,44 @@ test(
       await verifyDatabaseSchema(firstDatabase, migrations);
     });
 
+    await context.test("readiness rejects media table and object-locator constraint drift", async () => {
+      await firstDatabase.query(
+        "ALTER TABLE media_artifacts RENAME TO media_artifacts_drift_probe",
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /missing required table media_artifacts/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          "ALTER TABLE media_artifacts_drift_probe RENAME TO media_artifacts",
+          [],
+        );
+      }
+
+      await firstDatabase.query(
+        `ALTER TABLE media_artifacts
+           DROP CONSTRAINT media_artifacts_object_locator_key`,
+        [],
+      );
+      try {
+        await assert.rejects(
+          verifyDatabaseSchema(firstDatabase, migrations),
+          /media_artifacts_object_locator_key/u,
+        );
+      } finally {
+        await firstDatabase.query(
+          `ALTER TABLE media_artifacts
+             ADD CONSTRAINT media_artifacts_object_locator_key
+             UNIQUE (storage_provider_id, storage_bucket_name, storage_object_key)`,
+          [],
+        );
+      }
+      await verifyDatabaseSchema(firstDatabase, migrations);
+    });
+
     const firstProjects = new PostgresBatchProjectStore(firstDatabase);
     const secondProjects = new PostgresBatchProjectStore(secondDatabase);
     const firstTasks = new PostgresVideoTaskProductionStore(firstDatabase);
@@ -568,6 +666,201 @@ test(
           },
         ),
         hasPostgresSqlState("23503"),
+      );
+    });
+
+    await context.test("media artifacts persist, replay, isolate scope, and allocate concurrent versions", async () => {
+      const firstMedia = new PostgresMediaArtifactStore(firstDatabase);
+      const secondMedia = new PostgresMediaArtifactStore(secondDatabase);
+      const initialCandidate = mediaArtifactCandidate(
+        "media_preview_integration_1",
+        "2026-08-19T09:10:00.000Z",
+      );
+      const initialCreation = mediaArtifactCreation(
+        "request_media_preview_integration_1",
+        "b",
+      );
+
+      const created = await firstMedia.createWithResult(
+        initialCandidate,
+        initialCreation,
+      );
+      assert.equal(created.replayed, false);
+      assert.equal(created.record.artifact.version, 1);
+      assert.deepEqual(
+        await secondMedia.load(
+          "tenant_integration",
+          "project_integration",
+          "task_integration",
+          initialCandidate.artifact.id,
+        ),
+        created.record,
+      );
+
+      const replay = await secondMedia.createWithResult(
+        initialCandidate,
+        initialCreation,
+      );
+      assert.equal(replay.replayed, true);
+      assert.deepEqual(replay.record, created.record);
+      await assert.rejects(
+        secondMedia.createWithResult(initialCandidate, {
+          ...initialCreation,
+          payloadHash: "c".repeat(64),
+        }),
+        /conflicts with a different payload/u,
+      );
+
+      const concurrent = await Promise.all([
+        firstMedia.createWithResult(
+          mediaArtifactCandidate(
+            "media_preview_integration_2",
+            "2026-08-19T09:11:00.000Z",
+          ),
+          mediaArtifactCreation("request_media_preview_integration_2", "d"),
+        ),
+        secondMedia.createWithResult(
+          mediaArtifactCandidate(
+            "media_preview_integration_3",
+            "2026-08-19T09:12:00.000Z",
+          ),
+          mediaArtifactCreation("request_media_preview_integration_3", "e"),
+        ),
+      ]);
+      assert.deepEqual(
+        concurrent.map(({ record }) => record.artifact.version).sort((left, right) => left - right),
+        [2, 3],
+      );
+      assert.deepEqual(
+        (await secondMedia.list(
+          "tenant_integration",
+          "project_integration",
+          "task_integration",
+          { stage: "video_preview", role: "preview" },
+        )).map(({ artifact }) => artifact.version),
+        [1, 2, 3],
+      );
+      assert.equal(
+        await firstMedia.load(
+          "tenant_other",
+          "project_other_tenant",
+          "task_other_tenant",
+          initialCandidate.artifact.id,
+        ),
+        undefined,
+      );
+      assert.equal(
+        await firstMedia.load(
+          "tenant_integration",
+          "project_integration",
+          "task_missing",
+          initialCandidate.artifact.id,
+        ),
+        undefined,
+      );
+    });
+
+    await context.test("media artifact SQL constraints reject bad scope, locator reuse, envelope, and key", async () => {
+      const sourceArtifactId = "media_preview_integration_1";
+      await assert.rejects(
+        firstDatabase.query(
+          `INSERT INTO media_artifacts (
+             artifact_id, tenant_id, batch_project_id, video_task_id, stage, role,
+             artifact_version, media_type, byte_size, checksum_sha256, width,
+             height, duration_ms, created_at, created_by, storage_provider_id,
+             storage_bucket_name, storage_object_key, storage_object_version,
+             creation_actor_account_id, creation_request_id,
+             creation_payload_hash, artifact
+           )
+           SELECT $2::varchar(128), $3::varchar(128),
+                  batch_project_id, video_task_id, stage, role,
+                  artifact_version + 1000, media_type, byte_size, checksum_sha256,
+                  width, height, duration_ms, created_at, created_by,
+                  storage_provider_id, storage_bucket_name, $5::varchar(1024),
+                  storage_object_version, creation_actor_account_id,
+                  $4::varchar(128),
+                  creation_payload_hash,
+                  jsonb_set(
+                    jsonb_set(
+                      jsonb_set(
+                        artifact,
+                        '{id}',
+                        to_jsonb($2::varchar),
+                        false
+                      ),
+                      '{tenantId}', to_jsonb($3::varchar), false
+                    ),
+                    '{version}', to_jsonb(artifact_version + 1000), false
+                  )
+             FROM media_artifacts
+            WHERE artifact_id = $1`,
+          [
+            sourceArtifactId,
+            "media_bad_scope",
+            "tenant_missing",
+            "request_media_bad_scope",
+            "v1/tenants/tenant_missing/projects/project_integration/tasks/task_integration/artifacts/media_bad_scope/media",
+          ],
+        ),
+        hasPostgresSqlState("23503"),
+      );
+
+      await assert.rejects(
+        firstDatabase.query(
+          `INSERT INTO media_artifacts (
+             artifact_id, tenant_id, batch_project_id, video_task_id, stage, role,
+             artifact_version, media_type, byte_size, checksum_sha256, width,
+             height, duration_ms, created_at, created_by, storage_provider_id,
+             storage_bucket_name, storage_object_key, storage_object_version,
+             creation_actor_account_id, creation_request_id,
+             creation_payload_hash, artifact
+           )
+           SELECT artifact_id, tenant_id, batch_project_id, video_task_id,
+                  stage, role,
+                  artifact_version + 1001, media_type, byte_size, checksum_sha256,
+                  width, height, duration_ms, created_at, created_by,
+                  storage_provider_id, storage_bucket_name, storage_object_key,
+                  'different-object-version', creation_actor_account_id,
+                  $2::varchar(128),
+                  creation_payload_hash,
+                  jsonb_set(
+                    artifact,
+                    '{version}',
+                    to_jsonb(artifact_version + 1001),
+                    false
+                  )
+             FROM media_artifacts
+            WHERE artifact_id = $1`,
+          [
+            sourceArtifactId,
+            "request_media_reused_object_key",
+          ],
+        ),
+        hasPostgresSqlState("23505"),
+      );
+
+      await assert.rejects(
+        firstDatabase.query(
+          `UPDATE media_artifacts
+              SET artifact = jsonb_set(
+                artifact,
+                '{tenantId}',
+                to_jsonb('tenant_other'::text),
+                false
+              )
+            WHERE artifact_id = $1`,
+          [sourceArtifactId],
+        ),
+        hasPostgresSqlState("23514"),
+      );
+      await assert.rejects(
+        firstDatabase.query(
+          `UPDATE media_artifacts
+              SET storage_object_key = 'v1/tenants//invalid/media'
+            WHERE artifact_id = $1`,
+          [sourceArtifactId],
+        ),
+        hasPostgresSqlState("23514"),
       );
     });
 

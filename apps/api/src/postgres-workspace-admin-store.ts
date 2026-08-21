@@ -12,6 +12,10 @@ import {
   type WorkspaceAdminState,
   type WorkspaceAdminStore,
 } from "./workspace-admin-store.ts";
+import {
+  synchronizePostgresVehicleCatalog,
+  verifyPostgresVehicleCatalogProjection,
+} from "./postgres-vehicle-catalog-store.ts";
 
 interface WorkspaceAdminRow {
   tenant_id: string;
@@ -60,6 +64,7 @@ export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
       throw new Error("Persisted workspace administration state has an invalid tenant scope.");
     }
     validateWorkspaceAdminState(state, tenantId);
+    await verifyPostgresVehicleCatalogProjection(this.postgres, tenantId, state.vehicleVersions);
     return structuredClone(state);
   }
 
@@ -75,6 +80,7 @@ export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
         ? emptyWorkspaceAdminState(tenantId, {})
         : decodeState(row.state);
       validateWorkspaceAdminState(current, tenantId);
+      await verifyPostgresVehicleCatalogProjection(transaction, tenantId, current.vehicleVersions);
       return inspect(structuredClone(current));
     });
   }
@@ -96,6 +102,7 @@ export class PostgresWorkspaceAdminStore implements WorkspaceAdminStore {
       const next = await update(structuredClone(current));
       validateWorkspaceAdminState(next, tenantId);
       validateWorkspaceAdminTransition(current, next);
+      await synchronizePostgresVehicleCatalog(transaction, tenantId, next.vehicleVersions);
       const serialized = JSON.stringify(structuredClone(next));
       const write = row === undefined
         ? await transaction.query<{ revision: number | string }>(

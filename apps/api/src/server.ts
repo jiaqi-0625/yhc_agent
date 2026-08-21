@@ -41,6 +41,11 @@ import { parsePostgresDatabaseConfig, type PostgresDatabaseConfig } from "./data
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
 import type { GeneratedVideoArtifactImporter } from "./generated-video-artifact-importer.ts";
+import {
+  handleMediaArtifactRoute,
+  matchMediaArtifactAccessPath,
+} from "./media-artifact-routes.ts";
+import type { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
 import { sendMockCompanyAssetMedia } from "./mock-company-asset-media.ts";
 import {
   createPostgresApiRuntime,
@@ -162,6 +167,7 @@ async function handleRequest(
   accountRunLocks: AccountRunLockRuntime | undefined,
   videoGenerations: VideoGenerationRuntime | undefined,
   videoArtifacts: GeneratedVideoArtifactImporter | undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendMockCompanyAssetMedia(response, url.pathname))) return;
@@ -292,6 +298,20 @@ async function handleRequest(
       workspaceSessions,
       videoArtifacts,
     )
+  ) return;
+  if (
+    mediaArtifacts === undefined
+    && matchMediaArtifactAccessPath(url.pathname) !== undefined
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-MEDIA-ARTIFACT-RUNTIME_NOT_CONFIGURED",
+      "Media artifact access is not configured for this workspace runtime.",
+      503,
+    );
+  }
+  if (
+    mediaArtifacts !== undefined
+    && await handleMediaArtifactRoute(request, response, url, mediaArtifacts, workspaceSessions)
   ) return;
   if (
     videoTaskStages === undefined &&
@@ -454,6 +474,7 @@ export function createApiServer(
   environment: ApiEnvironment = process.env,
   videoGenerations: VideoGenerationRuntime | undefined = undefined,
   videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -477,7 +498,8 @@ export function createApiServer(
       projectLibrary !== undefined ||
       accountRunLocks !== undefined ||
       videoGenerations !== undefined ||
-      videoArtifacts !== undefined
+      videoArtifacts !== undefined ||
+      mediaArtifacts !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -761,6 +783,7 @@ export function createApiServer(
       activeAccountRunLocks,
       videoGenerations,
       videoArtifacts,
+      mediaArtifacts,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -791,6 +814,7 @@ export async function startApiServer(
   environment: ApiEnvironment = process.env,
   videoGenerations: VideoGenerationRuntime | undefined = undefined,
   videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
+  mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -818,6 +842,7 @@ export async function startApiServer(
       environment,
       videoGenerations,
       videoArtifacts,
+      mediaArtifacts,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);

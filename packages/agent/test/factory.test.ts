@@ -10,6 +10,13 @@ import { InMemoryVehicleService } from "@firefly/tools";
 import { ADVERTISING_AGENT_SYSTEM_PROMPT, createAdvertisingAgent, redactSensitive } from "../src/index.ts";
 import { MOCK_TASK_CONTEXT } from "./task-context-fixture.ts";
 
+test("the Agent proposes initial strategy generation before a vehicle snapshot exists", () => {
+  assert.match(
+    ADVERTISING_AGENT_SYSTEM_PROMPT,
+    /没有 vehicleSnapshotId[\s\S]*先提出策略生成操作卡片/u,
+  );
+});
+
 const model = {
   id: "test-model",
   name: "Test model",

@@ -1,6 +1,7 @@
 import type { VideoTask, VideoTaskStage, VideoTaskStageVersionsResponse } from "@firefly/schemas";
 
 export function stagePosition(task: Readonly<VideoTask>, stage: VideoTaskStage): "complete" | "current" | "locked";
+export function workspaceStageTaskStateKey(task: Readonly<Partial<VideoTask>> | null | undefined): string;
 export function rollbackImpact(stage: VideoTaskStage): string[];
 export function expectedVideoShotCount(durationSeconds: number): number;
 export function remainingVideoShotIndices(

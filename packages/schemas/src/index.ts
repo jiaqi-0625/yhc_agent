@@ -137,6 +137,7 @@ export const VehicleSchema = Type.Object(
     series: Type.String({ minLength: 1, maxLength: 120 }),
     modelYear: Type.Integer({ minimum: 2000, maximum: 2100 }),
     trim: Type.String({ minLength: 1, maxLength: 120 }),
+    factsText: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
     parameters: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
     fixedClaims: Type.Array(ClaimSchema),
     optionalClaims: Type.Array(ClaimSchema),
@@ -175,6 +176,7 @@ const VehicleFactFields = {
   series: Type.String({ minLength: 1, maxLength: 120 }),
   modelYear: Type.Integer({ minimum: 2000, maximum: 2100 }),
   trim: Type.String({ minLength: 1, maxLength: 120 }),
+  factsText: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
   parameters: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
   fixedClaims: Type.Array(ClaimSchema),
   optionalClaims: Type.Array(ClaimSchema),
@@ -701,6 +703,96 @@ export const TemporaryAssetSchema = Type.Object(
 );
 export type TemporaryAsset = Static<typeof TemporaryAssetSchema>;
 
+export const MediaArtifactStageSchema = Type.Union([
+  Type.Literal("video_preview"),
+  Type.Literal("delivery"),
+]);
+export type MediaArtifactStage = Static<typeof MediaArtifactStageSchema>;
+
+export const MediaArtifactRoleSchema = Type.Union([
+  Type.Literal("preview"),
+  Type.Literal("delivery"),
+]);
+export type MediaArtifactRole = Static<typeof MediaArtifactRoleSchema>;
+
+const MediaArtifactBaseFields = {
+  schemaVersion: Type.Literal(1),
+  id: Identifier,
+  tenantId: Identifier,
+  batchProjectId: Identifier,
+  videoTaskId: Identifier,
+  version: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  mediaType: Type.Union([
+    Type.Literal("video/mp4"),
+    Type.Literal("video/webm"),
+  ]),
+  byteSize: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  checksumSha256: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  width: Type.Integer({ minimum: 1, maximum: 32768 }),
+  height: Type.Integer({ minimum: 1, maximum: 32768 }),
+  durationMs: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  createdAt: IsoDateTime,
+  createdBy: Identifier,
+};
+
+/** Public, immutable media metadata. Object-store locators and URLs are never exposed here. */
+export const MediaArtifactSchema = Type.Union([
+  Type.Object(
+    {
+      ...MediaArtifactBaseFields,
+      stage: Type.Literal("video_preview"),
+      role: Type.Literal("preview"),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...MediaArtifactBaseFields,
+      stage: Type.Literal("delivery"),
+      role: Type.Literal("delivery"),
+    },
+    { additionalProperties: false },
+  ),
+]);
+export type MediaArtifact = Static<typeof MediaArtifactSchema>;
+
+export const MediaArtifactAccessPurposeSchema = Type.Union([
+  Type.Literal("playback"),
+  Type.Literal("download"),
+]);
+export type MediaArtifactAccessPurpose = Static<typeof MediaArtifactAccessPurposeSchema>;
+
+export const CreateMediaArtifactAccessRequestSchema = Type.Object(
+  {
+    purpose: MediaArtifactAccessPurposeSchema,
+  },
+  { additionalProperties: false },
+);
+export type CreateMediaArtifactAccessRequest = Static<
+  typeof CreateMediaArtifactAccessRequestSchema
+>;
+
+export const MediaArtifactAccessResponseSchema = Type.Object(
+  {
+    artifact: MediaArtifactSchema,
+    access: Type.Object(
+      {
+        method: Type.Literal("GET"),
+        url: Type.String({
+          minLength: 1,
+          maxLength: 8192,
+          format: "uri",
+          pattern: "^https?://",
+        }),
+        expiresAt: IsoDateTime,
+      },
+      { additionalProperties: false },
+    ),
+  },
+  { additionalProperties: false },
+);
+export type MediaArtifactAccessResponse = Static<typeof MediaArtifactAccessResponseSchema>;
+
 export const StageArtifactContentReferenceSchema = Type.Object(
   {
     artifactId: Identifier,
@@ -1073,6 +1165,7 @@ export const VehicleSnapshotSchema = Type.Object(
     modelYear: Type.Integer({ minimum: 2000, maximum: 2100 }),
     trim: NonEmptyString,
     color: Type.Optional(NonEmptyString),
+    factsText: Type.Optional(Type.String({ minLength: 1, maxLength: 100_000 })),
     parameters: Type.Record(Type.String(), Type.Union([Type.String(), Type.Number(), Type.Boolean()])),
     fixedClaims: Type.Array(ClaimSchema),
     optionalClaims: Type.Array(ClaimSchema),

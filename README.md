@@ -13,19 +13,22 @@ Local-first Agent framework built on Pi Agent Core for the automotive informatio
 - Persistent local conversations, transcript recovery, reset, cancellation, and normalized lifecycle events.
 - Interactive CLI, local browser acceptance page, and HTTP session endpoints.
 - Persistent business works stored separately from Agent transcripts.
+- PostgreSQL-backed Workspace V2 authority with immutable media-artifact metadata.
+- Optional private S3-compatible media storage with checksum verification and short-lived authenticated playback/download URLs.
 - A built-in fictional golden vehicle sample with sourced fixed/extended claims and prohibited expressions.
 - Versioned strategy generation, validation, human editing/locking, regeneration, approval request, rejection, and approval.
 - Agent tools propose strategy generation or approval through explicit action cards; only read-only validation runs directly, and the model has no approval-decision tool.
 - Restricted vehicle snapshot and claim validation tools remain available as a separate optional business assembly.
 - Unit and integration tests that require no model credentials.
 
-The default chat runtime still has no domain tools and does not call a paid model. The local acceptance page exercises the strategy vertical through bounded business APIs and a deterministic strategy generator. It does not publish ads, mutate an official vehicle catalog, spend media budget, or perform image/video generation.
+The default video backend remains disabled and never spends credits. When explicitly configured, the Workspace video-preview action uses the server-side Ark adapter, account budget, single-run lock, MP4 validation, private object storage, and authenticated playback flow. It does not publish ads or manage media buying.
 
 ## Requirements
 
 - Node.js 22.19 or newer.
 - npm 10 or newer.
-- PostgreSQL 18 only when exercising the retained PostgreSQL adapter (CI uses PostgreSQL 18.4).
+- PostgreSQL 18 for the Workspace V2 authority path (CI uses PostgreSQL 18.4).
+- A private S3-compatible bucket only when real media-object storage is enabled.
 
 ## Install
 
@@ -74,6 +77,8 @@ npm run dev:api
 
 PostgreSQL is the Workspace V2 production persistence path. For local verification, provide a disposable database, apply migrations explicitly, and bootstrap persisted administration data; ordinary reads do not inject demo brands, vehicles or grants.
 
+Workspace V2 also stores immutable media-artifact metadata in PostgreSQL; video bytes remain in private object storage and never enter the database.
+
 Create an ignored `.env`, set a private `POSTGRES_PASSWORD`, and set `DATABASE_URL` to the matching connection URI. Docker exposes the local PostgreSQL 18.4 service only on loopback:
 
 ```powershell
@@ -87,6 +92,43 @@ npm run db:status
 PostgreSQL startup never applies DDL. Run `npm run db:migrate` as an explicit deployment step; the adapter fails closed when the database cannot be reached or its required schema is incompatible. Missing administration bootstrap data remains an empty, unauthorized business state instead of being silently filled from process constants. `NODE_ENV=production` requires an explicit `PERSISTENCE_BACKEND=postgres`, completed migrations, identity bootstrap and release validation. `GET /health` is liveness-only. With PostgreSQL selected, `GET /ready` verifies the database and schema without returning connection details.
 
 Production identity-provider wiring is separate from database persistence. Development-account session issuance remains disabled under `NODE_ENV=production`. V2 project/task selection and `TaskContext` integration are verified independently; they must not recover business state by reading `.data/works`.
+
+### Configure private media object storage
+
+Media files are stored as private objects, while PostgreSQL stores their tenant/task scope, immutable object locator, version, byte checksum, dimensions, duration, and audit metadata. The application never stores a presigned URL: an authenticated request creates a fresh short-lived playback or download URL after rechecking workspace authorization.
+
+Object storage is disabled by default. To enable the S3-compatible adapter, set the following in the ignored `.env`:
+
+```dotenv
+OBJECT_STORAGE_BACKEND=s3
+OBJECT_STORAGE_S3_REGION=your-region
+OBJECT_STORAGE_S3_BUCKET=your-private-bucket
+OBJECT_STORAGE_SIGNED_GET_TTL_SECONDS=300
+```
+
+For AWS S3, leave `OBJECT_STORAGE_S3_ENDPOINT` empty and prefer the server workload identity/instance role. For another S3-compatible private service, set its HTTPS origin in `OBJECT_STORAGE_S3_ENDPOINT`; `OBJECT_STORAGE_S3_FORCE_PATH_STYLE=true` is available for providers that require path-style addressing. When a provider requires static access-key variables, inject them from the deployment secret store and keep them outside Git, logs, and ordinary configuration files. Production custom endpoints must use HTTPS; development HTTP endpoints are limited to loopback.
+
+Enabling the adapter makes startup and `GET /ready` verify both PostgreSQL and the private bucket. Uploads are create-only and SHA-256 checked. The authenticated access endpoint is:
+
+- `POST /v1/workspace/batch-projects/{projectId}/video-tasks/{videoTaskId}/media-artifacts/{artifactId}/access` with `{ "purpose": "playback" }` or `{ "purpose": "download" }`
+
+The response contains public media metadata plus `access.method`, `access.url`, and `access.expiresAt`; it never exposes the bucket, object key, object version, or cloud credentials.
+
+For a local private bucket, `compose.postgres.yml` includes MinIO and a one-shot private-bucket initializer. Generate unique `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` values only in the ignored `.env`, then point the S3 adapter at `http://127.0.0.1:9000` with path-style addressing. Local MinIO is for acceptance runs; Ark can return its output to the API, which downloads and validates the MP4 before uploading it to this private bucket.
+
+### Configure real Ark video generation
+
+Real generation is fail-closed until the following server-only settings exist in the ignored `.env`:
+
+```dotenv
+VIDEO_GENERATION_BACKEND=volcengine_ark
+ARK_VIDEO_API_KEY=
+ARK_VIDEO_MODEL_ID=
+ARK_VIDEO_RESOLUTION=720p
+ARK_VIDEO_ESTIMATED_COST_CNY_MINOR=1000
+```
+
+`ARK_VIDEO_MODEL_ID` is the actual Ark Model ID or Endpoint ID available to the account. The estimate value is the server budget reservation/cap shown before submission; it must be confirmed against the account's current Ark price. The Workspace submits only after an explicit user click, polls the asynchronous Ark task while holding the account run lock and reservation, downloads the completed output, derives duration and dimensions from MP4 bytes, hashes and uploads it, and returns a persisted `media_artifact` reference for human confirmation. Provider download URLs and credentials never enter public task state or Agent context.
 
 Interactive CLI:
 

@@ -1,6 +1,7 @@
 import type { VideoTaskProductionRecord } from "@firefly/domain";
 
 import type { PostgresQueryable, PostgresTransactionProvider } from "./postgres-contract.ts";
+import { persistPostgresVehicleTaskSnapshot } from "./postgres-vehicle-catalog-store.ts";
 import {
   assertVideoTaskId as assertVideoTaskStoreId,
   assertIdentifier as assertVideoTaskStoreIdentifier,
@@ -205,6 +206,7 @@ export class PostgresVideoTaskProductionStore implements VideoTaskCreationStore 
       [record.videoTask.id, revision, normalizeVideoTaskName(record.videoTask.name), JSON.stringify(record)],
     );
     if (result.rowCount !== 1) throw new Error("Video task transaction lost its revision compare-and-swap.");
+    await this.persistVehicleSnapshots(transaction, record);
   }
 
   private async insertWithoutCreation(transaction: PostgresQueryable, record: VideoTaskProductionRecord): Promise<void> {
@@ -215,5 +217,19 @@ export class PostgresVideoTaskProductionStore implements VideoTaskCreationStore 
        ) VALUES ($1, $2, $3, 1, $4, NULL, NULL, NULL, $5::jsonb)`,
       [record.videoTask.id, record.videoTask.tenantId, record.videoTask.batchProjectId, normalizeVideoTaskName(record.videoTask.name), JSON.stringify(record)],
     );
+    await this.persistVehicleSnapshots(transaction, record);
+  }
+
+  private async persistVehicleSnapshots(
+    transaction: PostgresQueryable,
+    record: Readonly<VideoTaskProductionRecord>,
+  ): Promise<void> {
+    for (const snapshot of record.taskVehicleSnapshots) {
+      await persistPostgresVehicleTaskSnapshot(transaction, snapshot, {
+        tenantId: record.videoTask.tenantId,
+        batchProjectId: record.videoTask.batchProjectId,
+        videoTaskId: record.videoTask.id,
+      });
+    }
   }
 }

@@ -116,6 +116,41 @@ export const workspaceApi = {
       jsonOptions("POST", input),
     );
   },
+  simulateStage: function (projectId, videoTaskId, stage) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/" + encodeURIComponent(stage) + "/development-simulation",
+      { method: "POST" },
+    );
+  },
+  estimateVideoProduction: function (projectId, videoTaskId) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-production/estimate",
+    );
+  },
+  getVideoProduction: function (projectId, videoTaskId) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-production",
+    );
+  },
+  startVideoProduction: function (projectId, videoTaskId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-production",
+      jsonOptions("POST", input),
+    );
+  },
+  getMediaArtifactAccess: function (projectId, videoTaskId, artifactId, purpose = "playback") {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/media-artifacts/" + encodeURIComponent(artifactId) + "/access",
+      jsonOptions("POST", { purpose: purpose }),
+    );
+  },
   rollbackStage: function (projectId, videoTaskId, stage, input) {
     return api(
       "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
