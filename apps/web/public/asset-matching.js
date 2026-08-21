@@ -13,6 +13,17 @@ export function selectionWithManualPriority(recommendations, manualSelection) {
     : new Set(manualSelection);
 }
 
+export function assetMatchingTaskContextKey(projectId, task, visible) {
+  const taskState = visible && task ? [
+    task.id || "",
+    Number.isSafeInteger(task.revision) ? task.revision : "",
+    task.status || "",
+    task.currentStage || "",
+    task.stageStatus || "",
+  ].join(":") : "";
+  return [projectId || "", taskState].join(":");
+}
+
 function createConfirmationRequestId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === "function") {
     return "asset_confirmation_" + globalThis.crypto.randomUUID().replaceAll("-", "");
@@ -381,7 +392,7 @@ export function createAssetMatchingPanel(options) {
   return {
     setContext(nextProjectId, task, visible) {
       const nextTaskId = visible ? task?.id || null : null;
-      const nextKey = [nextProjectId || "", nextTaskId || ""].join(":");
+      const nextKey = assetMatchingTaskContextKey(nextProjectId, task, visible);
       projectId = nextProjectId || null;
       taskId = nextTaskId;
       if (nextKey === contextKey) return;

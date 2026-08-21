@@ -24,6 +24,17 @@ const stageModules = Object.freeze({
   delivery: ["delivery"],
 });
 
+export function workspaceStageTaskStateKey(task) {
+  if (!task || typeof task !== "object") return "";
+  return [
+    task.id || "",
+    Number.isSafeInteger(task.revision) ? task.revision : "",
+    task.status || "",
+    task.currentStage || "",
+    task.stageStatus || "",
+  ].join(":");
+}
+
 export function stagePosition(task, stage) {
   if (!task || !stageOrder.includes(stage)) return "locked";
   const current = stageOrder.indexOf(task.currentStage);
@@ -317,6 +328,7 @@ export function createWorkspaceStagesPanel(options) {
   let simulatedArtifact = null;
   let productionState = null;
   let contextAccountId = null;
+  let contextTaskStateKey = "";
   let contextGeneration = 0;
   let busy = false;
   let sequence = 0;
@@ -361,6 +373,7 @@ export function createWorkspaceStagesPanel(options) {
     task = null;
     visibleModule = null;
     contextAccountId = null;
+    contextTaskStateKey = "";
     setPanelBusy(false);
     clearCachedState();
     clearRoots();
@@ -696,11 +709,13 @@ export function createWorkspaceStagesPanel(options) {
       const isVisible = Boolean(stageModules[activeModule]);
       const nextAccountId = options.getCurrentAccountId?.() || null;
       const nextVisibleModule = isVisible ? activeModule : null;
+      const nextTaskStateKey = workspaceStageTaskStateKey(nextTask);
       const accountChanged = nextAccountId !== contextAccountId;
       const resourceChanged = accountChanged
         || (nextProjectId || null) !== projectId
         || (nextTask?.id || null) !== (task?.id || null);
-      const contextChanged = resourceChanged || nextVisibleModule !== visibleModule;
+      const taskStateChanged = nextTaskStateKey !== contextTaskStateKey;
+      const contextChanged = resourceChanged || taskStateChanged || nextVisibleModule !== visibleModule;
       if (contextChanged) {
         sequence += 1;
         clearCachedState();
@@ -715,6 +730,7 @@ export function createWorkspaceStagesPanel(options) {
         clearRoots();
       }
       contextAccountId = nextAccountId;
+      contextTaskStateKey = nextTaskStateKey;
       projectId = nextProjectId || null;
       project = nextProject || null;
       task = nextTask || null;

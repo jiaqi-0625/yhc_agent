@@ -5,11 +5,30 @@ import {
   confirmationAvailability,
   createWorkspaceStagesPanel,
   rollbackImpact,
+  workspaceStageTaskStateKey,
   stagePosition,
   workspaceBudgetPresentation,
   workspaceProductionErrorText,
   workspaceRunLockPresentation,
 } from "../public/workspace-stages.js";
+
+test("workspace stage context changes when an Agent command advances task state", () => {
+  const before = workspaceStageTaskStateKey({
+    id: "task_sync",
+    revision: 2,
+    status: "active",
+    currentStage: "strategy",
+    stageStatus: "in_progress",
+  });
+  const after = workspaceStageTaskStateKey({
+    id: "task_sync",
+    revision: 3,
+    status: "active",
+    currentStage: "strategy",
+    stageStatus: "awaiting_confirmation",
+  });
+  assert.notEqual(after, before);
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -213,6 +232,7 @@ test("account changes invalidate in-flight production status and reload the same
   const confirmationCalls: string[] = [];
   const updatedTasks: string[] = [];
   const busyChanges: boolean[] = [];
+  let stageVersionCalls = 0;
   const budgetFor = (selectedAccountId: string, availableAmountMinor: number) => ({
     budget: {
       accountId: selectedAccountId,
@@ -228,6 +248,7 @@ test("account changes invalidate in-flight production status and reload the same
   });
   const api = {
     getStageVersions: async (_projectId: string, videoTaskId: string) => {
+      stageVersionCalls += 1;
       const selectedTask = videoTaskId === otherVideoTask.id ? otherVideoTask : videoTask;
       const versionId = videoTaskId + "_delivery_v1";
       return {
@@ -270,6 +291,15 @@ test("account changes invalidate in-flight production status and reload the same
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.match(roots.delivery.innerHTML, /¥222\.00/u);
   assert.match(roots.delivery.innerHTML, /运行槽可用/u);
+  const callsBeforeTaskUpdate = stageVersionCalls;
+  panel.setContext(
+    "project_1",
+    { project: { id: "project_1" } },
+    { ...videoTask, revision: videoTask.revision + 1, stageStatus: "confirmed" } as never,
+    "delivery",
+  );
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(stageVersionCalls, callsBeforeTaskUpdate + 6);
 
   oldBudget.resolve(budgetFor("account_creator_a", 11_100));
   oldRunLock.resolve({

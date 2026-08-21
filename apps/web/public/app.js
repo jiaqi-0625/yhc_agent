@@ -1,5 +1,5 @@
 import { agentApi } from "./agent-api.js?build=ws501-v1";
-import { createAssetMatchingPanel } from "./asset-matching.js";
+import { createAssetMatchingPanel } from "./asset-matching.js?build=task-sync-ws210-v1";
 import {
   agentActionAvailability,
   agentActionFailurePresentation,
@@ -26,7 +26,7 @@ import {
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-task-sync-ws210-v1";
 import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,

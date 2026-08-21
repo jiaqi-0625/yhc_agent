@@ -3,10 +3,30 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  assetMatchingTaskContextKey,
   assetReferenceIdentity,
   createAssetMatchingPanel,
   selectionWithManualPriority,
 } from "../public/asset-matching.js";
+
+test("asset matching context changes when the selected task revision changes", () => {
+  const taskBefore = {
+    id: "task_assets",
+    revision: 4,
+    status: "active",
+    currentStage: "asset_matching",
+    stageStatus: "in_progress",
+  };
+  const taskAfter = { ...taskBefore, revision: 5, stageStatus: "awaiting_confirmation" };
+  assert.notEqual(
+    assetMatchingTaskContextKey("project_assets", taskBefore, true),
+    assetMatchingTaskContextKey("project_assets", taskAfter, true),
+  );
+  assert.equal(
+    assetMatchingTaskContextKey("project_assets", taskBefore, false),
+    assetMatchingTaskContextKey("project_assets", taskAfter, false),
+  );
+});
 
 const vehicle = {
   assetId: "asset_vehicle",
@@ -334,10 +354,28 @@ test("confirmation locks an editable selection and retries a stable person/scene
   const panel = createAssetMatchingPanel({ elements, api });
   panel.setContext(
     "project_asset_matching",
-    { id: "task_asset_matching" },
+    {
+      id: "task_asset_matching",
+      revision: 1,
+      status: "active",
+      currentStage: "asset_matching",
+      stageStatus: "in_progress",
+    },
     true,
   );
   await waitFor(() => getCalls === 1, "initial asset-matching view");
+  panel.setContext(
+    "project_asset_matching",
+    {
+      id: "task_asset_matching",
+      revision: 2,
+      status: "active",
+      currentStage: "asset_matching",
+      stageStatus: "awaiting_confirmation",
+    },
+    true,
+  );
+  await waitFor(() => getCalls === 2, "updated task state to refresh asset matching");
   await waitFor(
     () => elements.grid.children.some((card) =>
       card.children[0]?.children.some((child) => child.tagName === "IMG") ?? false),
