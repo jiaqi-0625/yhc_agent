@@ -24,8 +24,8 @@ test("bundled FFmpeg composes generated shots into one playable MP4", async (con
   await mkdir(scope, { recursive: true });
   const shot1 = join(scope, "shot_1.mp4");
   const shot2 = join(scope, "shot_2.mp4");
-  await run(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:d=2", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", shot1]);
-  await run(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:d=2", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-y", shot2]);
+  await run(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=red:s=160x90:d=2", "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", shot1]);
+  await run(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=blue:s=160x90:d=2", "-f", "lavfi", "-i", "sine=frequency=660:duration=2", "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-y", shot2]);
   const artifact = (storageKey: string, artifactId: string): GeneratedVideoArtifact => ({
     artifactId, storageKey, mediaType: "video/mp4", width: 160, height: 90,
     durationSeconds: 1, checksumSha256: "a".repeat(64),
@@ -51,6 +51,7 @@ test("bundled FFmpeg composes generated shots into one playable MP4", async (con
   const bytes = await readFile(importer.resolveStoragePath(result.storageKey));
   assert.ok(bytes.length > 0);
   assert.equal(bytes.subarray(4, 8).toString("ascii"), "ftyp");
+  assert.ok(bytes.includes(Buffer.from("soun", "ascii")), "composed MP4 must retain an audio track");
   assert.equal(result.durationSeconds, 2);
   assert.match(result.checksumSha256, /^[a-f0-9]{64}$/u);
 });

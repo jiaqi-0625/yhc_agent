@@ -12,6 +12,24 @@ const ffmpegPath = createRequire(import.meta.url)("ffmpeg-static") as string | n
 
 const maximumVideoBytes = 200 * 1024 * 1024;
 
+function isMp4(bytes: Buffer): boolean {
+  return bytes.length >= 12 && bytes.toString("ascii", 4, 8) === "ftyp";
+}
+
+function hasAudioTrack(bytes: Buffer): boolean {
+  const handlerAtom = Buffer.from("hdlr", "ascii");
+  let offset = 0;
+  while ((offset = bytes.indexOf(handlerAtom, offset)) >= 0) {
+    const handlerTypeOffset = offset + 12;
+    if (
+      handlerTypeOffset + 4 <= bytes.length &&
+      bytes.toString("ascii", handlerTypeOffset, handlerTypeOffset + 4) === "soun"
+    ) return true;
+    offset += handlerAtom.length;
+  }
+  return false;
+}
+
 function safeSegment(value: string): string {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(value)) throw new Error("Generated video scope contains an invalid identifier.");
   return value;
@@ -50,7 +68,12 @@ export class GeneratedVideoArtifactImporter implements SeedanceArtifactImporter 
       throw new Error("Generated video exceeds the maximum allowed size.");
     }
     const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length === 0 || bytes.length > maximumVideoBytes) throw new Error("Generated video has an invalid size.");
+    if (bytes.length === 0 || bytes.length > maximumVideoBytes || !isMp4(bytes)) {
+      throw new Error("Generated video is not a valid bounded MP4 file.");
+    }
+    if (!hasAudioTrack(bytes)) {
+      throw new Error("Seedance returned an MP4 without an audio track; the silent result was rejected.");
+    }
 
     const task = await this.tasks.load(request.scope.videoTaskId);
     const project = await this.projects.load(request.scope.tenantId, request.scope.batchProjectId);
@@ -115,15 +138,19 @@ export class GeneratedVideoArtifactImporter implements SeedanceArtifactImporter 
     await mkdir(resolve(outputPath, ".."), { recursive: true });
     const sourcePaths = input.sources.map((source) => this.resolveStoragePath(source.storageKey));
     const inputArgs = sourcePaths.flatMap((path) => ["-i", path]);
-    const trimmedInputs = input.sourceDurationsSeconds.map(
-      (duration, index) => `[${index}:v]trim=duration=${duration},setpts=PTS-STARTPTS[v${index}]`,
+    const trimmedInputs = input.sourceDurationsSeconds.flatMap(
+      (duration, index) => [
+        `[${index}:v]trim=duration=${duration},setpts=PTS-STARTPTS[v${index}]`,
+        `[${index}:a]atrim=duration=${duration},asetpts=PTS-STARTPTS[a${index}]`,
+      ],
     );
-    const concatInputs = input.sources.map((_source, index) => `[v${index}]`).join("");
-    const filter = `${trimmedInputs.join(";")};${concatInputs}concat=n=${input.sources.length}:v=1:a=0[v]`;
+    const concatInputs = input.sources.map((_source, index) => `[v${index}][a${index}]`).join("");
+    const filter = `${trimmedInputs.join(";")};${concatInputs}concat=n=${input.sources.length}:v=1:a=1[v][a]`;
     await new Promise<void>((resolveRun, rejectRun) => {
       const process = spawn(ffmpegPath, [
         "-hide_banner", "-loglevel", "error", ...inputArgs,
-        "-filter_complex", filter, "-map", "[v]", "-an", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+        "-filter_complex", filter, "-map", "[v]", "-map", "[a]",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart", "-y", outputPath,
       ], { windowsHide: true });
       let details = "";
@@ -134,7 +161,9 @@ export class GeneratedVideoArtifactImporter implements SeedanceArtifactImporter 
         : rejectRun(new Error(`Video composition failed${details ? `: ${details.trim()}` : "."}`)));
     });
     const bytes = await readFile(outputPath);
-    if (bytes.length === 0 || bytes.length > maximumVideoBytes) throw new Error("Composed video has an invalid size.");
+    if (bytes.length === 0 || bytes.length > maximumVideoBytes || !isMp4(bytes) || !hasAudioTrack(bytes)) {
+      throw new Error("Composed video is invalid or has no audio track.");
+    }
     const checksumSha256 = createHash("sha256").update(bytes).digest("hex");
     const [width, height] = dimensions(input.aspectRatio);
     return {

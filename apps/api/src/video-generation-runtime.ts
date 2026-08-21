@@ -265,6 +265,7 @@ export class VideoGenerationRuntime {
         `本镜头任务：${plannedShot.purpose}。不得混入其他时间段的卖点或画面。`,
         `画幅：${project.aspectRatio}，成片取本镜头前 ${plannedShot.durationSeconds} 秒。`,
         "保持车型外观一致，写实商业摄影，画面稳定，不添加无法核验的车型参数文字，不添加水印。",
+        "必须生成完整音频：轻快克制的商业背景音乐、与画面同步的环境音和转场音效，以及自然清晰的中文女声旁白；本镜头不得静音。",
       ].join("\n");
       const providerJob = await this.provider.createGeneration({
         idempotencyKey,
@@ -272,7 +273,7 @@ export class VideoGenerationRuntime {
         assetSnapshotId: task.videoTask.assetSnapshotId,
         storyboardArtifactVersionId: storyboard.id,
         prompt,
-        generateAudio: false,
+        generateAudio: true,
         aspectRatio: project.aspectRatio,
         durationSeconds: providerDurationSeconds,
         watermark: false,

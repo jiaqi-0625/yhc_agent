@@ -97,9 +97,11 @@ test("real video generation requires a human start then persists and polls the p
     async createGeneration(input) {
       createCalls += 1;
       assert.equal(input.durationSeconds, 4);
+      assert.equal(input.generateAudio, true);
       assert.match(input.prompt, /0–4 秒/u);
       assert.match(input.prompt, /后排空间展示/u);
       assert.match(input.prompt, /已选主播正面出镜口播本段旁白/u);
+      assert.match(input.prompt, /中文女声旁白/u);
       return { providerJobId: "provider_job_1", idempotencyKey: input.idempotencyKey, model: SEEDANCE_2_5_MODEL, status: "queued", progressPercent: 0, createdAt: "2026-08-21T01:00:00.000Z", updatedAt: "2026-08-21T01:00:00.000Z" };
     },
     async getGeneration(providerJobId) {
