@@ -38,9 +38,17 @@ function deferred<T>() {
 
 function fakeRoot() {
   let confirmListener: (() => Promise<void>) | null = null;
+  let simulateListener: (() => Promise<void>) | null = null;
   return {
     innerHTML: "",
     querySelector(selector: string) {
+      if (selector === "[data-stage-simulate]") {
+        return {
+          addEventListener(_event: string, listener: () => Promise<void>) {
+            simulateListener = listener;
+          },
+        };
+      }
       if (selector !== "[data-stage-confirm]") return null;
       return {
         addEventListener(_event: string, listener: () => Promise<void>) {
@@ -53,8 +61,69 @@ function fakeRoot() {
       assert.ok(confirmListener, "confirmation listener must be rendered");
       return confirmListener();
     },
+    clickSimulate() {
+      assert.ok(simulateListener, "simulation listener must be rendered");
+      return simulateListener();
+    },
   };
 }
+
+test("script simulation remains visible when its task revision synchronizes back into the panel", async (context) => {
+  const browserGlobal = globalThis as typeof globalThis & { document?: unknown };
+  const originalDocument = browserGlobal.document;
+  browserGlobal.document = {
+    createElement() {
+      return {
+        className: "", innerHTML: "", open: false,
+        setAttribute() {}, querySelector() { return null; }, querySelectorAll() { return []; },
+        showModal() { this.open = true; }, close() { this.open = false; },
+      };
+    },
+    body: { append() {} },
+  };
+  context.after(() => {
+    if (originalDocument === undefined) delete browserGlobal.document;
+    else browserGlobal.document = originalDocument;
+  });
+  const roots = {
+    planning: fakeRoot(), storyboard: fakeRoot(), production: fakeRoot(), delivery: fakeRoot(),
+  };
+  let currentTask = {
+    id: "task_script", batchProjectId: "project_1", status: "active",
+    currentStage: "script", stageStatus: "in_progress", revision: 8,
+    ownedByCurrentAccount: true, theme: "智能通勤", audience: "城市家庭",
+    durationSeconds: 15, platformTags: ["信息流"],
+  };
+  let panel: ReturnType<typeof createWorkspaceStagesPanel>;
+  panel = createWorkspaceStagesPanel({
+    roots,
+    api: {
+      getStageVersions: async () => ({
+        videoTask: currentTask, activeArtifactVersionId: undefined, versions: [], invalidations: [],
+      }),
+      simulateStage: async () => {
+        currentTask = { ...currentTask, revision: 9, stageStatus: "awaiting_confirmation" };
+        return {
+          videoTask: currentTask,
+          artifact: {
+            artifactId: "development_script_1", schemaName: "development_simulated_script",
+            schemaVersion: 1, contentHashSha256: "a".repeat(64),
+          },
+        };
+      },
+    },
+    getCurrentAccountId: () => "account_creator_b",
+    onTaskUpdated: (updatedTask: typeof currentTask) => {
+      panel.setContext("project_1", { project: { id: "project_1" } }, updatedTask as never, "planning");
+    },
+  } as never);
+  panel.setContext("project_1", { project: { id: "project_1" } }, currentTask as never, "planning");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.match(roots.planning.innerHTML, /策略确认后由 Agent 生成脚本/u);
+  await roots.planning.clickSimulate();
+  assert.match(roots.planning.innerHTML, /开场：以智能通勤建立画面/u);
+  assert.match(roots.planning.innerHTML, /产物待负责人确认/u);
+});
 
 const task = {
   id: "task_1",

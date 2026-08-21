@@ -200,7 +200,7 @@ function strategyBody(task, view) {
 
 function scriptBody(task, view) {
   const version = activeVersion(view);
-  if (!task.scriptInput && !version) {
+  if (!task.scriptInput && !version && !view?.simulatedArtifact) {
     return `<div class="production-empty"><span>策略确认后由 Agent 生成脚本</span></div>`;
   }
   const script = task.scriptInput || [
@@ -365,6 +365,11 @@ export function createWorkspaceStagesPanel(options) {
     options.onBusyChange?.(busy);
   }
 
+  function adoptTaskUpdate(updatedTask) {
+    task = { ...task, ...updatedTask };
+    contextTaskStateKey = workspaceStageTaskStateKey(task);
+  }
+
   function reset() {
     contextGeneration += 1;
     sequence += 1;
@@ -411,8 +416,9 @@ export function createWorkspaceStagesPanel(options) {
       ["script", "storyboard", "delivery"].includes(stage) &&
       ["in_progress", "awaiting_confirmation"].includes(task.stageStatus),
     );
+    const renderView = simulatedArtifact ? { ...view, simulatedArtifact } : view;
     const body = stage === "strategy" ? strategyBody(task, view)
-      : stage === "script" ? scriptBody(task, view)
+      : stage === "script" ? scriptBody(task, renderView)
       : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
       : stage === "video_preview" ? previewBody(task, view, project, productionState)
       : deliveryBody(task, stageViews);
@@ -540,7 +546,7 @@ export function createWorkspaceStagesPanel(options) {
         || mutationProjectId !== projectId
         || mutationTaskId !== task?.id
       ) return;
-      task = { ...task, ...result.videoTask };
+      adoptTaskUpdate(result.videoTask);
       simulatedArtifact = null;
       options.onTaskUpdated?.(result.videoTask);
       await loadStage();
@@ -569,7 +575,7 @@ export function createWorkspaceStagesPanel(options) {
     render();
     try {
       const result = await options.api.simulateStage(projectId, task.id, stage);
-      task = { ...task, ...result.videoTask };
+      adoptTaskUpdate(result.videoTask);
       simulatedArtifact = result.artifact;
       options.onTaskUpdated?.(result.videoTask);
     } catch (error) {
@@ -594,7 +600,7 @@ export function createWorkspaceStagesPanel(options) {
         expectedTaskRevision: task.revision,
       });
       if (mutationContextGeneration !== contextGeneration || mutationTaskId !== task?.id) return;
-      task = { ...task, ...result.videoTask };
+      adoptTaskUpdate(result.videoTask);
       simulatedArtifact = result.artifact;
       const access = await options.api.getMediaArtifactAccess(
         mutationProjectId,
@@ -665,7 +671,7 @@ export function createWorkspaceStagesPanel(options) {
           || mutationProjectId !== projectId
           || mutationTaskId !== task?.id
         ) return;
-        task = { ...task, ...result.videoTask };
+        adoptTaskUpdate(result.videoTask);
         options.onTaskUpdated?.(result.videoTask);
         dialog.close();
         await loadStage();

@@ -153,6 +153,17 @@ export async function reloadAgentWorkspaceConversation(api, sessionId, videoTask
   return { session: sessionBody.session, messages: transcriptBody.messages };
 }
 
+export async function reloadAgentWorkspaceSession(api, sessionId, videoTaskId) {
+  if (!api || !isIdentifier(sessionId) || !isIdentifier(videoTaskId)) {
+    throw new Error("无法刷新当前任务的智能助手会话。");
+  }
+  const body = await api.getSession(sessionId, videoTaskId);
+  if (!isRecord(body?.session)) {
+    throw new Error("服务端返回的智能助手会话无法安全核验。");
+  }
+  return body.session;
+}
+
 function uncertainCommandResponse() {
   const error = new Error("服务端返回的操作结果无法安全核验。");
   error.mayHaveExecuted = true;

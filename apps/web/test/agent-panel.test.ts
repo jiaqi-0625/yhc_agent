@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, reloadAgentWorkspaceSession, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -408,6 +408,17 @@ test("workspace conversation reload reads session context and transcript togethe
   assert.equal(result.messages, messages);
 });
 
+test("workspace session reload avoids repainting an unchanged transcript", async () => {
+  let transcriptCalls = 0;
+  const session = { id: "agent_session_sync", taskContext: { videoTask: { id: "task_sync" } } };
+  const result = await reloadAgentWorkspaceSession({
+    getSession: async () => ({ session }),
+    getTranscript: async () => { transcriptCalls += 1; return { messages: [] }; },
+  }, "agent_session_sync", "task_sync");
+  assert.equal(result, session);
+  assert.equal(transcriptCalls, 0);
+});
+
 test("application wiring keeps action commands task-scoped and disabled during Agent runs", async () => {
   const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function currentAgentActionContext()");
@@ -470,9 +481,10 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /state\.taskContext = null/u);
   assert.match(workspaceSync, /restoreSessionForCurrentWork\(scope\)/u);
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
-  assert.match(workspaceSync, /reloadAgentWorkspaceConversation\(agentApi, sessionId, task\.id\)/u);
-  assert.match(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);
-  assert.match(workspaceSync, /refreshed\.session\.taskContext\.videoTask\.revision < task\.revision/u);
+  assert.match(workspaceSync, /reloadAgentWorkspaceSession\(agentApi, sessionId, task\.id\)/u);
+  assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(task\)/u);
+  assert.doesNotMatch(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);
+  assert.match(workspaceSync, /refreshed\.taskContext\.videoTask\.revision < task\.revision/u);
   assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);
   assert.match(
     source,

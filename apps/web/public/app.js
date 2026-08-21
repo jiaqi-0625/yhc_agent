@@ -11,9 +11,9 @@ import {
   createStableAgentActionRequestId,
   executeAgentActionCommand,
   extractAgentActionCard,
-  reloadAgentWorkspaceConversation,
+  reloadAgentWorkspaceSession,
   unavailableAgentTaskMessage,
-} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v2";
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v3";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -27,7 +27,7 @@ import {
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-task-sync-ws210-v1";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-task-sync-ws210-v2";
 import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,
@@ -1884,22 +1884,28 @@ async function refreshAgentContextForWorkspaceTask(task) {
   const sessionId = state.sessionId;
   const scope = captureWorkspaceScope();
   if (!sessionId || state.sessionVideoTaskId !== task.id) return;
+  if (
+    state.taskContext?.videoTask?.id === task.id
+    && state.taskContext.videoTask.revision <= task.revision
+  ) {
+    state.taskContext = {
+      ...state.taskContext,
+      videoTask: { ...state.taskContext.videoTask, ...task },
+    };
+    renderTaskContext(state.taskContext);
+    appendWorkspaceTaskSyncEvent(task);
+    refreshActionProposalAvailability();
+  }
   try {
-    const refreshed = await reloadAgentWorkspaceConversation(agentApi, sessionId, task.id);
+    const refreshed = await reloadAgentWorkspaceSession(agentApi, sessionId, task.id);
     if (
       !isCurrentWorkspaceScope(scope) ||
       currentSelectedVideoTaskId() !== task.id ||
       state.sessionId !== sessionId ||
-      refreshed.session?.taskContext?.videoTask?.id !== task.id ||
-      refreshed.session.taskContext.videoTask.revision < task.revision
+      refreshed?.taskContext?.videoTask?.id !== task.id ||
+      refreshed.taskContext.videoTask.revision < task.revision
     ) return;
-    updateSession(refreshed.session);
-    if (
-      !isCurrentWorkspaceScope(scope) ||
-      currentSelectedVideoTaskId() !== task.id ||
-      state.sessionId !== sessionId
-    ) return;
-    restoreTranscriptTimeline(refreshed.messages);
+    updateSession(refreshed);
     refreshActionProposalAvailability();
   } catch (error) {
     if (!isCurrentWorkspaceScope(scope) || currentSelectedVideoTaskId() !== task.id) return;
@@ -1908,6 +1914,35 @@ async function refreshAgentContextForWorkspaceTask(task) {
     refreshActionProposalAvailability();
     showError(error);
   }
+}
+
+function appendWorkspaceTaskSyncEvent(task) {
+  const revision = String(task.revision);
+  if (elements.messages.querySelector(`[data-workspace-task-revision="${revision}"]`)) return;
+  if (elements.welcome) elements.welcome.hidden = true;
+  const turn = createAgentTurn(false);
+  const content = appendTimelineEvent(turn, "action-result-event");
+  const event = document.createElement("section");
+  event.className = "agent-action-result-event";
+  event.dataset.workspaceTaskRevision = revision;
+  event.setAttribute("role", "status");
+  event.setAttribute("aria-live", "polite");
+  const header = document.createElement("div");
+  header.className = "agent-action-result-header";
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("span");
+  eyebrow.textContent = "工作区同步";
+  const title = document.createElement("strong");
+  const stage = taskStageLabels[task.currentStage] || task.currentStage;
+  const statuses = { in_progress: "进行中", awaiting_confirmation: "待确认", confirmed: "已确认" };
+  title.textContent = stage + " · " + (statuses[task.stageStatus] || task.stageStatus);
+  copy.append(eyebrow, title);
+  header.appendChild(copy);
+  const detail = document.createElement("p");
+  detail.textContent = "任务版本 " + revision + " 已同步，无需刷新页面。";
+  event.append(header, detail);
+  content.appendChild(event);
+  elements.messages.scrollTop = elements.messages.scrollHeight;
 }
 
 function applyWorkspaceSession(session, options = {}) {
