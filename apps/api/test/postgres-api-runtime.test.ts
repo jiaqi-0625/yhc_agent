@@ -146,6 +146,13 @@ test("postgres composition injects one database coordinator into every asset mut
     runtime.resolveStrategyDraftReader({
       ...strategyContext,
       videoTask: { ...strategyContext.videoTask, currentStage: "script" },
+    }, strategyScope)?.videoTaskId,
+    "task_strategy_reader",
+  );
+  assert.equal(
+    runtime.resolveStrategyDraftReader({
+      ...strategyContext,
+      videoTask: { ...strategyContext.videoTask, currentStage: "asset_matching" },
     }, strategyScope),
     undefined,
   );

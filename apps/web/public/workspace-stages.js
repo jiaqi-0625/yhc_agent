@@ -48,6 +48,15 @@ export function confirmationAvailability(task, stage, view) {
       ? { enabled: true, label: "确认策略" }
       : { enabled: false, label: "等待确认请求" };
   }
+  if (stage === "script" && task.scriptInput) {
+    return { enabled: true, label: "确认脚本" };
+  }
+  if (["storyboard", "video_preview", "delivery"].includes(stage) && view?.generatedArtifact) {
+    return {
+      enabled: true,
+      label: stage === "storyboard" ? "确认分镜" : stage === "video_preview" ? "确认模拟预览" : "确认模拟交付",
+    };
+  }
   const active = view?.versions?.find(function (item) { return item.id === view.activeArtifactVersionId; });
   return active
     ? { enabled: true, label: "确认本阶段", artifact: active.content }
@@ -376,6 +385,12 @@ export function createWorkspaceStagesPanel(options) {
     const stage = currentStage();
     if (!root || !stage || !task) return;
     const availability = confirmationAvailability(task, stage, view);
+    const canGenerateSimulation = ["storyboard", "video_preview", "delivery"].includes(stage)
+      && task.currentStage === stage
+      && task.stageStatus === "in_progress";
+    const simulationLabel = stage === "storyboard" ? "生成模拟分镜"
+      : stage === "video_preview" ? "生成模拟预览"
+      : "准备模拟交付";
     const body = stage === "strategy" ? strategyBody(task, view)
       : stage === "script" ? scriptBody(task, view)
       : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
@@ -383,7 +398,7 @@ export function createWorkspaceStagesPanel(options) {
       : deliveryBody(task, stageViews);
     root.innerHTML = `<div class="production-stage-shell">
       <header class="production-stage-header"><div><div class="production-stage-title"><h2>${stageLabels[stage]}</h2>${statusBadge(task, stage)}</div><p>${notice(stage)}</p></div>
-        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
+        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button>${canGenerateSimulation ? `<button class="button primary" type="button" data-stage-generate-simulation ${busy ? "disabled" : ""}>${simulationLabel}</button>` : ""}<button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
       </header>
       ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
       ${stagePath(task, stage)}
@@ -401,10 +416,57 @@ export function createWorkspaceStagesPanel(options) {
       });
     });
     root.querySelector("[data-stage-history]")?.addEventListener("click", showHistory);
+    root.querySelector("[data-stage-generate-simulation]")?.addEventListener("click", generateSimulatedStage);
     root.querySelector("[data-stage-confirm]")?.addEventListener("click", confirmStage);
     root.querySelectorAll("[data-shot-adjust]").forEach(function (button) {
       button.addEventListener("click", function () { showAssetPicker(Number(button.dataset.shotIndex), button.dataset.shotAdjust); });
     });
+  }
+
+  async function generateSimulatedStage() {
+    const stage = currentStage();
+    if (!["storyboard", "video_preview", "delivery"].includes(stage) || busy) return;
+    const mutationContextGeneration = contextGeneration;
+    const mutationProjectId = projectId;
+    const mutationTaskId = task.id;
+    const expectedRevision = task.revision;
+    setPanelBusy(true);
+    render();
+    try {
+      const result = await options.api.executeTaskCommand(mutationProjectId, mutationTaskId, {
+        requestId: requestId("generate_simulated_stage"),
+        card: {
+          schemaVersion: 1,
+          kind: "agent_action_card",
+          videoTaskId: mutationTaskId,
+          action: "generate_simulated_stage_artifact",
+          label: "生成当前阶段模拟产物",
+          summary: "生成用于 WS-503 完整用户链路验收的当前阶段模拟产物。",
+          expectedRevision,
+          cost: { kind: "free" },
+          payload: { schemaVersion: 1, stage },
+        },
+      });
+      if (
+        mutationContextGeneration !== contextGeneration ||
+        mutationProjectId !== projectId ||
+        mutationTaskId !== task?.id
+      ) return;
+      task = { ...task, ...result.videoTask };
+      options.onTaskUpdated?.(result.videoTask);
+      await loadStage();
+    } catch (error) {
+      if (
+        mutationContextGeneration === contextGeneration &&
+        mutationProjectId === projectId &&
+        mutationTaskId === task?.id
+      ) showMessage(errorText(error));
+    } finally {
+      if (mutationContextGeneration === contextGeneration) {
+        setPanelBusy(false);
+        render();
+      }
+    }
   }
 
   async function loadStage() {

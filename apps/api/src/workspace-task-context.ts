@@ -118,7 +118,7 @@ export function createWorkspaceStrategyDraftReader(
         record.videoTask.tenantId !== binding.tenantId ||
         record.videoTask.batchProjectId !== binding.projectId ||
         record.videoTask.status !== "active" ||
-        record.videoTask.currentStage !== "strategy" ||
+        !["strategy", "script"].includes(record.videoTask.currentStage) ||
         record.videoTask.revision !== taskContext.videoTask.revision
       ) {
         throw new StrategyDraftAccessError(
@@ -139,6 +139,31 @@ export function createWorkspaceStrategyDraftReader(
         draft.vehicleSnapshotId !== vehicleSnapshotId
       ) {
         throw new StrategyDraftAccessError();
+      }
+      if (record.videoTask.currentStage === "script") {
+        const artifactId = record.activeStageArtifactVersionIds.strategy;
+        const artifact = record.stageArtifactVersions.find(
+          (candidate) =>
+            candidate.id === artifactId &&
+            candidate.stage === "strategy" &&
+            candidate.content.schemaName === "video_task_strategy_draft" &&
+            candidate.content.artifactId === draft.id,
+        );
+        const confirmed = artifact !== undefined && record.stageConfirmations.some(
+          (confirmation) =>
+            confirmation.stage === "strategy" &&
+            confirmation.artifactVersionId === artifact.id &&
+            confirmation.decision === "confirmed" &&
+            confirmation.source === "human_action",
+        );
+        const invalidated = artifact !== undefined && record.stageArtifactInvalidations.some(
+          (invalidation) => invalidation.artifactVersionId === artifact.id,
+        );
+        if (!artifact || !confirmed || invalidated) {
+          throw new StrategyDraftAccessError(
+            "Script generation requires the current valid human-confirmed strategy draft.",
+          );
+        }
       }
       return {
         schemaVersion: 1,

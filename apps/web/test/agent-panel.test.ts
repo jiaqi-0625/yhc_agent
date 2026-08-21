@@ -17,6 +17,21 @@ const generationCard = {
   payload: { schemaVersion: 1, audience: "家庭用户", theme: "周末出行" },
 };
 
+const scriptCard = {
+  schemaVersion: 1,
+  kind: "agent_action_card",
+  videoTaskId: "task_1",
+  action: "generate_script",
+  label: "生成脚本草稿",
+  summary: "依据已确认策略生成一条完整脚本。",
+  expectedRevision: 4,
+  cost: { kind: "free" },
+  payload: {
+    schemaVersion: 1,
+    script: "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+  },
+};
+
 test("Agent panel width preserves the desktop workspace minimums", () => {
   assert.equal(resolveAgentPanelWidth(1084, 380), 358);
   assert.equal(resolveAgentPanelWidth(1224, 560), 498);
@@ -106,6 +121,65 @@ test("Agent action cards require the exact frozen structure before rendering", (
   ]) {
     assert.equal(parseAgentActionCard(invalid), undefined);
   }
+});
+
+test("script generation cards and server receipts are strictly validated", () => {
+  assert.deepEqual(parseAgentActionCard(scriptCard), scriptCard);
+  assert.equal(parseAgentActionCard({
+    ...scriptCard,
+    payload: { ...scriptCard.payload, strategyDraftId: "forged" },
+  }), undefined);
+  const response = {
+    receipt: {
+      schemaVersion: 1,
+      id: "command_receipt_script_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      videoTaskId: "task_1",
+      actorAccountId: "account_creator_a",
+      requestId: "agent_action_script_1",
+      payloadHash: "a".repeat(64),
+      action: "generate_script",
+      expectedTaskRevision: 4,
+      resultingTaskRevision: 5,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "script_generated", scriptContentHashSha256: "b".repeat(64) },
+      occurredAt: "2026-08-21T01:00:00.000Z",
+    },
+    replayed: false,
+    videoTask: {
+      id: "task_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      revision: 5,
+    },
+  };
+  const presentation = agentActionSuccessPresentation(
+    scriptCard,
+    "agent_action_script_1",
+    "project_1",
+    "account_creator_a",
+    response,
+  );
+  assert.equal(presentation.status, "已生成");
+  assert.match(presentation.message, /脚本草稿已写入任务并等待负责人确认/u);
+  assert.equal(agentActionTimelineEvent(scriptCard, presentation).title, "脚本草稿已生成");
+  assert.throws(
+    () => agentActionSuccessPresentation(
+      scriptCard,
+      "agent_action_script_1",
+      "project_1",
+      "account_creator_a",
+      {
+        ...response,
+        receipt: {
+          ...response.receipt,
+          result: { kind: "script_generated", scriptContentHashSha256: "not-a-hash" },
+        },
+      },
+    ),
+    (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+  );
 });
 
 test("Agent action execution sends only a request ID and the validated frozen card", () => {
@@ -407,6 +481,11 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.doesNotMatch(commandWiring, /\/v1\/works\//u);
   assert.match(source, /state\.busy \|\| state\.workflowBusy, card\.dataset\.executionBlocked/u);
   assert.match(source, /appendActionProposal\(turn, proposal, event\.toolCallId\)/u);
+  assert.match(source, /proposal\.action === "generate_script"[\s\S]*"确认生成脚本"/u);
+  assert.match(
+    source,
+    /isProposalTool = tool\.toolName === "propose_strategy_generation"[\s\S]*tool\.toolName === "propose_script_generation"/u,
+  );
   assert.match(source, /appendActionProposal\(turn, event\.card, event\.eventId\)/u);
 
   const controlsStart = source.indexOf("function refreshAgentInteractionControls()");

@@ -6,6 +6,7 @@ import type {
   StageConfirmationRequest,
   StrategyItem,
   VehicleSnapshot,
+  VideoTaskStage,
   VideoTaskStrategyDraft,
 } from "@firefly/schemas";
 
@@ -21,6 +22,18 @@ export interface GenerateVideoTaskStrategyCommand {
 
 export interface RequestVideoTaskStrategyApprovalCommand {
   expectedTaskRevision: number;
+}
+
+export interface GenerateVideoTaskScriptCommand {
+  expectedTaskRevision: number;
+  script: string;
+  scriptContentHashSha256: string;
+}
+
+export interface GenerateSimulatedStageArtifactCommand {
+  expectedTaskRevision: number;
+  stage: Extract<VideoTaskStage, "storyboard" | "video_preview" | "delivery">;
+  artifactContentHashSha256: string;
 }
 
 export type AgentActionCommandIdKind =
@@ -47,6 +60,7 @@ export type AgentActionCommandErrorCode =
   | "AIC-AGENT-COMMAND-STRATEGY_FACTS_INVALID"
   | "AIC-AGENT-COMMAND-STRATEGY_DRAFT_NOT_FOUND"
   | "AIC-AGENT-COMMAND-STRATEGY_VALIDATION_FAILED"
+  | "AIC-AGENT-COMMAND-SCRIPT_INVALID"
   | "AIC-AGENT-COMMAND-IDEMPOTENCY_CONFLICT";
 
 export class AgentActionCommandError extends Error {
@@ -68,6 +82,17 @@ function normalizeText(value: string, label: string): string {
     throw new AgentActionCommandError(
       "AIC-AGENT-COMMAND-STRATEGY_FACTS_INVALID",
       `${label} must contain 1 to 500 normalized characters.`,
+    );
+  }
+  return normalized;
+}
+
+export function normalizeVideoTaskScriptText(value: string): string {
+  const normalized = value.normalize("NFC").replace(/\r\n?/gu, "\n").trim();
+  if (normalized.length < 1 || normalized.length > 20000) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCRIPT_INVALID",
+      "A generated script must contain 1 to 20000 normalized characters.",
     );
   }
   return normalized;
@@ -130,6 +155,59 @@ function assertMutableStrategyScope(
     throw new AgentActionCommandError(
       "AIC-AGENT-COMMAND-STATE_CONFLICT",
       "The strategy command requires an active strategy stage in progress.",
+    );
+  }
+}
+
+function assertMutableScriptScope(
+  record: Readonly<VideoTaskProductionRecord>,
+  context: Readonly<AgentActionCommandContext>,
+): void {
+  const task = record.videoTask;
+  if (
+    task.tenantId !== context.tenantId ||
+    task.batchProjectId !== context.batchProjectId ||
+    task.ownerAccountId !== context.actorAccountId
+  ) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCOPE_INVALID",
+      "Only the current task owner in the authenticated project scope can generate a script.",
+    );
+  }
+  if (
+    task.status !== "active" ||
+    task.currentStage !== "script" ||
+    task.stageStatus !== "in_progress"
+  ) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-STATE_CONFLICT",
+      "Script generation requires an active script stage in progress.",
+    );
+  }
+}
+
+function assertConfirmedStrategy(record: Readonly<VideoTaskProductionRecord>): void {
+  const artifactVersionId = record.activeStageArtifactVersionIds.strategy;
+  const artifact = record.stageArtifactVersions.find(
+    (candidate) =>
+      candidate.id === artifactVersionId &&
+      candidate.stage === "strategy" &&
+      candidate.content.schemaName === "video_task_strategy_draft",
+  );
+  const confirmed = artifact !== undefined && record.stageConfirmations.some(
+    (confirmation) =>
+      confirmation.stage === "strategy" &&
+      confirmation.artifactVersionId === artifact.id &&
+      confirmation.decision === "confirmed" &&
+      confirmation.source === "human_action",
+  );
+  const invalidated = artifact !== undefined && record.stageArtifactInvalidations.some(
+    (invalidation) => invalidation.artifactVersionId === artifact.id,
+  );
+  if (!artifact || !confirmed || invalidated) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-STATE_CONFLICT",
+      "Script generation requires the current valid human-confirmed strategy version.",
     );
   }
 }
@@ -403,6 +481,124 @@ export function requestVideoTaskStrategyApproval(
         : structuredClone(draft),
     ),
     stageConfirmationRequests: [...structuredClone(record.stageConfirmationRequests), request],
+    commandReceipts: [...structuredClone(record.commandReceipts), commandReceipt],
+  };
+}
+
+export function generateVideoTaskScript(
+  record: Readonly<VideoTaskProductionRecord>,
+  command: Readonly<GenerateVideoTaskScriptCommand>,
+  context: Readonly<AgentActionCommandContext>,
+): VideoTaskProductionRecord {
+  assertCommandContext(context);
+  const replay = replayOrThrow(record, "generate_script", context);
+  if (replay) return replay;
+  assertRevision(command.expectedTaskRevision, record.videoTask.revision);
+  assertMutableScriptScope(record, context);
+  assertConfirmedStrategy(record);
+  if (!sha256Pattern.test(command.scriptContentHashSha256)) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCRIPT_INVALID",
+      "The generated script content hash is invalid.",
+    );
+  }
+  if (record.videoTask.scriptInput !== undefined) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCRIPT_INVALID",
+      "An existing human or generated script must not be overwritten by this proposal.",
+    );
+  }
+  const script = normalizeVideoTaskScriptText(command.script);
+  const commandReceipt = receipt(
+    record,
+    "generate_script",
+    command.expectedTaskRevision,
+    {
+      kind: "script_generated",
+      scriptContentHashSha256: command.scriptContentHashSha256.toLowerCase(),
+    },
+    context,
+  );
+  const workflow = nextVideoTaskWorkflowState({
+    taskStatus: record.videoTask.status,
+    currentStage: record.videoTask.currentStage,
+    stageStatus: record.videoTask.stageStatus,
+  }, {
+    type: "stage_confirmation_requested",
+    stage: "script",
+  });
+  return {
+    ...structuredClone(record),
+    videoTask: {
+      ...structuredClone(record.videoTask),
+      scriptInput: script,
+      status: workflow.taskStatus,
+      currentStage: workflow.currentStage,
+      stageStatus: workflow.stageStatus,
+      revision: record.videoTask.revision + 1,
+      updatedAt: context.occurredAt,
+      updatedBy: context.actorAccountId,
+    },
+    commandReceipts: [...structuredClone(record.commandReceipts), commandReceipt],
+  };
+}
+
+export function generateSimulatedStageArtifact(
+  record: Readonly<VideoTaskProductionRecord>,
+  command: Readonly<GenerateSimulatedStageArtifactCommand>,
+  context: Readonly<AgentActionCommandContext>,
+): VideoTaskProductionRecord {
+  assertCommandContext(context);
+  const replay = replayOrThrow(record, "generate_simulated_stage_artifact", context);
+  if (replay) return replay;
+  assertRevision(command.expectedTaskRevision, record.videoTask.revision);
+  const task = record.videoTask;
+  if (
+    task.tenantId !== context.tenantId ||
+    task.batchProjectId !== context.batchProjectId ||
+    task.ownerAccountId !== context.actorAccountId
+  ) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCOPE_INVALID",
+      "Only the current task owner can generate a simulated stage artifact.",
+    );
+  }
+  if (
+    task.status !== "active" ||
+    task.currentStage !== command.stage ||
+    task.stageStatus !== "in_progress"
+  ) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-STATE_CONFLICT",
+      "Simulated artifact generation requires the matching active stage in progress.",
+    );
+  }
+  if (!sha256Pattern.test(command.artifactContentHashSha256)) {
+    throw new AgentActionCommandError(
+      "AIC-AGENT-COMMAND-SCRIPT_INVALID",
+      "The simulated artifact content hash is invalid.",
+    );
+  }
+  const commandReceipt = receipt(
+    record,
+    "generate_simulated_stage_artifact",
+    command.expectedTaskRevision,
+    {
+      kind: "simulated_stage_artifact_generated",
+      stage: command.stage,
+      artifactContentHashSha256: command.artifactContentHashSha256.toLowerCase(),
+    },
+    context,
+  );
+  return {
+    ...structuredClone(record),
+    videoTask: {
+      ...structuredClone(task),
+      stageStatus: "awaiting_confirmation",
+      revision: task.revision + 1,
+      updatedAt: context.occurredAt,
+      updatedBy: context.actorAccountId,
+    },
     commandReceipts: [...structuredClone(record.commandReceipts), commandReceipt],
   };
 }

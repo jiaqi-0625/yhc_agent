@@ -129,6 +129,14 @@ export function createBusinessAgentRuntime(
                 videoTaskId: context.taskContext.videoTask.id,
                 currentRevision: () => context.taskContext.videoTask.revision,
               },
+              ...(context.taskContext.videoTask.currentStage === "script"
+                ? {
+                    scriptProposal: {
+                      videoTaskId: context.taskContext.videoTask.id,
+                      currentRevision: () => context.taskContext.videoTask.revision,
+                    },
+                  }
+                : {}),
             }
           : { strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id) }),
         ...(taskAssetReader === undefined ? {} : { taskAssetReader }),

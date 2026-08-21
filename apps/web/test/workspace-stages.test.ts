@@ -66,6 +66,16 @@ test("non-strategy confirmation only uses a server-returned persisted artifact",
   } as never);
   assert.deepEqual(unavailable, { enabled: false, label: "等待产物入库" });
 
+  const generated = confirmationAvailability(task as never, "storyboard", {
+    generatedArtifact: {
+      artifactId: "ws503_storyboard_1",
+      schemaName: "ws503_simulated_storyboard",
+      schemaVersion: 1,
+      contentHashSha256: "b".repeat(64),
+    },
+  } as never);
+  assert.deepEqual(generated, { enabled: true, label: "确认分镜" });
+
   const artifact = {
     artifactId: "storyboard_draft_1",
     schemaName: "storyboard_draft",
@@ -89,6 +99,21 @@ test("strategy confirmation requires the persisted confirmation request", () => 
     activeStrategyDraft: { id: "draft_1" },
     confirmationRequest: { id: "request_1" },
   } as never).enabled, true);
+});
+
+test("a persisted generated script can be confirmed without a client artifact", () => {
+  const scriptTask = {
+    ...task,
+    currentStage: "script",
+    scriptInput: "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+  } as const;
+  assert.deepEqual(confirmationAvailability(scriptTask as never, "script", {
+    activeArtifactVersionId: undefined,
+    versions: [],
+  } as never), {
+    enabled: true,
+    label: "确认脚本",
+  });
 });
 
 test("production budget validates account scope and the balance identity", () => {

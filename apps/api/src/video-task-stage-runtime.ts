@@ -272,6 +272,9 @@ export class VideoTaskStageRuntime {
       : [...record.stageConfirmationRequests].reverse().find(
           (request) => request.strategyDraftId === activeStrategyDraft.id,
         );
+    const generatedArtifact = stage === "storyboard" || stage === "video_preview" || stage === "delivery"
+      ? this.#simulatedStageArtifact(record, stage, undefined)
+      : undefined;
     return {
       videoTask: structuredClone(record.videoTask),
       ...(activeArtifactVersionId === undefined ? {} : { activeArtifactVersionId }),
@@ -305,6 +308,9 @@ export class VideoTaskStageRuntime {
       ...(confirmationRequest === undefined
         ? {}
         : { confirmationRequest: structuredClone(confirmationRequest) }),
+      ...(generatedArtifact === undefined
+        ? {}
+        : { generatedArtifact: structuredClone(generatedArtifact) }),
     };
   }
 
@@ -378,6 +384,59 @@ export class VideoTaskStageRuntime {
       );
     }
     return derived;
+  }
+
+  #scriptArtifact(
+    record: Readonly<VideoTaskProductionRecord>,
+    proposed: Readonly<StageArtifactContentReference> | undefined,
+  ): StageArtifactContentReference | undefined {
+    if (proposed !== undefined) return structuredClone(proposed);
+    const script = record.videoTask.scriptInput;
+    if (script === undefined || record.videoTask.currentStage !== "script") return undefined;
+    const contentHashSha256 = createHash("sha256").update(script).digest("hex");
+    const generated = [...record.commandReceipts].reverse().find(
+      (receipt) =>
+        receipt.action === "generate_script" &&
+        receipt.result.kind === "script_generated" &&
+        receipt.result.scriptContentHashSha256 === contentHashSha256 &&
+        receipt.resultingTaskRevision <= record.videoTask.revision,
+    );
+    if (generated === undefined) {
+      throw runtimeError(
+        "AIC-STAGE-SCRIPT_DRAFT_NOT_FOUND",
+        "The task has no server-persisted generated script awaiting human confirmation.",
+        409,
+      );
+    }
+    return {
+      artifactId: `script_draft_${contentHashSha256.slice(0, 48)}`,
+      schemaName: "video_task_script_draft",
+      schemaVersion: 1,
+      contentHashSha256,
+    };
+  }
+
+  #simulatedStageArtifact(
+    record: Readonly<VideoTaskProductionRecord>,
+    stage: Extract<VideoTaskStage, "storyboard" | "video_preview" | "delivery">,
+    proposed: Readonly<StageArtifactContentReference> | undefined,
+  ): StageArtifactContentReference | undefined {
+    if (proposed !== undefined) return structuredClone(proposed);
+    const generated = [...record.commandReceipts].reverse().find(
+      (receipt) =>
+        receipt.action === "generate_simulated_stage_artifact" &&
+        receipt.result.kind === "simulated_stage_artifact_generated" &&
+        receipt.result.stage === stage &&
+        receipt.resultingTaskRevision <= record.videoTask.revision,
+    );
+    if (generated?.result.kind !== "simulated_stage_artifact_generated") return undefined;
+    const contentHashSha256 = generated.result.artifactContentHashSha256;
+    return {
+      artifactId: `ws503_${stage}_${contentHashSha256.slice(0, 40)}`,
+      schemaName: `ws503_simulated_${stage}`,
+      schemaVersion: 1,
+      contentHashSha256,
+    };
   }
 
   #receiptCollision(
@@ -559,7 +618,11 @@ export class VideoTaskStageRuntime {
         } else {
           artifact = stage === "strategy"
             ? this.#strategyArtifact(current, input.artifact)
-            : input.artifact;
+            : stage === "script"
+              ? this.#scriptArtifact(current, input.artifact)
+              : stage === "storyboard" || stage === "video_preview" || stage === "delivery"
+                ? this.#simulatedStageArtifact(current, stage, input.artifact)
+                : input.artifact;
         }
         if (artifact === undefined) {
           throw runtimeError(

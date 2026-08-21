@@ -353,7 +353,7 @@ export async function createPostgresApiRuntime(
       resolveStrategyDraftReader: (
         taskContext: Readonly<TaskContext>,
         sessionScope: Readonly<AgentSessionScope>,
-      ) => taskContext.videoTask.currentStage === "strategy"
+      ) => ["strategy", "script"].includes(taskContext.videoTask.currentStage)
         ? createWorkspaceStrategyDraftReader(videoTaskStore, taskContext, sessionScope)
         : undefined,
       readiness,

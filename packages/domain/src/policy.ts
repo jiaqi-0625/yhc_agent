@@ -97,7 +97,7 @@ export const toolPolicies: Readonly<Record<string, ToolPolicy>> = {
   },
   get_current_strategy_draft: {
     risk: "read",
-    allowedStatuses: ["strategy_draft", "awaiting_strategy_approval", "strategy_approved"],
+    allowedStatuses: ["strategy_draft", "awaiting_strategy_approval", "strategy_approved", "script_draft"],
     allowedRoles: ["creator", "reviewer", "content_admin"],
   },
   validate_strategy: {
@@ -113,6 +113,11 @@ export const toolPolicies: Readonly<Record<string, ToolPolicy>> = {
   propose_strategy_approval: {
     risk: "proposal",
     allowedStatuses: ["strategy_draft"],
+    allowedRoles: creatorsAndAdmins,
+  },
+  propose_script_generation: {
+    risk: "proposal",
+    allowedStatuses: ["script_draft"],
     allowedRoles: creatorsAndAdmins,
   },
   generate_script: {

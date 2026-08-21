@@ -4,7 +4,10 @@ import {
   assertCanOperateVideoTask,
   assertCanViewBatchProject,
   assertCanViewVideoTask,
+  generateSimulatedStageArtifact,
+  generateVideoTaskScript,
   generateVideoTaskStrategy,
+  normalizeVideoTaskScriptText,
   requestVideoTaskStrategyApproval,
   rollbackVideoTaskStage,
   type AgentActionCommandContext,
@@ -361,6 +364,39 @@ export class AgentActionCommandRuntime {
               { expectedTaskRevision: input.card.expectedRevision },
               context,
             );
+          case "generate_script": {
+            const script = normalizeVideoTaskScriptText(input.card.payload.script);
+            return generateVideoTaskScript(
+              current,
+              {
+                expectedTaskRevision: input.card.expectedRevision,
+                script,
+                scriptContentHashSha256: createHash("sha256").update(script).digest("hex"),
+              },
+              context,
+            );
+          }
+          case "generate_simulated_stage_artifact": {
+            const stage = input.card.payload.stage;
+            const artifactContentHashSha256 = createHash("sha256").update(JSON.stringify({
+              schemaVersion: 1,
+              kind: "ws503_simulated_stage_artifact",
+              stage,
+              videoTaskId: current.videoTask.id,
+              sourceTaskRevision: current.videoTask.revision,
+              activeUpstreamArtifactVersionIds: current.activeStageArtifactVersionIds,
+              assetSnapshotId: current.videoTask.assetSnapshotId ?? null,
+            })).digest("hex");
+            return generateSimulatedStageArtifact(
+              current,
+              {
+                expectedTaskRevision: input.card.expectedRevision,
+                stage,
+                artifactContentHashSha256,
+              },
+              context,
+            );
+          }
           case "rollback_stage": {
             const rolledBack = rollbackVideoTaskStage(
               current,

@@ -53,6 +53,13 @@ export const workspaceApi = {
       jsonOptions("POST", input),
     );
   },
+  executeTaskCommand: function (projectId, videoTaskId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/commands",
+      jsonOptions("POST", input),
+    );
+  },
   uploadTemporaryAsset: function (projectId, input) {
     return api(
       "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) + "/temporary-assets",

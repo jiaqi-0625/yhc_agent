@@ -336,6 +336,59 @@ test("V2 Agent reads only the active persisted strategy draft bound to its task 
   assert.equal("generation" in result.draft, false);
   assert.equal("createdAt" in result.draft, false);
 
+  const confirmedForScript = structuredClone(withDraft);
+  confirmedForScript.videoTask.currentStage = "script";
+  confirmedForScript.videoTask.stageStatus = "in_progress";
+  confirmedForScript.stageArtifactVersions = [{
+    id: "artifact_strategy_ws503_postgres",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: locked.videoTask.id,
+    stage: "strategy",
+    version: 1,
+    content: {
+      artifactId: draft.id,
+      schemaName: "video_task_strategy_draft",
+      schemaVersion: 1,
+      contentHashSha256: "a".repeat(64),
+    },
+    dependencies: [{
+      kind: "vehicle_snapshot",
+      vehicleSnapshotId: locked.videoTask.vehicleSnapshotId!,
+    }],
+    provenance: { kind: "human_confirmation", confirmationId: "confirmation_strategy_ws503" },
+    createdAt: occurredAt,
+    createdBy: creator.actorAccountId,
+  }];
+  confirmedForScript.activeStageArtifactVersionIds.strategy = "artifact_strategy_ws503_postgres";
+  confirmedForScript.stageConfirmations = [{
+    id: "confirmation_strategy_ws503",
+    tenantId,
+    batchProjectId: project.id,
+    videoTaskId: locked.videoTask.id,
+    stage: "strategy",
+    artifactVersionId: "artifact_strategy_ws503_postgres",
+    decision: "confirmed",
+    source: "human_action",
+    expectedTaskRevision: locked.videoTask.revision - 1,
+    actorAccountId: creator.actorAccountId,
+    occurredAt,
+  }];
+  const scriptReader = createWorkspaceStrategyDraftReader(
+    { async load() { return structuredClone(confirmedForScript); } },
+    {
+      ...context,
+      videoTask: { ...context.videoTask, currentStage: "script", stageStatus: "in_progress" },
+    },
+    {
+      actorId: creator.actorAccountId,
+      tenantId: creator.tenantId,
+      projectId: project.id,
+      videoTaskId: locked.videoTask.id,
+    },
+  );
+  assert.deepEqual((await scriptReader.read()).draft.items, draft.items);
+
   withDraft.videoTask.revision += 1;
   await assert.rejects(() => reader.read(), /no longer matches/u);
 });

@@ -303,11 +303,16 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
     getWorkStatus: () => "script_draft",
     vehicleService: new InMemoryVehicleService([]),
     stageSuggestionReader: reader,
+    scriptProposal: {
+      videoTaskId: taskContext.videoTask.id,
+      currentRevision: () => taskContext.videoTask.revision,
+    },
   });
   assert.deepEqual(agent.state.tools.map((tool) => tool.name), [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
     "get_current_stage_suggestion_context",
+    "propose_script_generation",
   ]);
   assert.match(agent.state.systemPrompt, /脚本、资产匹配、分镜或交付阶段建议前/u);
   assert.match(agent.state.systemPrompt, /已确认上游产物精确版本/u);
@@ -318,7 +323,8 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
   assert.match(agent.state.systemPrompt, /本地候选必须提示人工复核来源和使用权/u);
   assert.match(agent.state.systemPrompt, /资产匹配可返回带描述词的精确版本人物\/场景候选并提出推荐/u);
   assert.match(agent.state.systemPrompt, /不得持久化选择或确认阶段/u);
-  assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);
+  assert.match(agent.state.systemPrompt, /不得声称已经生成、持久化、确认、导出或发布/u);
+  assert.match(agent.state.systemPrompt, /脚本生成必须经操作卡片人工点击/u);
   assert.throws(
     () => createAdvertisingAgent({
       model,
@@ -328,6 +334,21 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
       getWorkStatus: () => "script_draft",
       vehicleService: new InMemoryVehicleService([]),
       stageSuggestionReader: { ...reader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "script_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      scriptProposal: {
+        videoTaskId: "task_other",
+        currentRevision: () => taskContext.videoTask.revision,
+      },
     }),
     /scope does not match/u,
   );

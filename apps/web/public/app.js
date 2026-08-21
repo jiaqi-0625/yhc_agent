@@ -12,7 +12,7 @@ import {
   executeAgentActionCommand,
   extractAgentActionCard,
   unavailableAgentTaskMessage,
-} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1";
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-ws503-script-v1";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -26,7 +26,7 @@ import {
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-ws503-script-v2";
 import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,
@@ -1316,7 +1316,11 @@ function appendActionProposal(turn, proposal, sourceId) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "button primary agent-action-button";
-  button.textContent = proposal.action === "generate_strategy" ? "确认生成策略" : "确认提交人工审批";
+  button.textContent = proposal.action === "generate_strategy"
+    ? "确认生成策略"
+    : proposal.action === "generate_script"
+      ? "确认生成脚本"
+      : "确认提交人工审批";
   button.addEventListener("click", function () { void executeActionProposal(card, proposal); });
   card.append(header, summary, meta, result, button);
   content.appendChild(card);
@@ -1363,11 +1367,13 @@ function finishToolEvent(turn, event, resumeThinking) {
       : "已完成";
   tool.description.textContent = friendlyToolResult(tool.toolName, event);
   const isProposalTool = tool.toolName === "propose_strategy_generation"
-    || tool.toolName === "propose_strategy_approval";
+    || tool.toolName === "propose_strategy_approval"
+    || tool.toolName === "propose_script_generation";
   const proposal = event.isError || !isProposalTool ? undefined : extractAgentActionCard(event.output);
   const proposalMatchesTool = proposal
     && ((tool.toolName === "propose_strategy_generation" && proposal.action === "generate_strategy")
-      || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval"));
+      || (tool.toolName === "propose_strategy_approval" && proposal.action === "request_strategy_approval")
+      || (tool.toolName === "propose_script_generation" && proposal.action === "generate_script"));
   if (proposalMatchesTool) appendActionProposal(turn, proposal, event.toolCallId);
   if (resumeThinking !== false) appendThinkingEvent(turn);
 }

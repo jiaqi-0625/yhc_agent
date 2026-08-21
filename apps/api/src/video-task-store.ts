@@ -739,6 +739,18 @@ export function validateRecord(
       referencedConfirmationRequestIds.add(request.id);
       continue;
     }
+    if (receipt.action === "generate_script") {
+      if (receipt.result.kind !== "script_generated") {
+        throw new Error("Persisted video task has an invalid script command receipt.");
+      }
+      continue;
+    }
+    if (receipt.action === "generate_simulated_stage_artifact") {
+      if (receipt.result.kind !== "simulated_stage_artifact_generated") {
+        throw new Error("Persisted video task has an invalid simulated artifact command receipt.");
+      }
+      continue;
+    }
     if (receipt.result.kind !== "stage_rolled_back") {
       throw new Error("Persisted video task has an invalid rollback command receipt.");
     }

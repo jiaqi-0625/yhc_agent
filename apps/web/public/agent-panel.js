@@ -3,6 +3,7 @@ import { agentApi } from "./agent-api.js";
 const supportedActionLabels = {
   generate_strategy: "生成卖点策略草稿",
   request_strategy_approval: "提交卖点策略人工审批",
+  generate_script: "生成脚本草稿",
 };
 
 function isRecord(value) {
@@ -41,6 +42,13 @@ function isSupportedPayload(action, payload) {
       && payload.audience.trim().length > 0
       && typeof payload.theme === "string"
       && payload.theme.trim().length > 0;
+  }
+  if (action === "generate_script") {
+    return hasExactKeys(payload, ["schemaVersion", "script"])
+      && payload.schemaVersion === 1
+      && typeof payload.script === "string"
+      && payload.script.trim().length > 0
+      && payload.script.length <= 20_000;
   }
   return action === "request_strategy_approval"
     && hasExactKeys(payload, ["schemaVersion"])
@@ -152,6 +160,12 @@ function matchesCommandResult(action, result) {
       && result.kind === "strategy_generated"
       && isIdentifier(result.strategyDraftId);
   }
+  if (action === "generate_script") {
+    return hasExactKeys(result, ["kind", "scriptContentHashSha256"])
+      && result.kind === "script_generated"
+      && typeof result.scriptContentHashSha256 === "string"
+      && /^[A-Fa-f0-9]{64}$/u.test(result.scriptContentHashSha256);
+  }
   return action === "request_strategy_approval"
     && hasExactKeys(result, ["kind", "strategyDraftId", "stageConfirmationRequestId"])
     && result.kind === "strategy_confirmation_requested"
@@ -232,6 +246,16 @@ export function agentActionSuccessPresentation(proposal, requestId, projectId, a
       replayed: response.replayed,
     };
   }
+  if (parsedCard.action === "generate_script") {
+    return {
+      status: response.replayed ? "已恢复" : "已生成",
+      message: replayPrefix + "脚本草稿已写入任务并等待负责人确认；任务版本更新至 " + receipt.resultingTaskRevision + "。",
+      receiptId: receipt.id,
+      resultingRevision: videoTask.revision,
+      occurredAt: receipt.occurredAt,
+      replayed: response.replayed,
+    };
+  }
   return {
     status: response.replayed ? "已恢复" : "已提交",
     message: replayPrefix + "人工确认请求已提交，当前阶段尚未确认；任务版本更新至 " + receipt.resultingTaskRevision + "。",
@@ -274,7 +298,11 @@ export function agentActionTimelineEvent(proposal, presentation) {
     resultingRevision: presentation.resultingRevision,
     occurredAt: presentation.occurredAt,
     replayed: presentation.replayed,
-    title: parsedCard.action === "generate_strategy" ? "策略草稿已生成" : "人工确认请求已提交",
+    title: parsedCard.action === "generate_strategy"
+      ? "策略草稿已生成"
+      : parsedCard.action === "generate_script"
+        ? "脚本草稿已生成"
+        : "人工确认请求已提交",
     status: presentation.replayed ? "结果已恢复" : "执行成功",
     message: presentation.message,
   };

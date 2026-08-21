@@ -689,7 +689,7 @@ export function createApiServer(
             resolveStrategyDraftReader: videoTaskStore === undefined
               ? () => undefined
               : (taskContext, sessionScope) =>
-                  taskContext.videoTask.currentStage === "strategy"
+                  ["strategy", "script"].includes(taskContext.videoTask.currentStage)
                     ? createWorkspaceStrategyDraftReader(
                         videoTaskStore,
                         taskContext,

@@ -312,6 +312,44 @@ function approvalCard(
   };
 }
 
+function scriptCard(
+  videoTaskId: string,
+  expectedRevision = 4,
+): Extract<AgentActionCard, { action: "generate_script" }> {
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId,
+    action: "generate_script",
+    label: "生成脚本草稿",
+    summary: "根据已确认策略生成一条脚本。",
+    expectedRevision,
+    cost: { kind: "free" },
+    payload: {
+      schemaVersion: 1,
+      script: "00–10s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+    },
+  };
+}
+
+function simulatedStageCard(
+  videoTaskId: string,
+  stage: "storyboard" | "video_preview" | "delivery",
+  expectedRevision: number,
+): Extract<AgentActionCard, { action: "generate_simulated_stage_artifact" }> {
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId,
+    action: "generate_simulated_stage_artifact",
+    label: "生成当前阶段模拟产物",
+    summary: "生成用于 WS-503 完整用户链路验收的当前阶段模拟产物。",
+    expectedRevision,
+    cost: { kind: "free" },
+    payload: { schemaVersion: 1, stage },
+  };
+}
+
 async function prepareStrategyApproval(value: Awaited<ReturnType<typeof fixture>>) {
   await value.commands.execute(project.id, value.taskId, {
     requestId: "command_generate_strategy",
@@ -322,6 +360,36 @@ async function prepareStrategyApproval(value: Awaited<ReturnType<typeof fixture>
     card: approvalCard(value.taskId),
   }, value.creator);
 }
+
+test("a real script command persists one draft before explicit stage confirmation", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+  const strategy = await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_confirm_strategy_for_script_generation",
+    expectedTaskRevision: 3,
+  }, value.creator);
+  assert.equal(strategy.videoTask.currentStage, "script");
+  assert.equal(strategy.videoTask.revision, 4);
+
+  const generated = await value.commands.execute(project.id, value.taskId, {
+    requestId: "command_generate_script",
+    card: scriptCard(value.taskId),
+  }, value.creator);
+  assert.equal(generated.videoTask.currentStage, "script");
+  assert.equal(generated.videoTask.stageStatus, "awaiting_confirmation");
+  assert.equal(generated.videoTask.revision, 5);
+  assert.equal(generated.receipt.result.kind, "script_generated");
+  assert.equal((await value.tasks.load(value.taskId))?.videoTask.scriptInput, scriptCard(value.taskId).payload.script);
+
+  const confirmed = await value.stages.confirmStage(project.id, value.taskId, "script", {
+    requestId: "request_confirm_generated_script",
+    expectedTaskRevision: 5,
+  }, value.creator);
+  assert.equal(confirmed.videoTask.currentStage, "asset_matching");
+  assert.equal(confirmed.videoTask.revision, 6);
+  assert.equal(confirmed.artifactVersion.content.schemaName, "video_task_script_draft");
+  assert.match(confirmed.artifactVersion.content.artifactId, /^script_draft_[a-f0-9]{48}$/u);
+});
 
 async function prepareAssetMatchingApproval(value: Awaited<ReturnType<typeof fixture>>) {
   await prepareStrategyApproval(value);
@@ -547,34 +615,16 @@ test("WS-503 acceptance path reaches delivery through all six human confirmation
   }, value.creator);
   confirmations.push(strategy.confirmation);
 
-  const submitArtifactStage = async (
-    stage: "script" | "storyboard" | "video_preview" | "delivery",
-    expectedTaskRevision: number,
-  ) => {
-    const current = await value.tasks.load(value.taskId);
-    assert.ok(current);
-    assert.equal(current.videoTask.currentStage, stage);
-    await value.tasks.save({
-      ...structuredClone(current),
-      videoTask: {
-        ...structuredClone(current.videoTask),
-        stageStatus: "awaiting_confirmation",
-      },
-    });
-    return value.stages.confirmStage(project.id, value.taskId, stage, {
-      requestId: `request_ws503_confirm_${stage}`,
-      expectedTaskRevision,
-      artifact: {
-        artifactId: `mock_ws503_${stage}_artifact`,
-        schemaName: `mock_ws503_${stage}_artifact`,
-        schemaVersion: 1,
-        contentHashSha256: expectedTaskRevision.toString(16).padStart(64, "0"),
-      },
-      comment: "WS-503 自动化中的模拟产物，仅用于验证人工确认链路。",
-    }, value.creator);
-  };
-
-  const script = await submitArtifactStage("script", 4);
+  await value.commands.execute(
+    project.id,
+    value.taskId,
+    { requestId: "request_ws503_generate_script", card: scriptCard(value.taskId, 4) },
+    value.creator,
+  );
+  const script = await value.stages.confirmStage(project.id, value.taskId, "script", {
+    requestId: "request_ws503_confirm_script",
+    expectedTaskRevision: 5,
+  }, value.creator);
   confirmations.push(script.confirmation);
 
   const assets = await value.stages.confirmStage(
@@ -583,7 +633,7 @@ test("WS-503 acceptance path reaches delivery through all six human confirmation
     "asset_matching",
     {
       requestId: "request_ws503_confirm_asset_matching",
-      expectedTaskRevision: 5,
+      expectedTaskRevision: 6,
       assetSelection: {
         expectedProjectAssetPoolRevision: 1,
         selectedAssets: selectedReusableAssets(),
@@ -594,11 +644,33 @@ test("WS-503 acceptance path reaches delivery through all six human confirmation
   );
   confirmations.push(assets.confirmation);
 
-  const storyboard = await submitArtifactStage("storyboard", 6);
+  const submitSimulatedStage = async (
+    stage: "storyboard" | "video_preview" | "delivery",
+    expectedTaskRevision: number,
+  ) => {
+    await value.commands.execute(
+      project.id,
+      value.taskId,
+      {
+        requestId: `request_ws503_generate_${stage}`,
+        card: simulatedStageCard(value.taskId, stage, expectedTaskRevision),
+      },
+      value.creator,
+    );
+    const view = await value.stages.getStageVersions(project.id, value.taskId, stage, value.creator);
+    assert.ok(view.generatedArtifact);
+    return value.stages.confirmStage(project.id, value.taskId, stage, {
+      requestId: `request_ws503_confirm_${stage}`,
+      expectedTaskRevision: expectedTaskRevision + 1,
+      comment: "人工确认 WS-503 用户链路中的服务端模拟产物。",
+    }, value.creator);
+  };
+
+  const storyboard = await submitSimulatedStage("storyboard", 7);
   confirmations.push(storyboard.confirmation);
-  const preview = await submitArtifactStage("video_preview", 7);
+  const preview = await submitSimulatedStage("video_preview", 9);
   confirmations.push(preview.confirmation);
-  const delivery = await submitArtifactStage("delivery", 8);
+  const delivery = await submitSimulatedStage("delivery", 11);
   confirmations.push(delivery.confirmation);
 
   const completed = await value.tasks.load(value.taskId);
@@ -606,7 +678,7 @@ test("WS-503 acceptance path reaches delivery through all six human confirmation
   assert.equal(completed.videoTask.status, "completed");
   assert.equal(completed.videoTask.currentStage, "delivery");
   assert.equal(completed.videoTask.stageStatus, "confirmed");
-  assert.equal(completed.videoTask.revision, 9);
+  assert.equal(completed.videoTask.revision, 13);
   assert.deepEqual(
     confirmations.map(({ stage, source }) => ({ stage, source })),
     [
