@@ -250,11 +250,15 @@ function storyboardBody(task, view, assetView, adjustments) {
     }).join("")}</div>`;
 }
 
-function previewBody(task, view, project) {
+function previewBody(task, view, project, productionState) {
   const version = activeVersion(view);
   const ratio = project?.project?.aspectRatio || "9:16";
+  const accessUrl = productionState?.access?.access?.url;
+  const player = accessUrl
+    ? `<video controls playsinline preload="metadata" src="${escapeHtml(accessUrl)}"></video>`
+    : `<div><span class="preview-play"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg></span><strong>${productionState?.running ? "真实视频生成中" : "等待真实视频"}</strong><small>${productionState?.running ? "正在调用 Ark 并校验产物，请勿关闭页面" : "需配置 Ark 模型与私有对象存储"}</small></div>`;
   return `<div class="preview-layout">
-    <section class="preview-player ratio-${ratio.replace(":", "-")}"><div><span class="preview-play"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg></span><strong>模拟预览</strong><small>未接入真实视频生成</small></div><time>00:${String(task.durationSeconds).padStart(2, "0")}</time></section>
+    <section class="preview-player ratio-${ratio.replace(":", "-")}">${player}<time>00:${String(task.durationSeconds).padStart(2, "0")}</time></section>
     <aside class="production-card preview-info"><header><h3>${version ? `预览 v${version.version}` : "预览信息"}</h3>${statusBadge(task, "video_preview")}</header><dl><div><dt>画幅</dt><dd>${escapeHtml(ratio)}</dd></div><div><dt>时长</dt><dd>${task.durationSeconds} 秒</dd></div><div><dt>生成状态</dt><dd>${version ? "已生成版本" : "等待生成"}</dd></div></dl></aside>
   </div>`;
 }
@@ -275,8 +279,10 @@ function productionStatusCard(label, presentation) {
   return `<article class="production-status-card ${presentation.tone || "neutral"}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(presentation.value)}</strong><small>${escapeHtml(presentation.detail)}</small></article>`;
 }
 
-function productionStatusStrip(budgetState, runLockState) {
-  const estimate = { tone: "neutral", value: "生成前获取", detail: "服务接入后显示" };
+function productionStatusStrip(budgetState, runLockState, productionState) {
+  const estimate = productionState?.estimate
+    ? { tone: "success", value: `${(productionState.estimate.amountMinor / 100).toFixed(2)} ${productionState.estimate.currency}`, detail: "服务端报价，提交时重新校验" }
+    : { tone: productionState?.estimateError ? "danger" : "neutral", value: productionState?.estimateError ? "不可用" : "读取中", detail: productionState?.estimateError ? errorText(productionState.estimateError) : "正在获取服务端报价" };
   const budget = budgetState?.presentation || {
     tone: budgetState?.error ? "danger" : "neutral",
     value: budgetState?.error ? "读取失败" : "读取中",
@@ -309,6 +315,7 @@ export function createWorkspaceStagesPanel(options) {
   let runLockState = null;
   let adjustments = {};
   let simulatedArtifact = null;
+  let productionState = null;
   let contextAccountId = null;
   let contextGeneration = 0;
   let busy = false;
@@ -331,6 +338,7 @@ export function createWorkspaceStagesPanel(options) {
     runLockState = null;
     adjustments = {};
     simulatedArtifact = null;
+    productionState = null;
   }
 
   function clearRoots() {
@@ -387,22 +395,22 @@ export function createWorkspaceStagesPanel(options) {
       task.ownedByCurrentAccount &&
       task.status === "active" &&
       task.currentStage === stage &&
-      ["script", "storyboard", "video_preview", "delivery"].includes(stage) &&
+      ["script", "storyboard", "delivery"].includes(stage) &&
       ["in_progress", "awaiting_confirmation"].includes(task.stageStatus),
     );
     const body = stage === "strategy" ? strategyBody(task, view)
       : stage === "script" ? scriptBody(task, view)
       : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
-      : stage === "video_preview" ? previewBody(task, view, project)
+      : stage === "video_preview" ? previewBody(task, view, project, productionState)
       : deliveryBody(task, stageViews);
     root.innerHTML = `<div class="production-stage-shell">
       <header class="production-stage-header"><div><div class="production-stage-title"><h2>${stageLabels[stage]}</h2>${statusBadge(task, stage)}</div><p>${notice(stage)}</p></div>
-        <div class="production-stage-actions">${canSimulate ? `<button class="button secondary" type="button" data-stage-simulate ${busy ? "disabled" : ""}>${task.stageStatus === "awaiting_confirmation" ? "恢复模拟产物" : "生成模拟产物"}</button>` : ""}<button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
+        <div class="production-stage-actions">${canSimulate ? `<button class="button secondary" type="button" data-stage-simulate ${busy ? "disabled" : ""}>${task.stageStatus === "awaiting_confirmation" ? "恢复阶段产物" : "生成阶段产物"}</button>` : ""}${stage === "video_preview" && task.ownedByCurrentAccount && task.stageStatus === "in_progress" ? `<button class="button primary" type="button" data-video-produce ${busy ? "disabled" : ""}>${productionState?.running ? "真实生成中…" : "生成真实视频"}</button>` : ""}<button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
       </header>
       ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
       ${stagePath(task, stage)}
       <div class="production-stage-notice ${stagePosition(task, stage)}"><svg class="icon" aria-hidden="true"><use href="#i-spark" /></svg><span>${notice(stage)}</span></div>
-      ${["video_preview", "delivery"].includes(stage) ? productionStatusStrip(budgetState, runLockState) : ""}
+      ${["video_preview", "delivery"].includes(stage) ? productionStatusStrip(budgetState, runLockState, productionState) : ""}
       <div class="production-stage-body">${body}</div>
     </div>`;
     root.querySelectorAll("[data-planning-stage]").forEach(function (button) {
@@ -416,6 +424,7 @@ export function createWorkspaceStagesPanel(options) {
     });
     root.querySelector("[data-stage-history]")?.addEventListener("click", showHistory);
     root.querySelector("[data-stage-simulate]")?.addEventListener("click", simulateStage);
+    root.querySelector("[data-video-produce]")?.addEventListener("click", produceVideo);
     root.querySelector("[data-stage-confirm]")?.addEventListener("click", confirmStage);
     root.querySelectorAll("[data-shot-adjust]").forEach(function (button) {
       button.addEventListener("click", function () { showAssetPicker(Number(button.dataset.shotIndex), button.dataset.shotAdjust); });
@@ -431,7 +440,16 @@ export function createWorkspaceStagesPanel(options) {
     renderLoading(root);
     try {
       const productionStatusPromise = ["video_preview", "delivery"].includes(stage)
-        ? Promise.allSettled([options.api.getOwnBudget(), options.api.getProductionStatus()])
+        ? Promise.allSettled([
+            options.api.getOwnBudget(),
+            options.api.getProductionStatus(),
+            stage === "video_preview" && typeof options.api.estimateVideoProduction === "function"
+              ? options.api.estimateVideoProduction(projectId, task.id)
+              : Promise.resolve(null),
+            stage === "video_preview" && typeof options.api.getVideoProduction === "function"
+              ? options.api.getVideoProduction(projectId, task.id)
+              : Promise.resolve(null),
+          ])
         : null;
       if (stage === "delivery") {
         const results = await Promise.all(stageOrder.map(function (item) { return options.api.getStageVersions(projectId, task.id, item); }));
@@ -459,6 +477,22 @@ export function createWorkspaceStagesPanel(options) {
             ? { presentation: workspaceRunLockPresentation(productionResults[1].value, task.id) }
             : { error: productionResults[1].reason };
         } catch (error) { runLockState = { error: error }; }
+        if (stage === "video_preview") {
+          productionState = {
+            ...(productionState || {}),
+            ...(productionResults[2].status === "fulfilled"
+              ? { estimate: productionResults[2].value, estimateError: null }
+              : { estimateError: productionResults[2].reason }),
+          };
+          if (productionResults[3].status === "fulfilled" && productionResults[3].value?.artifact) {
+            simulatedArtifact = productionResults[3].value.artifact;
+            productionState = {
+              ...productionState,
+              access: productionResults[3].value.access,
+              mediaArtifact: productionResults[3].value.mediaArtifact,
+            };
+          }
+        }
       }
       task = { ...task, ...view.videoTask };
       render();
@@ -530,6 +564,43 @@ export function createWorkspaceStagesPanel(options) {
     } finally {
       setPanelBusy(false);
       render();
+    }
+  }
+
+  async function produceVideo() {
+    if (busy || !task || typeof options.api.startVideoProduction !== "function") return;
+    const mutationContextGeneration = contextGeneration;
+    const mutationProjectId = projectId;
+    const mutationTaskId = task.id;
+    setPanelBusy(true);
+    productionState = { ...(productionState || {}), running: true };
+    render();
+    try {
+      const result = await options.api.startVideoProduction(mutationProjectId, mutationTaskId, {
+        requestId: requestId("video_generation"),
+        expectedTaskRevision: task.revision,
+      });
+      if (mutationContextGeneration !== contextGeneration || mutationTaskId !== task?.id) return;
+      task = { ...task, ...result.videoTask };
+      simulatedArtifact = result.artifact;
+      const access = await options.api.getMediaArtifactAccess(
+        mutationProjectId,
+        mutationTaskId,
+        result.mediaArtifactId,
+        "playback",
+      );
+      productionState = { ...(productionState || {}), running: false, result: result, access: access };
+      options.onTaskUpdated?.(result.videoTask);
+    } catch (error) {
+      if (mutationContextGeneration === contextGeneration) {
+        productionState = { ...(productionState || {}), running: false, error: error };
+        showMessage(errorText(error));
+      }
+    } finally {
+      if (mutationContextGeneration === contextGeneration) {
+        setPanelBusy(false);
+        render();
+      }
     }
   }
 

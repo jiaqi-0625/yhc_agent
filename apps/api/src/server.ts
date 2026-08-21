@@ -68,6 +68,7 @@ import {
   matchVideoTaskStagePath,
 } from "./video-task-stage-routes.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
+import type { VideoProductionRuntime } from "./video-production-runtime.ts";
 import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
 import { LocalTemporaryAssetStore } from "./temporary-asset-store.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
@@ -178,6 +179,7 @@ async function handleRequest(
   accountRunLocks: AccountRunLockRuntime | undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined,
+  videoProduction: VideoProductionRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
@@ -335,6 +337,7 @@ async function handleRequest(
       videoTaskStages,
       workspaceSessions,
       developmentAccountsEnabled,
+      videoProduction,
     )
   ) return;
   if (
@@ -477,6 +480,7 @@ export function createApiServer(
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
+  videoProduction: VideoProductionRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -500,6 +504,7 @@ export function createApiServer(
       projectLibrary !== undefined ||
       accountRunLocks !== undefined ||
       mediaArtifacts !== undefined
+      || videoProduction !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -773,6 +778,7 @@ export function createApiServer(
       activeAccountRunLocks,
       developmentCompanyAssetMedia,
       mediaArtifacts,
+      videoProduction,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -802,6 +808,7 @@ export async function startApiServer(
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
+  videoProduction: VideoProductionRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -828,6 +835,7 @@ export async function startApiServer(
       accountRunLocks,
       developmentCompanyAssetMedia,
       mediaArtifacts,
+      videoProduction,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -1007,6 +1015,7 @@ export async function startConfiguredApiServer(
       postgres.accountRunLocks,
       createDevelopmentCompanyAssetMediaStore(host, environment),
       postgres.mediaArtifacts,
+      postgres.videoProduction,
     );
     attachPostgresLifecycle(
       server,

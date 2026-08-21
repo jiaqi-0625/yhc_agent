@@ -21,7 +21,7 @@ Local-first Agent framework built on Pi Agent Core for the automotive informatio
 - Restricted vehicle snapshot and claim validation tools remain available as a separate optional business assembly.
 - Unit and integration tests that require no model credentials.
 
-The default chat runtime still has no domain tools and does not call a paid model. The local acceptance page exercises the strategy vertical through bounded business APIs and a deterministic strategy generator. It does not publish ads, mutate an official vehicle catalog, spend media budget, or perform image/video generation.
+The default video backend remains disabled and never spends credits. When explicitly configured, the Workspace video-preview action uses the server-side Ark adapter, account budget, single-run lock, MP4 validation, private object storage, and authenticated playback flow. It does not publish ads or manage media buying.
 
 ## Requirements
 
@@ -97,7 +97,7 @@ Production identity-provider wiring is separate from database persistence. Devel
 
 Media files are stored as private objects, while PostgreSQL stores their tenant/task scope, immutable object locator, version, byte checksum, dimensions, duration, and audit metadata. The application never stores a presigned URL: an authenticated request creates a fresh short-lived playback or download URL after rechecking workspace authorization.
 
-Object storage is disabled by default so existing simulated preview flows remain usable. To enable the S3-compatible adapter, set the following in the ignored `.env`:
+Object storage is disabled by default. To enable the S3-compatible adapter, set the following in the ignored `.env`:
 
 ```dotenv
 OBJECT_STORAGE_BACKEND=s3
@@ -112,7 +112,23 @@ Enabling the adapter makes startup and `GET /ready` verify both PostgreSQL and t
 
 - `POST /v1/workspace/batch-projects/{projectId}/video-tasks/{videoTaskId}/media-artifacts/{artifactId}/access` with `{ "purpose": "playback" }` or `{ "purpose": "download" }`
 
-The response contains public media metadata plus `access.method`, `access.url`, and `access.expiresAt`; it never exposes the bucket, object key, object version, or cloud credentials. The Seedance/video-generation provider is still a separate integration: this object-storage foundation does not claim that a real video provider is connected.
+The response contains public media metadata plus `access.method`, `access.url`, and `access.expiresAt`; it never exposes the bucket, object key, object version, or cloud credentials.
+
+For a local private bucket, `compose.postgres.yml` includes MinIO and a one-shot private-bucket initializer. Generate unique `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` values only in the ignored `.env`, then point the S3 adapter at `http://127.0.0.1:9000` with path-style addressing. Local MinIO is for acceptance runs; Ark can return its output to the API, which downloads and validates the MP4 before uploading it to this private bucket.
+
+### Configure real Ark video generation
+
+Real generation is fail-closed until the following server-only settings exist in the ignored `.env`:
+
+```dotenv
+VIDEO_GENERATION_BACKEND=volcengine_ark
+ARK_VIDEO_API_KEY=
+ARK_VIDEO_MODEL_ID=
+ARK_VIDEO_RESOLUTION=720p
+ARK_VIDEO_ESTIMATED_COST_CNY_MINOR=1000
+```
+
+`ARK_VIDEO_MODEL_ID` is the actual Ark Model ID or Endpoint ID available to the account. The estimate value is the server budget reservation/cap shown before submission; it must be confirmed against the account's current Ark price. The Workspace submits only after an explicit user click, polls the asynchronous Ark task while holding the account run lock and reservation, downloads the completed output, derives duration and dimensions from MP4 bytes, hashes and uploads it, and returns a persisted `media_artifact` reference for human confirmation. Provider download URLs and credentials never enter public task state or Agent context.
 
 Interactive CLI:
 

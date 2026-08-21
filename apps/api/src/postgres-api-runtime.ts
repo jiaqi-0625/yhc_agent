@@ -10,6 +10,7 @@ import type { TaskContext } from "@firefly/schemas";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
+import { ArkVideoGenerationProvider } from "./ark-video-generation-provider.ts";
 import {
   createAgentAssetMatchingCandidateReader,
   createCurrentProjectAssetPoolReader,
@@ -29,6 +30,7 @@ import { PostgresAccountBudgetStore } from "./postgres-account-budget-store.ts";
 import { PostgresAccountRunLockStore } from "./postgres-account-run-lock-store.ts";
 import { PostgresBatchProjectStore } from "./postgres-batch-project-store.ts";
 import { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
+import { HighCostOperationRuntime } from "./high-cost-operation-runtime.ts";
 import type { MediaObjectStorage } from "./media-object-storage.ts";
 import { parseObjectStorageConfig } from "./object-storage-config.ts";
 import { PostgresMediaArtifactStore } from "./postgres-media-artifact-store.ts";
@@ -50,6 +52,11 @@ import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
+import {
+  createConfiguredVideoPricingProvider,
+  VideoProductionRuntime,
+} from "./video-production-runtime.ts";
+import { parseVideoGenerationConfig } from "./video-generation-config.ts";
 import { WorkspaceAdminRuntime } from "./workspace-admin-runtime.ts";
 import { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 import {
@@ -127,6 +134,7 @@ export interface PostgresApiRuntime {
   readonly videoTasks: VideoTaskRuntime;
   readonly videoTaskStages: VideoTaskStageRuntime;
   readonly mediaArtifacts: MediaArtifactRuntime | undefined;
+  readonly videoProduction: VideoProductionRuntime | undefined;
   readonly projectLibrary: ProjectLibraryRuntime;
   readonly agentActionCommands: AgentActionCommandRuntime;
   readonly projectAssets: ProjectAssetRuntime;
@@ -185,6 +193,10 @@ export async function createPostgresApiRuntime(
         ? createS3MediaObjectStorage(objectStorageConfig)
         : undefined
     );
+    const videoGenerationConfig = parseVideoGenerationConfig(options.environment ?? process.env);
+    if (videoGenerationConfig.backend !== "disabled" && mediaObjectStorage === undefined) {
+      throw new Error("Real video generation requires private media object storage.");
+    }
     const migrations = options.migrations ?? await loadDatabaseMigrations();
     const readiness = async (): Promise<void> => {
       await database.ping();
@@ -206,7 +218,12 @@ export async function createPostgresApiRuntime(
     const assetCoordinator = new PostgresProjectAssetCoordinator(database);
 
     const workspaceSessions = new WorkspaceSessionRuntime(sessionStore, administrationStore);
-    const accountBudgets = new AccountBudgetRuntime(budgetStore, unavailablePricingProvider());
+    const accountBudgets = new AccountBudgetRuntime(
+      budgetStore,
+      videoGenerationConfig.backend === "volcengine_ark"
+        ? createConfiguredVideoPricingProvider(videoGenerationConfig)
+        : unavailablePricingProvider(),
+    );
     const workspaceAdmin = new WorkspaceAdminRuntime(
       administrationStore,
       accountBudgets,
@@ -260,6 +277,22 @@ export async function createPostgresApiRuntime(
           mediaArtifactStore,
           mediaObjectStorage,
         );
+    const accountRunLocks = new AccountRunLockRuntime(runLockStore);
+    const videoProduction = videoGenerationConfig.backend !== "volcengine_ark"
+      || mediaObjectStorage === undefined
+      || mediaArtifacts === undefined
+      ? undefined
+      : new VideoProductionRuntime(
+          administrationStore,
+          projectStore,
+          videoTaskStore,
+          mediaArtifactStore,
+          mediaArtifacts,
+          mediaObjectStorage,
+          new HighCostOperationRuntime(accountRunLocks, accountBudgets),
+          new ArkVideoGenerationProvider(videoGenerationConfig),
+          videoGenerationConfig,
+        );
     const videoTaskStages = new VideoTaskStageRuntime(
       administrationStore,
       projectStore,
@@ -286,8 +319,6 @@ export async function createPostgresApiRuntime(
       undefined,
       assetCoordinator,
     );
-    const accountRunLocks = new AccountRunLockRuntime(runLockStore);
-
     return Object.freeze({
       database,
       workspaceSessions,
@@ -296,6 +327,7 @@ export async function createPostgresApiRuntime(
       videoTasks,
       videoTaskStages,
       mediaArtifacts,
+      videoProduction,
       projectLibrary,
       agentActionCommands,
       projectAssets,
