@@ -527,9 +527,12 @@ test("asset matching confirmation atomically locks the exact server-composed sna
   const value = await fixture();
   const upstream = await prepareAssetMatchingApproval(value);
   const editable = await value.tasks.load(value.taskId);
+  assert.ok(editable);
   assert.equal(editable?.videoTask.currentStage, "asset_matching");
   assert.equal(editable?.videoTask.stageStatus, "in_progress");
   assert.equal(editable?.videoTask.revision, 5);
+  editable.videoTask.scriptInput = "【0–5 秒】画面：后排空间。旁白：大五座空间。\n【5–10 秒】画面：内饰。旁白：舒适座舱。\n【10–15 秒】画面：车辆侧面。旁白：从容出发。\n【15–20 秒】画面：城市道路。旁白：稳定行驶。\n【20–25 秒】画面：车身细节。旁白：设计简洁。\n【25–30 秒】画面：整车定格。旁白：萤火 E5。";
+  await value.tasks.save(editable);
   const input = {
     requestId: "request_confirm_asset_matching",
     expectedTaskRevision: 5,
@@ -586,6 +589,25 @@ test("asset matching confirmation atomically locks the exact server-composed sna
     ],
   );
 
+  const adaptedScript = await value.stages.getStageVersions(
+    project.id,
+    value.taskId,
+    "script",
+    value.creator,
+  );
+  assert.equal(adaptedScript.scriptAdaptation?.source, "selected_presenter");
+  assert.match(adaptedScript.scriptAdaptation?.script ?? "", /已选主播正面出镜口播本段旁白/u);
+  assert.match(adaptedScript.scriptAdaptation?.script ?? "", /大五座/u);
+
+  const storyboard = await value.stages.getStageVersions(
+    project.id,
+    value.taskId,
+    "storyboard",
+    value.creator,
+  );
+  assert.ok(storyboard.storyboardPlan?.shots.every((shot) =>
+    /已选主播正面出镜口播本段旁白/u.test(shot.scriptExcerpt)));
+
   await value.projects.transactAssetPool(tenantId, project.id, (current) => ({
     ...structuredClone(current),
     revision: current.revision + 1,
@@ -601,6 +623,55 @@ test("asset matching confirmation atomically locks the exact server-composed sna
   assert.equal(replay.replayed, true);
   assert.deepEqual(replay.receipt, confirmed.receipt);
   assert.deepEqual(await value.tasks.load(value.taskId), persisted);
+});
+
+test("confirmed asset matching reopens before storyboard confirmation and reruns script matching", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+  await value.stages.confirmStage(project.id, value.taskId, "asset_matching", {
+    requestId: "request_confirm_assets_before_revision",
+    expectedTaskRevision: 5,
+    assetSelection: {
+      expectedProjectAssetPoolRevision: 1,
+      selectedAssets: selectedReusableAssets(),
+    },
+  }, value.creator);
+  await value.commands.execute(
+    project.id,
+    value.taskId,
+    {
+      requestId: "request_generate_storyboard_before_asset_revision",
+      card: simulatedStageCard(value.taskId, "storyboard", 6),
+    },
+    value.creator,
+  );
+
+  const reopened = await value.stages.reopenAssetMatching(project.id, value.taskId, {
+    requestId: "request_reopen_assets_for_presenter",
+    expectedTaskRevision: 7,
+    reason: "更换人物口播主播并重新匹配",
+  }, value.creator);
+
+  assert.equal(reopened.replayed, false);
+  assert.equal(reopened.videoTask.currentStage, "asset_matching");
+  assert.equal(reopened.videoTask.stageStatus, "in_progress");
+  assert.equal(reopened.videoTask.assetSnapshotId, undefined);
+  assert.equal(reopened.videoTask.revision, 8);
+  assert.equal(reopened.receipt.action, "reopen_stage");
+  assert.equal(reopened.invalidations[0]?.stage, "asset_matching");
+  assert.equal(reopened.invalidations[0]?.cause.kind, "manual_revision");
+
+  const persisted = await value.tasks.load(value.taskId);
+  assert.ok(persisted);
+  assert.equal(persisted.activeStageArtifactVersionIds.asset_matching, undefined);
+  assert.equal(persisted.stageArtifactVersions.some(({ stage }) => stage === "asset_matching"), true);
+  const replay = await value.stages.reopenAssetMatching(project.id, value.taskId, {
+    requestId: "request_reopen_assets_for_presenter",
+    expectedTaskRevision: 7,
+    reason: "更换人物口播主播并重新匹配",
+  }, value.creator);
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.receipt, reopened.receipt);
 });
 
 test("WS-503 acceptance path reaches delivery through all six human confirmation gates", async () => {

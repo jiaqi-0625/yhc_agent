@@ -54,7 +54,7 @@ export function confirmationAvailability(task, stage, view) {
   if (["storyboard", "video_preview", "delivery"].includes(stage) && view?.generatedArtifact) {
     return {
       enabled: true,
-      label: stage === "storyboard" ? "确认分镜" : stage === "video_preview" ? "确认模拟预览" : "确认模拟交付",
+      label: stage === "storyboard" ? "确认方案并进入真实视频" : stage === "video_preview" ? "确认模拟预览" : "确认模拟交付",
     };
   }
   const active = view?.versions?.find(function (item) { return item.id === view.activeArtifactVersionId; });
@@ -200,13 +200,15 @@ function scriptBody(task, view) {
   if (!task.scriptInput && !version) {
     return `<div class="production-empty"><span>策略确认后由 Agent 生成脚本</span></div>`;
   }
-  const script = task.scriptInput || [
+  const script = view?.scriptAdaptation?.source === "selected_presenter"
+    ? view.scriptAdaptation.script
+    : task.scriptInput || [
     `开场：以${task.theme}建立画面。`,
     `主体：围绕${task.audience}呈现车型卖点。`,
-    `收束：品牌与车型露出。`,
-  ].join("\n");
+      `收束：品牌与车型露出。`,
+    ].join("\n");
   return `<div class="script-layout">
-    <section class="production-card script-document"><header><div><h3>${version ? `脚本 v${version.version}` : "已有脚本"}</h3><span>${task.durationSeconds} 秒</span></div><span class="stage-mini-status">${task.platformTags?.[0] || "信息流"}</span></header>
+    <section class="production-card script-document"><header><div><h3>${version ? `脚本 v${version.version}` : "已有脚本"}${view?.scriptAdaptation ? " · 人物口播适配" : ""}</h3><span>${task.durationSeconds} 秒</span></div><span class="stage-mini-status">${task.platformTags?.[0] || "信息流"}</span></header>
       <div class="script-lines">${script.split(/\n+/u).filter(Boolean).map(function (line, index) {
         return `<div><time>${String(index * Math.max(1, Math.floor(task.durationSeconds / 3))).padStart(2, "0")}s</time><p>${escapeHtml(line)}</p></div>`;
       }).join("")}</div>
@@ -221,50 +223,193 @@ function assetItems(assetView) {
     return [item.source, item.assetId, item.version, item.category].join(":");
   }));
   const company = (assetView.companyAssets || []).map(function (item) {
-    return { name: item.displayName, category: item.reference.category, reference: item.reference };
+    return {
+      name: item.displayName,
+      description: item.description || item.recommendationReason || "",
+      tags: item.tags || [],
+      category: item.reference.category,
+      reference: item.reference,
+    };
   });
   const temporary = (assetView.temporaryAssets || []).map(function (item) {
-    return { name: item.fileName, category: item.category, reference: { ...item, assetId: item.id, source: "local_upload" } };
+    return {
+      name: item.fileName,
+      description: item.sourceDescription || "",
+      tags: [],
+      category: item.category,
+      reference: { ...item, assetId: item.id, source: "local_upload" },
+    };
   });
   return company.concat(temporary).filter(function (item) {
     return selected.has([item.reference.source, item.reference.assetId, item.reference.version, item.reference.category].join(":"));
   });
 }
 
-function storyboardBody(task, view, assetView, adjustments) {
+export function simulatedStageActionCard(videoTaskId, stage, expectedRevision) {
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId,
+    action: "generate_simulated_stage_artifact",
+    label: "生成当前阶段模拟产物",
+    summary: stage === "storyboard"
+      ? "先生成可人工确认的镜头时序与素材映射；确认后在制作阶段调用真实视频模型逐镜头生成。"
+      : "生成用于 WS-503 完整用户链路验收的当前阶段模拟产物。",
+    expectedRevision,
+    cost: { kind: "free" },
+    payload: { schemaVersion: 1, stage },
+  };
+}
+
+function storyboardFallbackShots(task) {
+  const durations = task.durationSeconds === 10 ? [4, 3, 3]
+    : task.durationSeconds === 15 ? [3, 3, 3, 3, 3]
+      : [5, 5, 5, 5, 5, 5];
+  let startSeconds = 0;
+  return durations.map(function (durationSeconds, shotIndex) {
+    const endSeconds = startSeconds + durationSeconds;
+    const shot = {
+      shotIndex,
+      startSeconds,
+      endSeconds,
+      durationSeconds,
+      purpose: shotIndex === 0 ? "脚本开场" : shotIndex === durations.length - 1 ? "品牌收束" : "脚本卖点演绎",
+      scriptExcerpt: "未能解析脚本时间段，请返回脚本阶段修正后再确认。",
+    };
+    startSeconds = endSeconds;
+    return shot;
+  });
+}
+
+function storyboardShots(task, view) {
+  return view?.storyboardPlan?.source === "confirmed_script" && Array.isArray(view.storyboardPlan.shots)
+    ? view.storyboardPlan.shots
+    : storyboardFallbackShots(task);
+}
+
+const storyboardAssetRules = Object.freeze([
+  { script: ["后排", "空间", "座椅", "放倒", "装载", "后备箱"], asset: ["后排", "座椅", "内饰", "后备箱", "放倒"] },
+  { script: ["续航", "CLTC", "电池", "仪表", "充电", "补能"], asset: ["仪表", "座舱", "中控", "充电", "电池"] },
+  { script: ["前脸", "侧面", "外观", "车身", "整车", "定格", "车型名称"], asset: ["整车", "前45度", "侧面", "外观", "棚拍"] },
+]);
+
+function storyboardAssetScore(asset, shot) {
+  const script = `${shot.purpose} ${shot.scriptExcerpt}`.toLocaleLowerCase("zh-CN");
+  const assetText = `${asset.name} ${asset.description || ""} ${(asset.tags || []).join(" ")}`.toLocaleLowerCase("zh-CN");
+  return storyboardAssetRules.reduce(function (score, rule) {
+    if (!rule.script.some(function (term) { return script.includes(term.toLocaleLowerCase("zh-CN")); })) return score;
+    return score + rule.asset.reduce(function (value, term) {
+      return value + (assetText.includes(term.toLocaleLowerCase("zh-CN")) ? 1 : 0);
+    }, 0);
+  }, 0);
+}
+
+function shotVehicle(vehicles, shot) {
+  return vehicles
+    .map(function (asset, index) { return { asset, index, score: storyboardAssetScore(asset, shot) }; })
+    .sort(function (left, right) { return right.score - left.score || left.index - right.index; })[0]?.asset || null;
+}
+
+function shotRequires(shot, category) {
+  const text = shot.scriptExcerpt.toLocaleLowerCase("zh-CN");
+  const terms = category === "person"
+    ? ["人物", "一家", "父母", "孩子", "驾驶员", "乘员", "主持人", "主播", "口播", "出镜"]
+    : ["清晨", "露营", "城市", "道路", "公路", "社区", "湖边", "夜间", "出发"];
+  return terms.some(function (term) { return text.includes(term.toLocaleLowerCase("zh-CN")); });
+}
+
+function storyboardBody(task, view, assetView, adjustments, generations, shotMedia) {
   const assets = assetItems(assetView);
-  const vehicle = assets.find(function (item) { return item.category === "vehicle"; });
+  const vehicles = assets.filter(function (item) { return item.category === "vehicle"; });
   const people = assets.filter(function (item) { return item.category === "person"; });
   const scenes = assets.filter(function (item) { return item.category === "scene"; });
-  const count = task.durationSeconds <= 10 ? 3 : task.durationSeconds <= 15 ? 4 : 6;
+  const shots = storyboardShots(task, view);
   const version = activeVersion(view);
-  const shotLength = Math.max(1, Math.floor(task.durationSeconds / count));
-  return `<div class="storyboard-toolbar"><span>${count} 个镜头 · ${task.durationSeconds} 秒</span><span>${version ? `分镜 v${version.version}` : "分镜草稿"}</span></div>
-    <div class="storyboard-grid">${Array.from({ length: count }, function (_, index) {
-      const person = adjustments[index]?.person || people[index % Math.max(people.length, 1)] || null;
-      const scene = adjustments[index]?.scene || scenes[index % Math.max(scenes.length, 1)] || null;
-      const start = index * shotLength;
-      const end = index === count - 1 ? task.durationSeconds : Math.min(task.durationSeconds, start + shotLength);
+  return `<div class="storyboard-toolbar"><span>${shots.length} 个真实视频目标镜头 · ${task.durationSeconds} 秒</span><span>${version ? `分镜方案 v${version.version}` : "分镜方案（不调用视频模型）"}</span></div>
+    <div class="storyboard-grid">${shots.map(function (shot, index) {
+      const vehicle = shotVehicle(vehicles, shot);
+      const generation = latestVideoGenerationForShot(generations, index);
+      const media = shotMedia.get(index);
+      const personRequired = shotRequires(shot, "person");
+      const sceneRequired = shotRequires(shot, "scene");
+      const person = personRequired ? adjustments[index]?.person || people[index % Math.max(people.length, 1)] || null : null;
+      const scene = sceneRequired ? adjustments[index]?.scene || scenes[index % Math.max(scenes.length, 1)] || null : null;
       return `<article class="storyboard-shot">
-        <div class="shot-preview"><span>${String(index + 1).padStart(2, "0")}</span><svg class="icon" aria-hidden="true"><use href="#i-image" /></svg><small>${start}–${end}s</small></div>
-        <div class="shot-body"><header><div><h3>镜头 ${index + 1}</h3><p>${index === 0 ? "建立场景" : index === count - 1 ? "品牌收束" : "卖点演绎"}</p></div>${adjustments[index] ? '<span class="stage-mini-status pending">人工调整</span>' : ""}</header>
+        <div class="shot-preview">${media
+          ? `<video controls playsinline preload="auto" src="${escapeHtml(media.url)}" aria-label="镜头 ${index + 1} 视频预览"></video>`
+          : generation?.status === "queued" || generation?.status === "running"
+            ? `<div class="shot-video-loading"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg><strong>${generation.progressPercent}%</strong><small>视频生成中</small></div>`
+            : generation?.status === "succeeded"
+              ? '<div class="shot-video-loading"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg><small>视频载入中</small></div>'
+              : '<svg class="icon" aria-hidden="true"><use href="#i-image" /></svg>'}<span>${String(index + 1).padStart(2, "0")}</span><small>${shot.startSeconds}–${shot.endSeconds}s</small></div>
+        <div class="shot-body"><header><div><h3>镜头 ${index + 1}</h3><p>${escapeHtml(shot.purpose)}</p></div><div class="shot-header-actions">${media ? `<button type="button" class="shot-video-open" data-shot-video-index="${index}">完整预览</button>` : ""}${adjustments[index] ? '<span class="stage-mini-status pending">人工调整</span>' : ""}</div></header>
+          <p class="storyboard-script-excerpt"><strong>对应脚本</strong>${escapeHtml(shot.scriptExcerpt)}</p>
           <div class="shot-assets">
             <div><span>车型</span><strong>${escapeHtml(vehicle?.name || "已锁定车型")}</strong><em>锁定</em></div>
-            <div><span>人物</span><strong>${escapeHtml(person?.name || "未配置")}</strong><button type="button" data-shot-adjust="person" data-shot-index="${index}" ${people.length ? "" : "disabled"}>更换</button></div>
-            <div><span>场景</span><strong>${escapeHtml(scene?.name || "未配置")}</strong><button type="button" data-shot-adjust="scene" data-shot-index="${index}" ${scenes.length ? "" : "disabled"}>更换</button></div>
+            <div><span>人物</span><strong>${escapeHtml(personRequired ? person?.name || "缺少匹配人物" : "脚本未要求")}</strong>${personRequired ? `<button type="button" data-shot-adjust="person" data-shot-index="${index}" ${people.length ? "" : "disabled"}>更换</button>` : ""}</div>
+            <div><span>场景</span><strong>${escapeHtml(sceneRequired ? scene?.name || "缺少匹配场景" : "脚本未要求")}</strong>${sceneRequired ? `<button type="button" data-shot-adjust="scene" data-shot-index="${index}" ${scenes.length ? "" : "disabled"}>更换</button>` : ""}</div>
           </div>
         </div>
       </article>`;
     }).join("")}</div>`;
 }
 
-function previewBody(task, view, project) {
+export function expectedVideoShotCount(durationSeconds) {
+  return ({ 10: 3, 15: 5, 30: 6 })[durationSeconds] || 0;
+}
+
+export function remainingVideoShotIndices(shotCount, generations) {
+  const completed = new Set((generations || []).filter(function (item) {
+    return item.status === "succeeded" && item.output;
+  }).map(function (item) { return item.shotIndex; }));
+  return Array.from({ length: shotCount }, function (_value, shotIndex) { return shotIndex; })
+    .filter(function (shotIndex) { return !completed.has(shotIndex); });
+}
+
+export function latestVideoGenerationForShot(generations, shotIndex) {
+  return [...(generations || [])].reverse().find(function (item) {
+    return item.shotIndex === shotIndex;
+  }) || null;
+}
+
+function previewBody(task, view, project, generation, generations, mediaObjectUrl) {
   const version = activeVersion(view);
   const ratio = project?.project?.aspectRatio || "9:16";
-  return `<div class="preview-layout">
-    <section class="preview-player ratio-${ratio.replace(":", "-")}"><div><span class="preview-play"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg></span><strong>模拟预览</strong><small>未接入真实视频生成</small></div><time>00:${String(task.durationSeconds).padStart(2, "0")}</time></section>
-    <aside class="production-card preview-info"><header><h3>${version ? `预览 v${version.version}` : "预览信息"}</h3>${statusBadge(task, "video_preview")}</header><dl><div><dt>画幅</dt><dd>${escapeHtml(ratio)}</dd></div><div><dt>时长</dt><dd>${task.durationSeconds} 秒</dd></div><div><dt>生成状态</dt><dd>${version ? "已生成版本" : "等待生成"}</dd></div></dl></aside>
+  const composite = (generations || []).find(function (item) { return item.composite; })?.composite || generation?.composite;
+  const completedShots = new Set((generations || []).filter(function (item) {
+    return item.status === "succeeded" && item.output;
+  }).map(function (item) { return item.shotIndex; })).size;
+  const expectedShots = expectedVideoShotCount(task.durationSeconds);
+  const mediaLabel = composite ? "完整广告成片" : "当前已完成镜头片段";
+  const mediaDuration = composite?.durationSeconds || generation?.output?.durationSeconds || task.durationSeconds;
+  return `<div class="preview-layout ratio-${ratio.replace(":", "-")}">
+    <section class="preview-player ratio-${ratio.replace(":", "-")}">${mediaObjectUrl
+      ? `<video controls playsinline preload="auto" src="${escapeHtml(mediaObjectUrl)}" aria-label="${mediaLabel}"></video>`
+      : `<div><span class="preview-play"><svg class="icon" aria-hidden="true"><use href="#i-film" /></svg></span><strong>${generation ? "真实广告生成中" : "等待生成完整广告"}</strong><small>${generation ? `当前镜头状态：${escapeHtml(generation.status)} · ${generation.progressPercent}%` : "生成前会展示总预估费用并要求人工确认"}</small></div>`}<time>00:${String(Math.round(mediaDuration)).padStart(2, "0")}</time></section>
+    <aside class="production-card preview-info"><header><h3>${version ? `预览 v${version.version}` : "预览信息"}</h3>${statusBadge(task, "video_preview")}</header><dl><div><dt>画幅</dt><dd>${escapeHtml(ratio)}</dd></div><div><dt>当前媒体</dt><dd>${mediaDuration} 秒</dd></div><div><dt>生成状态</dt><dd>${composite ? "完整广告已合成" : `已完成 ${completedShots}/${expectedShots} 个镜头`}</dd></div></dl>${mediaObjectUrl ? `<a class="button secondary" href="${escapeHtml(mediaObjectUrl)}" download="${composite ? "完整广告.mp4" : "当前镜头片段.mp4"}">下载${mediaLabel}</a>` : ""}</aside>
   </div>`;
+}
+
+function generationStatusBody(generation, generations, expectedCount) {
+  if (!generation && !generations?.length) return '<p class="production-empty-copy">尚未生成真实视频。点击“生成完整广告”后将逐镜头生成并合成为成片。</p>';
+  const status = { queued: "已排队", running: "生成中", succeeded: "生成完成", failed: "生成失败", cancelled: "已取消" }[generation.status] || generation.status;
+  const latest = new Map();
+  (generations || [generation]).forEach(function (item) { latest.set(item.shotIndex, item); });
+  const cards = [...latest.values()].sort(function (left, right) { return left.shotIndex - right.shotIndex; }).map(function (item) {
+    const itemStatus = { queued: "已排队", running: "生成中", succeeded: "生成完成", failed: "生成失败", cancelled: "已取消" }[item.status] || item.status;
+    const failure = item.failure ? `<p class="production-error" role="alert">${escapeHtml(item.failure.message)}</p>` : "";
+    return `<article class="production-card"><header><h3>真实视频 · 第 ${item.shotIndex + 1} 镜头</h3><span class="stage-mini-status ${item.status === "succeeded" ? "success" : ""}">${escapeHtml(itemStatus)}</span></header><p>进度 ${item.progressPercent}% · 预估 ${(item.estimate.amountMinor / 100).toFixed(2)} ${escapeHtml(item.estimate.currency)}</p>${failure}</article>`;
+  }).join("");
+  const composite = (generations || []).find(function (item) { return item.composite; })?.composite || generation?.composite;
+  const completedCount = [...latest.values()].filter(function (item) {
+    return item.status === "succeeded" && item.output;
+  }).length;
+  const progress = composite
+    ? "全部镜头已合成，完整广告可在播放器中验收。"
+    : completedCount < expectedCount
+      ? `已完成 ${completedCount}/${expectedCount} 个镜头，完整广告尚未合成。请点击“继续生成完整广告”完成剩余镜头。`
+      : `${status}；所有镜头完成后仍需合成为完整广告。`;
+  return `<p class="production-empty-copy">${escapeHtml(progress)}</p><div class="delivery-grid">${cards}</div>`;
 }
 
 function deliveryBody(task, views) {
@@ -272,7 +417,7 @@ function deliveryBody(task, views) {
     ["成片 MP4", "video_preview"], ["字幕", "video_preview"], ["最终脚本", "script"],
     ["分镜", "storyboard"], ["素材清单", "asset_matching"], ["剪映草稿", "delivery"],
   ];
-  return `<div class="delivery-summary"><section><span>${task.status === "completed" ? "交付完成" : "交付准备"}</span><strong>${files.filter(function (entry) { return activeVersion(views[entry[1]]); }).length} / ${files.length}</strong><small>文件就绪</small></section><p>真实成片与剪映草稿将在生成服务接入后提供。</p></div>
+  return `<div class="delivery-summary"><section><span>${task.status === "completed" ? "交付完成" : "交付准备"}</span><strong>${files.filter(function (entry) { return activeVersion(views[entry[1]]); }).length} / ${files.length}</strong><small>文件就绪</small></section><p>可逐镜头调用真实视频模型，并在全部完成后合成为一条无音轨 MP4 广告。</p></div>
     <div class="delivery-grid">${files.map(function ([name, stage]) {
       const ready = Boolean(activeVersion(views[stage]));
       return `<article class="production-card"><span class="delivery-file-icon"><svg class="icon" aria-hidden="true"><use href="${name.includes("成片") ? "#i-film" : name.includes("素材") ? "#i-package" : "#i-file"}" /></svg></span><div><h3>${name}</h3><p>${ready ? "版本已确认" : "尚未生成"}</p></div><span class="stage-mini-status ${ready ? "success" : ""}">${ready ? "就绪" : "等待"}</span></article>`;
@@ -284,7 +429,7 @@ function productionStatusCard(label, presentation) {
 }
 
 function productionStatusStrip(budgetState, runLockState) {
-  const estimate = { tone: "neutral", value: "生成前获取", detail: "服务接入后显示" };
+  const estimate = { tone: "neutral", value: "生成前获取", detail: "点击真实生成后由服务端计算" };
   const budget = budgetState?.presentation || {
     tone: budgetState?.error ? "danger" : "neutral",
     value: budgetState?.error ? "读取失败" : "读取中",
@@ -315,6 +460,13 @@ export function createWorkspaceStagesPanel(options) {
   let stageViews = {};
   let budgetState = null;
   let runLockState = null;
+  let videoGeneration = null;
+  let videoGenerations = [];
+  let videoGenerationError = null;
+  let videoMediaObjectUrl = null;
+  let videoMediaArtifactId = null;
+  let storyboardShotMedia = new Map();
+  let videoPollTimer = null;
   let adjustments = {};
   let contextAccountId = null;
   let contextGeneration = 0;
@@ -336,6 +488,16 @@ export function createWorkspaceStagesPanel(options) {
     stageViews = {};
     budgetState = null;
     runLockState = null;
+    videoGeneration = null;
+    videoGenerations = [];
+    videoGenerationError = null;
+    if (videoMediaObjectUrl) URL.revokeObjectURL(videoMediaObjectUrl);
+    videoMediaObjectUrl = null;
+    videoMediaArtifactId = null;
+    storyboardShotMedia.forEach(function (item) { URL.revokeObjectURL(item.url); });
+    storyboardShotMedia = new Map();
+    if (videoPollTimer) clearTimeout(videoPollTimer);
+    videoPollTimer = null;
     adjustments = {};
   }
 
@@ -388,22 +550,27 @@ export function createWorkspaceStagesPanel(options) {
     const canGenerateSimulation = ["storyboard", "video_preview", "delivery"].includes(stage)
       && task.currentStage === stage
       && task.stageStatus === "in_progress";
-    const simulationLabel = stage === "storyboard" ? "生成模拟分镜"
+    const canGenerateRealVideo = ["video_preview", "delivery"].includes(stage)
+      && task.status === "active"
+      && task.ownerAccountId === options.getCurrentAccountId?.();
+    const simulationLabel = stage === "storyboard" ? "生成分镜方案（不调用视频模型）"
       : stage === "video_preview" ? "生成模拟预览"
       : "准备模拟交付";
     const body = stage === "strategy" ? strategyBody(task, view)
       : stage === "script" ? scriptBody(task, view)
-      : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
-      : stage === "video_preview" ? previewBody(task, view, project)
+      : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments, videoGenerations, storyboardShotMedia)
+      : stage === "video_preview" ? previewBody(task, view, project, videoGeneration, videoGenerations, videoMediaObjectUrl)
       : deliveryBody(task, stageViews);
     root.innerHTML = `<div class="production-stage-shell">
       <header class="production-stage-header"><div><div class="production-stage-title"><h2>${stageLabels[stage]}</h2>${statusBadge(task, stage)}</div><p>${notice(stage)}</p></div>
-        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button>${canGenerateSimulation ? `<button class="button primary" type="button" data-stage-generate-simulation ${busy ? "disabled" : ""}>${simulationLabel}</button>` : ""}<button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
+        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button>${canGenerateRealVideo ? `<button class="button primary" type="button" data-generate-real-video ${busy ? "disabled" : ""}>${videoGenerations.length ? "继续生成完整广告" : "生成完整广告"}</button>` : ""}${canGenerateSimulation ? `<button class="button secondary" type="button" data-stage-generate-simulation ${busy ? "disabled" : ""}>${simulationLabel}</button>` : ""}<button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
       </header>
       ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
       ${stagePath(task, stage)}
       <div class="production-stage-notice ${stagePosition(task, stage)}"><svg class="icon" aria-hidden="true"><use href="#i-spark" /></svg><span>${notice(stage)}</span></div>
       ${["video_preview", "delivery"].includes(stage) ? productionStatusStrip(budgetState, runLockState) : ""}
+      ${["video_preview", "delivery"].includes(stage) ? generationStatusBody(videoGeneration, videoGenerations, expectedVideoShotCount(task.durationSeconds)) : ""}
+      ${videoGenerationError ? `<div class="production-error" role="alert">${escapeHtml(errorText(videoGenerationError))}</div>` : ""}
       <div class="production-stage-body">${body}</div>
     </div>`;
     root.querySelectorAll("[data-planning-stage]").forEach(function (button) {
@@ -417,10 +584,163 @@ export function createWorkspaceStagesPanel(options) {
     });
     root.querySelector("[data-stage-history]")?.addEventListener("click", showHistory);
     root.querySelector("[data-stage-generate-simulation]")?.addEventListener("click", generateSimulatedStage);
+    root.querySelector("[data-generate-real-video]")?.addEventListener("click", generateRealVideo);
     root.querySelector("[data-stage-confirm]")?.addEventListener("click", confirmStage);
+    root.querySelectorAll("[data-shot-video-index]").forEach(function (button) {
+      button.addEventListener("click", function () { showShotVideo(Number(button.dataset.shotVideoIndex)); });
+    });
     root.querySelectorAll("[data-shot-adjust]").forEach(function (button) {
       button.addEventListener("click", function () { showAssetPicker(Number(button.dataset.shotIndex), button.dataset.shotAdjust); });
     });
+  }
+
+  function scheduleVideoPoll() {
+    if (videoPollTimer) clearTimeout(videoPollTimer);
+    if (!["queued", "running"].includes(videoGeneration?.status)) return;
+    const scheduledGeneration = contextGeneration;
+    videoPollTimer = setTimeout(function () {
+      if (scheduledGeneration === contextGeneration) void loadLatestVideoGeneration();
+    }, 4000);
+  }
+
+  async function loadGenerationMedia() {
+    const composite = videoGenerations.find(function (item) { return item.composite; })?.composite || videoGeneration?.composite;
+    const output = composite || videoGeneration?.output;
+    if (!output || output.artifactId === videoMediaArtifactId) return;
+    const generation = contextGeneration;
+    const blob = await options.api.getVideoGenerationMedia(output.mediaUrl);
+    if (generation !== contextGeneration) return;
+    if (videoMediaObjectUrl) URL.revokeObjectURL(videoMediaObjectUrl);
+    videoMediaObjectUrl = URL.createObjectURL(blob);
+    videoMediaArtifactId = output.artifactId;
+    render();
+  }
+
+  async function loadStoryboardShotMedia() {
+    const generation = contextGeneration;
+    try {
+      const completed = videoGenerations.filter(function (item) {
+        return item.status === "succeeded" && item.output;
+      });
+      const loaded = await Promise.all(completed.map(async function (item) {
+        const existing = storyboardShotMedia.get(item.shotIndex);
+        if (existing?.artifactId === item.output.artifactId) return [item.shotIndex, existing];
+        const blob = await options.api.getVideoGenerationMedia(item.output.mediaUrl);
+        return [item.shotIndex, {
+          artifactId: item.output.artifactId,
+          url: URL.createObjectURL(blob),
+        }];
+      }));
+      if (generation !== contextGeneration) {
+        loaded.forEach(function ([, item]) {
+          if (![...storyboardShotMedia.values()].some(function (existing) { return existing.url === item.url; })) {
+            URL.revokeObjectURL(item.url);
+          }
+        });
+        return;
+      }
+      const next = new Map(loaded);
+      storyboardShotMedia.forEach(function (item) {
+        if (![...next.values()].some(function (candidate) { return candidate.url === item.url; })) {
+          URL.revokeObjectURL(item.url);
+        }
+      });
+      storyboardShotMedia = next;
+      videoGenerationError = null;
+      render();
+    } catch (error) {
+      if (generation !== contextGeneration) return;
+      videoGenerationError = error;
+      render();
+    }
+  }
+
+  async function loadLatestVideoGeneration() {
+    const generation = contextGeneration;
+    const activeProjectId = projectId;
+    const activeTaskId = task?.id;
+    if (!activeProjectId || !activeTaskId) return;
+    try {
+      const result = await options.api.getLatestVideoGeneration(activeProjectId, activeTaskId);
+      if (generation !== contextGeneration || activeProjectId !== projectId || activeTaskId !== task?.id) return;
+      videoGeneration = result.generation;
+      videoGenerations = result.generations || (result.generation ? [result.generation] : []);
+      videoGenerationError = null;
+      render();
+      if (visibleModule === "storyboard") await loadStoryboardShotMedia();
+      else if (videoGeneration?.output) await loadGenerationMedia();
+      scheduleVideoPoll();
+    } catch (error) {
+      if (generation !== contextGeneration) return;
+      videoGenerationError = error;
+      render();
+    }
+  }
+
+  async function generateRealVideo() {
+    if (busy || !task || !projectId) return;
+    const generation = contextGeneration;
+    setPanelBusy(true);
+    render();
+    try {
+      const estimateResult = await options.api.getVideoGenerationEstimate(projectId, task.id);
+      const estimate = estimateResult.estimate;
+      const plan = estimateResult.plan;
+      let latestResult = await options.api.getLatestVideoGeneration(projectId, task.id);
+      const remainingIndices = remainingVideoShotIndices(plan.shotCount, latestResult.generations);
+      const remainingDurations = remainingIndices.map(function (shotIndex) { return plan.shotDurationsSeconds[shotIndex]; });
+      const remainingAmountMinor = estimate.amountMinor * remainingIndices.length;
+      const generationSummary = remainingIndices.length
+        ? `将调用真实视频模型生成剩余 ${remainingIndices.length} 个分镜镜头，并在全部完成后合成为完整广告。\n剩余镜头时长：${remainingDurations.join(" + ")} 秒\n本次预估费用：${(remainingAmountMinor / 100).toFixed(2)} ${estimate.currency}`
+        : "全部分镜镜头均已生成，本次只进行本地完整广告合成，不再调用视频模型。";
+      const confirmed = window.confirm(`${generationSummary}\n成片暂不包含音轨。\n\n是否继续？`);
+      if (!confirmed || generation !== contextGeneration) return;
+      for (let shotIndex = 0; shotIndex < plan.shotCount; shotIndex += 1) {
+        if (generation !== contextGeneration) return;
+        let shot = [...(latestResult.generations || [])].reverse().find(function (item) { return item.shotIndex === shotIndex; });
+        if (!shot || !["queued", "running", "succeeded"].includes(shot.status)) {
+          const started = await options.api.startVideoGeneration(projectId, task.id, {
+            requestId: requestId("video_generation_shot_" + shotIndex),
+            expectedTaskRevision: task.revision,
+            shotIndex: shotIndex,
+          });
+          shot = started.generation;
+        }
+        while (["queued", "running"].includes(shot.status)) {
+          videoGeneration = shot;
+          videoGenerations = [...(latestResult.generations || []).filter(function (item) { return item.shotIndex !== shotIndex; }), shot];
+          render();
+          await new Promise(function (resolveWait) { setTimeout(resolveWait, 4000); });
+          if (generation !== contextGeneration) return;
+          const polled = await options.api.getVideoGeneration(projectId, task.id, shot.id);
+          shot = polled.generation;
+        }
+        if (shot.status !== "succeeded") throw new Error(`第 ${shotIndex + 1} 个镜头生成失败：${shot.failure?.message || "请重试"}`);
+        latestResult = await options.api.getLatestVideoGeneration(projectId, task.id);
+        videoGeneration = latestResult.generation;
+        videoGenerations = latestResult.generations || [];
+        render();
+      }
+      const composed = await options.api.composeVideoGeneration(projectId, task.id, {
+        requestId: requestId("video_composition"),
+        expectedTaskRevision: task.revision,
+      });
+      if (generation !== contextGeneration) return;
+      videoGeneration = composed.generation;
+      videoGenerations = composed.generations || [];
+      videoGenerationError = null;
+      await loadGenerationMedia();
+    } catch (error) {
+      if (generation === contextGeneration) {
+        videoGenerationError = error;
+        showMessage(errorText(error));
+      }
+    } finally {
+      if (generation === contextGeneration) {
+        setPanelBusy(false);
+        render();
+      }
+    }
   }
 
   async function generateSimulatedStage() {
@@ -435,17 +755,7 @@ export function createWorkspaceStagesPanel(options) {
     try {
       const result = await options.api.executeTaskCommand(mutationProjectId, mutationTaskId, {
         requestId: requestId("generate_simulated_stage"),
-        card: {
-          schemaVersion: 1,
-          kind: "agent_action_card",
-          videoTaskId: mutationTaskId,
-          action: "generate_simulated_stage_artifact",
-          label: "生成当前阶段模拟产物",
-          summary: "生成用于 WS-503 完整用户链路验收的当前阶段模拟产物。",
-          expectedRevision,
-          cost: { kind: "free" },
-          payload: { schemaVersion: 1, stage },
-        },
+        card: simulatedStageActionCard(mutationTaskId, stage, expectedRevision),
       });
       if (
         mutationContextGeneration !== contextGeneration ||
@@ -478,7 +788,19 @@ export function createWorkspaceStagesPanel(options) {
     renderLoading(root);
     try {
       const productionStatusPromise = ["video_preview", "delivery"].includes(stage)
-        ? Promise.allSettled([options.api.getOwnBudget(), options.api.getProductionStatus()])
+        ? Promise.allSettled([
+            options.api.getOwnBudget(),
+            options.api.getProductionStatus(),
+            options.api.getLatestVideoGeneration
+              ? options.api.getLatestVideoGeneration(projectId, task.id)
+              : Promise.resolve({ generation: null }),
+          ])
+        : null;
+      const storyboardGenerationPromise = stage === "storyboard" && options.api.getLatestVideoGeneration
+        ? options.api.getLatestVideoGeneration(projectId, task.id).then(
+            function (value) { return { value }; },
+            function (error) { return { error }; },
+          )
         : null;
       if (stage === "delivery") {
         const results = await Promise.all(stageOrder.map(function (item) { return options.api.getStageVersions(projectId, task.id, item); }));
@@ -506,9 +828,30 @@ export function createWorkspaceStagesPanel(options) {
             ? { presentation: workspaceRunLockPresentation(productionResults[1].value, task.id) }
             : { error: productionResults[1].reason };
         } catch (error) { runLockState = { error: error }; }
+        if (productionResults[2].status === "fulfilled") {
+          videoGeneration = productionResults[2].value.generation;
+          videoGenerations = productionResults[2].value.generations || (videoGeneration ? [videoGeneration] : []);
+          videoGenerationError = null;
+        } else {
+          videoGenerationError = productionResults[2].reason;
+        }
+      }
+      if (storyboardGenerationPromise) {
+        const generationResult = await storyboardGenerationPromise;
+        if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;
+        if (generationResult.value) {
+          videoGeneration = generationResult.value.generation;
+          videoGenerations = generationResult.value.generations || (videoGeneration ? [videoGeneration] : []);
+          videoGenerationError = null;
+        } else {
+          videoGenerationError = generationResult.error;
+        }
       }
       task = { ...task, ...view.videoTask };
       render();
+      if (stage === "storyboard" && videoGenerations.some(function (item) { return item.output; })) void loadStoryboardShotMedia();
+      else if (videoGeneration?.output || videoGeneration?.composite || videoGenerations.some(function (item) { return item.composite; })) void loadGenerationMedia();
+      scheduleVideoPoll();
     } catch (error) {
       if (loadSequence !== sequence || loadContextGeneration !== contextGeneration) return;
       root.innerHTML = `<div class="production-error" role="alert"><span>${escapeHtml(errorText(error))}</span><button type="button" class="text-button">重试</button></div>`;
@@ -574,6 +917,16 @@ export function createWorkspaceStagesPanel(options) {
     dialog.querySelector("[data-dialog-close]")?.addEventListener("click", function () { dialog.close(); });
     dialog.querySelectorAll("[data-rollback-version]").forEach(function (button) {
       button.addEventListener("click", function () { showRollback(button.dataset.rollbackVersion); });
+    });
+    dialog.showModal();
+  }
+
+  function showShotVideo(shotIndex) {
+    const media = storyboardShotMedia.get(shotIndex);
+    if (!media) return;
+    dialog.innerHTML = `<div class="stage-dialog-card shot-video-dialog"><header><div><h2 id="stage-history-title">镜头 ${shotIndex + 1} · 完整预览</h2><p>可播放完整片段、拖动进度或全屏查看</p></div><button type="button" data-dialog-close aria-label="关闭">×</button></header><div class="shot-video-dialog-player"><video controls autoplay playsinline preload="auto" src="${escapeHtml(media.url)}" aria-label="镜头 ${shotIndex + 1} 完整视频"></video></div><footer><a class="button secondary" href="${escapeHtml(media.url)}" download="镜头-${shotIndex + 1}.mp4">下载片段</a><button type="button" class="button primary" data-dialog-close>关闭</button></footer></div>`;
+    dialog.querySelectorAll("[data-dialog-close]").forEach(function (button) {
+      button.addEventListener("click", function () { dialog.close(); });
     });
     dialog.showModal();
   }

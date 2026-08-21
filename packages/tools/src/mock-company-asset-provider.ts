@@ -17,6 +17,12 @@ import type {
   CompanyAssetReference,
   CompanyAssetResolveResult,
 } from "./company-asset-provider.ts";
+import {
+  mockCompanyAssetMediaManifest,
+  mockCompanyReusableAssetMediaManifest,
+  type MockCompanyAssetMediaManifestEntry,
+  type MockCompanyReusableAssetMediaManifestEntry,
+} from "./mock-company-asset-manifest.ts";
 
 type ReusableAssetCategory = Exclude<AssetCategory, "vehicle">;
 
@@ -82,6 +88,53 @@ function preview(assetId: string, width = 1920, height = 1080): CompanyAssetPrev
     width,
     height,
     thumbnailUrl: `/v1/mock-company-assets/${assetId}/thumbnail`,
+  };
+}
+
+function mediaManifestRecord(
+  entry: Readonly<MockCompanyAssetMediaManifestEntry>,
+): MockVehicleAssetRecord {
+  return {
+    tenantId: entry.tenantId,
+    assetId: entry.assetId,
+    version: entry.version,
+    category: "vehicle",
+    vehicleId: entry.vehicleId,
+    displayName: entry.displayName,
+    description: `${entry.visualDescription}（文本仅描述该图可见内容，不构成官方车型事实或配置声明。）`,
+    brandIds: [entry.brandId],
+    tags: [...entry.tags],
+    preview: {
+      mediaType: entry.mediaType,
+      width: entry.width,
+      height: entry.height,
+      thumbnailUrl: `/v1/mock-company-assets/${entry.assetId}/versions/${entry.version}/thumbnail`,
+    },
+    updatedAt: entry.updatedAt,
+    internalSortWeight: 90,
+  };
+}
+
+function reusableMediaManifestRecord(
+  entry: Readonly<MockCompanyReusableAssetMediaManifestEntry>,
+): MockReusableAssetRecord {
+  return {
+    tenantId: entry.tenantId,
+    assetId: entry.assetId,
+    version: entry.version,
+    category: entry.category,
+    displayName: entry.displayName,
+    description: `${entry.visualDescription}（模拟生成素材，正式投放前需复核人物、车辆外观与使用权。）`,
+    brandIds: [entry.brandId],
+    tags: [...entry.tags],
+    preview: {
+      mediaType: entry.mediaType,
+      width: entry.width,
+      height: entry.height,
+      thumbnailUrl: `/v1/mock-company-assets/${entry.assetId}/versions/${entry.version}/thumbnail`,
+    },
+    updatedAt: entry.updatedAt,
+    internalSortWeight: 100,
   };
 }
 
@@ -270,6 +323,8 @@ const defaultCatalog: readonly MockCompanyAssetRecord[] = [
     updatedAt: "2026-08-18T08:00:00.000Z",
     internalSortWeight: 999,
   },
+  ...mockCompanyAssetMediaManifest.map(mediaManifestRecord),
+  ...mockCompanyReusableAssetMediaManifest.map(reusableMediaManifestRecord),
 ];
 
 function recordsForScope(

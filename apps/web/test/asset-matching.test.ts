@@ -269,13 +269,14 @@ test("manual asset selection always takes priority over a later Agent recommenda
 test("asset confirmation refreshes the workspace task and Agent context", async () => {
   const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const panelStart = source.indexOf("assetMatchingPanel = createAssetMatchingPanel({");
-  const start = source.indexOf("onTaskUpdated: function (updatedTask)", panelStart);
+  const start = source.indexOf("onTaskUpdated: function (updatedTask, currentProjectId)", panelStart);
   const callbackSource = source.slice(start).replaceAll("\r\n", "\n");
   const callbackEnd = callbackSource.indexOf("\n  },\n});");
   assert.ok(panelStart >= 0 && start >= panelStart && callbackEnd > 0);
   const updateWiring = callbackSource.slice(0, callbackEnd);
   assert.match(updateWiring, /task\.revision = updatedTask\.revision/u);
   assert.match(updateWiring, /task\.currentStage = updatedTask\.currentStage/u);
+  assert.match(updateWiring, /let updatedProjectId = currentProjectId \|\| null/u);
   assert.match(updateWiring, /workspaceFrame\.open\(updatedProjectId, updatedTask\.id/u);
   assert.match(updateWiring, /historyMode: "replace"/u);
 });
@@ -283,6 +284,9 @@ test("asset confirmation refreshes the workspace task and Agent context", async 
 test("confirmation locks an editable selection and retries a stable person/scene-only request", async (context) => {
   installFakeDocument(context);
   const elements = panelElements();
+  const allTab = new FakeElement();
+  allTab.dataset.assetCategory = "all";
+  elements.tabs.push(allTab);
   let currentView = matchingView("in_progress");
   let getCalls = 0;
   const requests: Array<{
@@ -333,6 +337,7 @@ test("confirmation locks an editable selection and retries a stable person/scene
     true,
   );
   await waitFor(() => getCalls === 1, "initial asset-matching view");
+  allTab.click();
 
   assert.equal(elements.confirm.disabled, false);
   const temporaryStyleCard = elements.grid.children.find(
@@ -342,6 +347,7 @@ test("confirmation locks an editable selection and retries a stable person/scene
   assert.equal(temporaryStyleCard.disabled, true, "temporary visual_style cannot be replaced");
 
   elements.confirm.click();
+  assert.equal(elements.confirm.textContent, "正在确认…");
   await waitFor(
     () => requests.length === 1 && elements.confirm.disabled === false,
     "failed confirmation to become retryable",
@@ -360,4 +366,71 @@ test("confirmation locks an editable selection and retries a stable person/scene
     );
   }
   assert.equal(elements.confirm.disabled, true);
+});
+
+test("a confirmed selection can be explicitly reopened before storyboard confirmation", async (context) => {
+  installFakeDocument(context);
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { confirm: () => true },
+  });
+  context.after(() => {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else delete (globalThis as unknown as Record<string, unknown>).window;
+  });
+  const elements = panelElements();
+  const locked = {
+    ...matchingView("awaiting_confirmation"),
+    videoTask: {
+      ...matchingView("awaiting_confirmation").videoTask,
+      currentStage: "storyboard",
+      stageStatus: "awaiting_confirmation",
+      revision: 12,
+      assetSnapshotId: "asset_snapshot_1",
+    },
+    matchingReady: false,
+    confirmationReady: false,
+    revisionReady: true,
+    matchingLocked: true,
+  };
+  let getCalls = 0;
+  const reopenRequests: Array<{ requestId: string; expectedTaskRevision: number; reason: string }> = [];
+  const api = {
+    async getAssetMatching() {
+      getCalls += 1;
+      return structuredClone(getCalls === 1 ? locked : matchingView("in_progress"));
+    },
+    async reopenAssetMatching(_projectId: string, _taskId: string, request: typeof reopenRequests[number]) {
+      reopenRequests.push(structuredClone(request));
+      return {
+        videoTask: {
+          ...locked.videoTask,
+          currentStage: "asset_matching",
+          stageStatus: "in_progress",
+          revision: 13,
+        },
+      };
+    },
+    async lockAssetSelection() { throw new Error("confirmation is outside this test"); },
+    async uploadTemporaryAsset() { throw new Error("upload is outside this test"); },
+  };
+  const updated: Array<{ currentStage: string }> = [];
+  const panel = createAssetMatchingPanel({
+    elements,
+    api,
+    onTaskUpdated(task: { currentStage: string }) { updated.push(structuredClone(task)); },
+  });
+  panel.setContext("project_asset_matching", { id: "task_asset_matching" }, true);
+  await waitFor(() => getCalls === 1, "locked asset-matching view");
+
+  assert.equal(elements.confirm.textContent, "重新配置资产");
+  assert.equal(elements.confirm.disabled, false);
+  elements.confirm.click();
+  await waitFor(() => reopenRequests.length === 1 && getCalls === 2, "asset matching reopen");
+
+  assert.match(reopenRequests[0]!.requestId, /^asset_reopen_[A-Za-z0-9]+$/u);
+  assert.equal(reopenRequests[0]!.expectedTaskRevision, 12);
+  assert.match(reopenRequests[0]!.reason, /人物口播/u);
+  assert.equal(updated[0]?.currentStage, "asset_matching");
 });

@@ -1,6 +1,7 @@
 import {
   createScopedStageSuggestionContextReader,
   createScopedTaskAssetSnapshotReader,
+  createArkSeedanceVideoGenerationProviderFromEnv,
   MockCompanyAssetProvider,
   type StageSuggestionContextReader,
   type StrategyDraftReader,
@@ -11,6 +12,7 @@ import type { TaskContext } from "@firefly/schemas";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
+import { GeneratedVideoArtifactImporter } from "./generated-video-artifact-importer.ts";
 import {
   createAgentAssetMatchingCandidateReader,
   createCurrentProjectAssetPoolReader,
@@ -35,6 +37,7 @@ import {
 } from "./postgres-database.ts";
 import { PostgresTemporaryAssetStore } from "./postgres-temporary-asset-store.ts";
 import { PostgresVideoTaskProductionStore } from "./postgres-video-task-store.ts";
+import { PostgresVideoGenerationStore } from "./postgres-video-generation-store.ts";
 import { PostgresWorkspaceAdminStore } from "./postgres-workspace-admin-store.ts";
 import { PostgresWorkspaceSessionStore } from "./postgres-workspace-session-store.ts";
 import {
@@ -46,6 +49,7 @@ import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
+import { VideoGenerationRuntime } from "./video-generation-runtime.ts";
 import { WorkspaceAdminRuntime } from "./workspace-admin-runtime.ts";
 import { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 import {
@@ -129,6 +133,8 @@ export interface PostgresApiRuntime {
   readonly temporaryAssets: TemporaryAssetRuntime;
   readonly assetMatching: AssetMatchingRuntime;
   readonly accountRunLocks: AccountRunLockRuntime;
+  readonly videoGenerations?: VideoGenerationRuntime;
+  readonly videoGenerationArtifacts?: GeneratedVideoArtifactImporter;
   readonly assetCoordinator: PostgresProjectAssetCoordinator;
   readonly taskContexts: WorkspaceTaskContextResolver;
   readonly resolveWorkStatus: (
@@ -158,6 +164,7 @@ export interface PostgresApiRuntime {
 export interface CreatePostgresApiRuntimeOptions {
   readonly database?: PostgresApiDatabase;
   readonly migrations?: readonly DatabaseMigration[];
+  readonly environment?: Readonly<Record<string, string | undefined>>;
 }
 
 function unavailablePricingProvider() {
@@ -168,11 +175,32 @@ function unavailablePricingProvider() {
   };
 }
 
+function videoGenerationPricingProvider(environment: Readonly<Record<string, string | undefined>>) {
+  const amountMinor = Number.parseInt(environment.VIDEO_GENERATION_ESTIMATE_MINOR ?? "1000", 10);
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 1) {
+    throw new Error("VIDEO_GENERATION_ESTIMATE_MINOR must be a positive integer.");
+  }
+  return {
+    async estimate(_task: unknown, operation: string, estimatedAt: string) {
+      if (operation !== "video_generation") {
+        return unavailablePricingProvider().estimate();
+      }
+      return {
+        amountMinor,
+        currency: "CNY" as const,
+        pricingVersion: environment.VIDEO_GENERATION_PRICING_VERSION ?? "seedance_2_5_fixed_v1",
+        expiresAt: new Date(Date.parse(estimatedAt) + 10 * 60 * 1000).toISOString(),
+      };
+    },
+  };
+}
+
 export async function createPostgresApiRuntime(
   config: PostgresDatabaseConfig,
   options: Readonly<CreatePostgresApiRuntimeOptions> = {},
 ): Promise<PostgresApiRuntime> {
   const database: PostgresApiDatabase = options.database ?? createPostgresDatabase(config);
+  const environment = options.environment ?? process.env;
   try {
     const migrations = options.migrations ?? await loadDatabaseMigrations();
     const readiness = async (): Promise<void> => {
@@ -193,7 +221,7 @@ export async function createPostgresApiRuntime(
     const assetCoordinator = new PostgresProjectAssetCoordinator(database);
 
     const workspaceSessions = new WorkspaceSessionRuntime(sessionStore, administrationStore);
-    const accountBudgets = new AccountBudgetRuntime(budgetStore, unavailablePricingProvider());
+    const accountBudgets = new AccountBudgetRuntime(budgetStore, videoGenerationPricingProvider(environment));
     const workspaceAdmin = new WorkspaceAdminRuntime(
       administrationStore,
       accountBudgets,
@@ -264,6 +292,27 @@ export async function createPostgresApiRuntime(
       assetCoordinator,
     );
     const accountRunLocks = new AccountRunLockRuntime(runLockStore);
+    const videoGenerationArtifacts = environment.ARK_API_KEY === undefined
+      ? undefined
+      : new GeneratedVideoArtifactImporter(
+          environment.GENERATED_VIDEO_DATA_DIRECTORY ?? ".data/generated-videos",
+          projectStore,
+          videoTaskStore,
+        );
+    const videoGenerations = videoGenerationArtifacts === undefined
+      ? undefined
+      : new VideoGenerationRuntime(
+          administrationStore,
+          projectStore,
+          videoTaskStore,
+          new PostgresVideoGenerationStore(database),
+          createArkSeedanceVideoGenerationProviderFromEnv(environment, {
+            artifactImporter: videoGenerationArtifacts,
+          }),
+          accountRunLocks,
+          accountBudgets,
+          videoGenerationArtifacts,
+        );
 
     return Object.freeze({
       database,
@@ -278,6 +327,8 @@ export async function createPostgresApiRuntime(
       temporaryAssets,
       assetMatching,
       accountRunLocks,
+      ...(videoGenerations === undefined ? {} : { videoGenerations }),
+      ...(videoGenerationArtifacts === undefined ? {} : { videoGenerationArtifacts }),
       assetCoordinator,
       taskContexts,
       resolveWorkStatus: (

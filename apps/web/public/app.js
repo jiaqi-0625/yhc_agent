@@ -1,5 +1,5 @@
 import { agentApi } from "./agent-api.js?build=ws501-v1";
-import { createAssetMatchingPanel } from "./asset-matching.js";
+import { createAssetMatchingPanel } from "./asset-matching.js?build=asset-revision-ws506-v1";
 import {
   agentActionAvailability,
   agentActionFailurePresentation,
@@ -24,9 +24,9 @@ import {
   renderProjectLibrary,
 } from "./project-library.js";
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
-import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
+import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2-ws506-video-v1-asset-revision-v1";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-ws503-script-v2";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-ws503-script-v2-ws506-video-v4";
 import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,
@@ -2186,8 +2186,8 @@ assetMatchingPanel = createAssetMatchingPanel({
     uploadError: elements.assetUploadError,
   },
   api: workspaceApi,
-  onTaskUpdated: function (updatedTask) {
-    let updatedProjectId = null;
+  onTaskUpdated: function (updatedTask, currentProjectId) {
+    let updatedProjectId = currentProjectId || null;
     for (const summary of state.projectLibrary) {
       const task = summary.tasks.find(function (candidate) { return candidate.id === updatedTask.id; });
       if (!task) continue;
@@ -2195,7 +2195,7 @@ assetMatchingPanel = createAssetMatchingPanel({
       task.currentStage = updatedTask.currentStage;
       task.stageStatus = updatedTask.stageStatus;
       task.status = updatedTask.status;
-      task.updatedAt = updatedTask.updatedAt;
+      if (updatedTask.updatedAt) task.updatedAt = updatedTask.updatedAt;
       updatedProjectId = summary.project.id;
       break;
     }

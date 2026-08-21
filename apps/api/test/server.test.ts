@@ -89,6 +89,7 @@ test("root serves the local acceptance web UI with locked-down browser assets", 
   assert.equal(pageResponse.status, 200);
   assert.match(pageResponse.headers.get("content-type") ?? "", /^text\/html/u);
   assert.match(pageResponse.headers.get("content-security-policy") ?? "", /default-src 'self'/u);
+  assert.match(pageResponse.headers.get("content-security-policy") ?? "", /media-src 'self' blob:/u);
   const page = await pageResponse.text();
   assert.match(page, /萤火虫 · 汽车广告工作区/u);
   assert.doesNotMatch(page, /platform-sidebar/u);

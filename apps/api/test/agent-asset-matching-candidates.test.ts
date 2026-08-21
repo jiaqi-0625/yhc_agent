@@ -51,6 +51,14 @@ const companyPerson = {
   version: 3,
   category: "person" as const,
 };
+const companyVehicle = {
+  source: "company_catalog" as const,
+  sourceProvider: "mock-company-assets",
+  assetId: "vehicle_hero",
+  version: 4,
+  category: "vehicle" as const,
+  vehicleId: "vehicle_1",
+};
 const localScene = {
   source: "local_upload" as const,
   batchProjectId: "project_1",
@@ -100,14 +108,7 @@ function projectPool(overrides: Partial<ProjectAssetPool> = {}): ProjectAssetPoo
     vehicleId: "vehicle_1",
     revision: 7,
     assets: [
-      {
-        source: "company_catalog",
-        sourceProvider: "mock-company-assets",
-        assetId: "vehicle_hero",
-        version: 4,
-        category: "vehicle",
-        vehicleId: "vehicle_1",
-      },
+      companyVehicle,
       companyPerson,
       localScene,
     ],
@@ -156,6 +157,15 @@ const catalogItem: CompanyAssetCatalogItem = {
   preview: { mediaType: "image/webp", width: 1440, height: 1920 },
   updatedAt: occurredAt,
 };
+const vehicleCatalogItem: CompanyAssetCatalogItem = {
+  reference: companyVehicle,
+  displayName: "车型一整车左前视角",
+  description: "项目车型外观画面",
+  brandIds: ["brand_1"],
+  tags: ["整车", "外观"],
+  preview: { mediaType: "image/webp", width: 1920, height: 1080 },
+  updatedAt: occurredAt,
+};
 
 function provider(resolve: CompanyAssetProvider["resolveAssets"]): CompanyAssetProvider {
   return {
@@ -183,8 +193,11 @@ function reader(options: {
       async transactProject() { throw new Error("not used"); },
     },
     companyAssets: options.companyProvider ?? provider(async (references) => {
-      assert.deepEqual(references, [companyPerson]);
-      return { items: [structuredClone(catalogItem)], missingReferences: [] };
+      assert.deepEqual(references, [companyVehicle, companyPerson]);
+      return {
+        items: [structuredClone(vehicleCatalogItem), structuredClone(catalogItem)],
+        missingReferences: [],
+      };
     }),
     companyAssetScope: {
       tenantId: "tenant_1",
@@ -199,8 +212,11 @@ function reader(options: {
 test("Agent asset matching candidates come only from the exact project pool versions", async () => {
   const result = await reader().read();
   assert.equal(result.projectAssetPoolRevision, 7);
-  assert.deepEqual(result.companyCandidates.map((item) => item.reference), [companyPerson]);
-  assert.equal(result.companyCandidates[0]?.description, "适合家庭周末露营和后备箱空间展示");
+  assert.deepEqual(
+    result.companyCandidates.map((item) => item.reference),
+    [companyVehicle, companyPerson],
+  );
+  assert.equal(result.companyCandidates[1]?.description, "适合家庭周末露营和后备箱空间展示");
   assert.deepEqual(result.localCandidates, [{
     reference: localScene,
     displayName: "湖畔露营.webp",

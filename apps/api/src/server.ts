@@ -40,6 +40,8 @@ import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.t
 import { parsePostgresDatabaseConfig, type PostgresDatabaseConfig } from "./database-config.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
+import type { GeneratedVideoArtifactImporter } from "./generated-video-artifact-importer.ts";
+import { sendMockCompanyAssetMedia } from "./mock-company-asset-media.ts";
 import {
   createPostgresApiRuntime,
   type PostgresApiRuntime,
@@ -54,6 +56,11 @@ import { handleProjectCreationRoute } from "./project-creation-routes.ts";
 import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { handleVideoTaskRoute } from "./video-task-routes.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
+import {
+  handleVideoGenerationRoute,
+  matchesVideoGenerationRoute,
+} from "./video-generation-routes.ts";
+import type { VideoGenerationRuntime } from "./video-generation-runtime.ts";
 import {
   handleVideoTaskStageRoute,
   matchVideoTaskStagePath,
@@ -153,8 +160,11 @@ async function handleRequest(
   readiness: ApiReadinessProbe,
   assetMatching: AssetMatchingRuntime | undefined,
   accountRunLocks: AccountRunLockRuntime | undefined,
+  videoGenerations: VideoGenerationRuntime | undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && (await sendMockCompanyAssetMedia(response, url.pathname))) return;
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
   if (request.method === "GET" && url.pathname === "/health") {
     sendJson(response, 200, { status: "ok", service: "firefly-ad-agent-api", version });
@@ -190,6 +200,7 @@ async function handleRequest(
         "work_bound_agent",
         "task_context_v1",
         ...(projectLibrary === undefined ? [] : ["project_library_v1"]),
+        ...(videoGenerations === undefined ? [] : ["seedance_single_shot_generation_v1"]),
       ],
       domainTools: [
         "get_vehicle_snapshot",
@@ -259,6 +270,27 @@ async function handleRequest(
       url,
       projectCreation,
       workspaceSessions,
+    )
+  ) return;
+  if (
+    (videoGenerations === undefined || videoArtifacts === undefined) &&
+    matchesVideoGenerationRoute(url.pathname)
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-VIDEO-GENERATION-RUNTIME-NOT-CONFIGURED",
+      "Real video generation is not configured on this server.",
+      503,
+    );
+  }
+  if (
+    videoGenerations !== undefined && videoArtifacts !== undefined &&
+    await handleVideoGenerationRoute(
+      request,
+      response,
+      url,
+      videoGenerations,
+      workspaceSessions,
+      videoArtifacts,
     )
   ) return;
   if (
@@ -420,6 +452,8 @@ export function createApiServer(
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   environment: ApiEnvironment = process.env,
+  videoGenerations: VideoGenerationRuntime | undefined = undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -441,7 +475,9 @@ export function createApiServer(
       agentActionCommands !== undefined ||
       videoTaskStages !== undefined ||
       projectLibrary !== undefined ||
-      accountRunLocks !== undefined
+      accountRunLocks !== undefined ||
+      videoGenerations !== undefined ||
+      videoArtifacts !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
@@ -723,6 +759,8 @@ export function createApiServer(
       readiness,
       activeAssetMatching,
       activeAccountRunLocks,
+      videoGenerations,
+      videoArtifacts,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -751,6 +789,8 @@ export async function startApiServer(
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
   environment: ApiEnvironment = process.env,
+  videoGenerations: VideoGenerationRuntime | undefined = undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -776,6 +816,8 @@ export async function startApiServer(
       assetMatching,
       accountRunLocks,
       environment,
+      videoGenerations,
+      videoArtifacts,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -902,9 +944,9 @@ export async function startConfiguredApiServer(
     );
   }
 
-  const postgres = await (options.createPostgresRuntime ?? createPostgresApiRuntime)(
-    parsePostgresDatabaseConfig(environment),
-  );
+  const postgres = await (options.createPostgresRuntime === undefined
+    ? createPostgresApiRuntime(parsePostgresDatabaseConfig(environment), { environment })
+    : options.createPostgresRuntime(parsePostgresDatabaseConfig(environment)));
   const business = options.business ?? new LocalBusinessRuntime();
   let server: Server | undefined;
   try {
@@ -954,6 +996,8 @@ export async function startConfiguredApiServer(
       postgres.assetMatching,
       postgres.accountRunLocks,
       environment,
+      postgres.videoGenerations,
+      postgres.videoGenerationArtifacts,
     );
     attachPostgresLifecycle(
       server,

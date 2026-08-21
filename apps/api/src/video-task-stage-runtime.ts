@@ -8,6 +8,7 @@ import {
   deriveStageConfirmationDependencies,
   lockVideoTaskAssetSnapshot,
   nextVideoTaskWorkflowState,
+  reopenAssetMatching,
   rollbackVideoTaskStage,
   StageConfirmationDeniedError,
   validateStrategy,
@@ -19,6 +20,8 @@ import type {
   BatchProject,
   ConfirmVideoTaskStageRequest,
   ConfirmVideoTaskStageResponse,
+  ReopenAssetMatchingRequest,
+  ReopenAssetMatchingResponse,
   RollbackVideoTaskStageRequest,
   RollbackVideoTaskStageResponse,
   StageArtifactContentReference,
@@ -30,6 +33,7 @@ import type {
 
 import type { BatchProjectStore } from "./batch-project-store.ts";
 import { BusinessRuntimeError } from "./business-runtime.ts";
+import { presenterProductionScript, storyboardScriptPlan } from "./storyboard-script-plan.ts";
 import type {
   ProjectAssetRuntime,
   TaskAssetSelectionResolver,
@@ -137,6 +141,21 @@ function rollbackPayloadHash(
     action: "rollback_stage",
     expectedTaskRevision: input.expectedTaskRevision,
     targetArtifactVersionId: input.targetArtifactVersionId,
+    reason: input.reason,
+  });
+}
+
+function reopenAssetMatchingPayloadHash(
+  projectId: string,
+  videoTaskId: string,
+  input: Readonly<ReopenAssetMatchingRequest>,
+): string {
+  return sha256({
+    projectId,
+    videoTaskId,
+    stage: "asset_matching",
+    action: "reopen_stage",
+    expectedTaskRevision: input.expectedTaskRevision,
     reason: input.reason,
   });
 }
@@ -275,6 +294,17 @@ export class VideoTaskStageRuntime {
     const generatedArtifact = stage === "storyboard" || stage === "video_preview" || stage === "delivery"
       ? this.#simulatedStageArtifact(record, stage, undefined)
       : undefined;
+    const selectedAssetSnapshot = record.taskAssetSnapshots.find(
+      (snapshot) => snapshot.id === record.videoTask.assetSnapshotId,
+    );
+    const presenterSelected = selectedAssetSnapshot?.assets.some(
+      (asset) => asset.category === "person",
+    ) === true;
+    const productionPlan = record.videoTask.scriptInput
+      ? storyboardScriptPlan(record.videoTask.scriptInput, record.videoTask.durationSeconds, {
+          presenterNarration: presenterSelected,
+        })
+      : undefined;
     return {
       videoTask: structuredClone(record.videoTask),
       ...(activeArtifactVersionId === undefined ? {} : { activeArtifactVersionId }),
@@ -311,6 +341,24 @@ export class VideoTaskStageRuntime {
       ...(generatedArtifact === undefined
         ? {}
         : { generatedArtifact: structuredClone(generatedArtifact) }),
+      ...(stage === "script" && presenterSelected && productionPlan !== undefined
+        ? {
+            scriptAdaptation: {
+              schemaVersion: 1 as const,
+              source: "selected_presenter" as const,
+              script: presenterProductionScript(productionPlan),
+            },
+          }
+        : {}),
+      ...(stage === "storyboard" && record.videoTask.scriptInput
+        ? {
+            storyboardPlan: {
+              schemaVersion: 1 as const,
+              source: "confirmed_script" as const,
+              shots: productionPlan!.map((shot) => ({ ...shot })),
+            },
+          }
+        : {}),
     };
   }
 
@@ -838,6 +886,114 @@ export class VideoTaskStageRuntime {
       receipt: structuredClone(receipt),
       videoTask: structuredClone(record.videoTask),
       rollback: structuredClone(rollback),
+      invalidations,
+    };
+  }
+
+  async reopenAssetMatching(
+    projectId: string,
+    videoTaskId: string,
+    input: Readonly<ReopenAssetMatchingRequest>,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<ReopenAssetMatchingResponse> {
+    this.#assertCreator(session);
+    if (!this.projectAssets) {
+      throw runtimeError("AIC-ASSET-MATCHING-UNAVAILABLE", "资产匹配服务当前不可用。", 503);
+    }
+    const payloadHash = reopenAssetMatchingPayloadHash(projectId, videoTaskId, input);
+    let replayed = false;
+    const execute = () => this.administration.withSnapshot(session.tenantId, async (state) => {
+      const scope = this.#currentScope(session, state);
+      this.#assertCreator(scope);
+      const project = await this.#project(scope.tenantId, projectId);
+      assertCanViewBatchProject(scope, project);
+      return this.tasks.transact(videoTaskId, (current) => {
+        if (!current) {
+          throw runtimeError("AIC-STAGE-TASK_NOT_FOUND", `Video task '${videoTaskId}' was not found.`, 404);
+        }
+        this.#assertTaskBelongsToProject(current, project, videoTaskId);
+        assertCanViewVideoTask(scope, project, current.videoTask);
+        const existing = this.#stageReceipt(current, scope.actorAccountId, input.requestId);
+        if (existing) {
+          if (
+            existing.action !== "reopen_stage" ||
+            existing.result.stage !== "asset_matching" ||
+            existing.payloadHash !== payloadHash
+          ) {
+            throw runtimeError(
+              "AIC-STAGE-IDEMPOTENCY_CONFLICT",
+              "The stage request ID was already used with different business input.",
+              409,
+            );
+          }
+          replayed = true;
+          return structuredClone(current);
+        }
+        if (this.#receiptCollision(current, scope.actorAccountId, input.requestId)) {
+          throw runtimeError(
+            "AIC-STAGE-IDEMPOTENCY_CONFLICT",
+            "The stage request ID was already used by another task command.",
+            409,
+          );
+        }
+        if (project.status !== "active") {
+          throw runtimeError(
+            "AIC-STAGE-PROJECT_INACTIVE",
+            "Asset matching can only be revised in an active batch project.",
+            409,
+          );
+        }
+        assertCanOperateVideoTask(scope, project, current.videoTask);
+        const occurredAt = this.now();
+        const reopened = reopenAssetMatching(current, input, {
+          tenantId: scope.tenantId,
+          batchProjectId: project.id,
+          actorAccountId: scope.actorAccountId,
+          occurredAt,
+          createInvalidationId: () => this.createId("invalidation"),
+        });
+        const newInvalidations = reopened.stageArtifactInvalidations.slice(
+          current.stageArtifactInvalidations.length,
+        );
+        const receipt: StageMutationReceipt = {
+          schemaVersion: 1,
+          id: this.createId("stage_mutation_receipt"),
+          tenantId: current.videoTask.tenantId,
+          batchProjectId: current.videoTask.batchProjectId,
+          videoTaskId: current.videoTask.id,
+          actorAccountId: scope.actorAccountId,
+          requestId: input.requestId,
+          payloadHash,
+          action: "reopen_stage",
+          expectedTaskRevision: input.expectedTaskRevision,
+          resultingTaskRevision: reopened.videoTask.revision,
+          result: {
+            kind: "stage_reopened",
+            stage: "asset_matching",
+            invalidationIds: newInvalidations.map(({ id }) => id),
+          },
+          occurredAt,
+        };
+        return {
+          ...reopened,
+          stageMutationReceipts: [...structuredClone(reopened.stageMutationReceipts), receipt],
+        };
+      });
+    });
+    const record = await this.projectAssets.coordinateTaskAssetSelection(projectId, execute);
+    const receipt = this.#stageReceipt(record, session.actorAccountId, input.requestId);
+    if (!receipt || receipt.action !== "reopen_stage") {
+      throw new Error("Asset matching reopen did not persist its idempotency receipt.");
+    }
+    const invalidations = receipt.result.invalidationIds.map((id) => {
+      const invalidation = record.stageArtifactInvalidations.find((candidate) => candidate.id === id);
+      if (!invalidation) throw new Error("Asset matching reopen receipt points to a missing invalidation.");
+      return structuredClone(invalidation);
+    });
+    return {
+      replayed,
+      receipt: structuredClone(receipt),
+      videoTask: structuredClone(record.videoTask),
       invalidations,
     };
   }

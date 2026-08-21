@@ -35,7 +35,7 @@ export async function sendWebAsset(response: ServerResponse, pathname: string): 
     "content-type": asset.type,
     "content-length": content.byteLength,
     "cache-control": pathname === "/" ? "no-store" : "public, max-age=300",
-    "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+    "content-security-policy": "default-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     "x-content-type-options": "nosniff",
     "referrer-policy": "no-referrer",
   });

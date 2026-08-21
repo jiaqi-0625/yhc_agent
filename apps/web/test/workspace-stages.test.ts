@@ -4,7 +4,11 @@ import test from "node:test";
 import {
   confirmationAvailability,
   createWorkspaceStagesPanel,
+  expectedVideoShotCount,
+  latestVideoGenerationForShot,
+  remainingVideoShotIndices,
   rollbackImpact,
+  simulatedStageActionCard,
   stagePosition,
   workspaceBudgetPresentation,
   workspaceProductionErrorText,
@@ -74,7 +78,7 @@ test("non-strategy confirmation only uses a server-returned persisted artifact",
       contentHashSha256: "b".repeat(64),
     },
   } as never);
-  assert.deepEqual(generated, { enabled: true, label: "确认分镜" });
+  assert.deepEqual(generated, { enabled: true, label: "确认方案并进入真实视频" });
 
   const artifact = {
     artifactId: "storyboard_draft_1",
@@ -99,6 +103,29 @@ test("strategy confirmation requires the persisted confirmation request", () => 
     activeStrategyDraft: { id: "draft_1" },
     confirmationRequest: { id: "request_1" },
   } as never).enabled, true);
+});
+
+test("real video progress uses the supported multi-shot plan", () => {
+  assert.equal(expectedVideoShotCount(10), 3);
+  assert.equal(expectedVideoShotCount(15), 5);
+  assert.equal(expectedVideoShotCount(30), 6);
+  assert.equal(expectedVideoShotCount(20), 0);
+  assert.deepEqual(remainingVideoShotIndices(3, [
+    { shotIndex: 0, status: "succeeded", output: { artifactId: "shot_1" } },
+    { shotIndex: 1, status: "failed" },
+  ]), [1, 2]);
+  assert.deepEqual(latestVideoGenerationForShot([
+    { id: "old", shotIndex: 0, status: "failed" },
+    { id: "new", shotIndex: 0, status: "succeeded" },
+    { id: "other", shotIndex: 1, status: "succeeded" },
+  ], 0), { id: "new", shotIndex: 0, status: "succeeded" });
+});
+
+test("simulated storyboard generation uses the frozen Agent action-card label", () => {
+  const card = simulatedStageActionCard("task_1", "storyboard", 10);
+  assert.equal(card.action, "generate_simulated_stage_artifact");
+  assert.equal(card.label, "生成当前阶段模拟产物");
+  assert.deepEqual(card.payload, { schemaVersion: 1, stage: "storyboard" });
 });
 
 test("a persisted generated script can be confirmed without a client artifact", () => {

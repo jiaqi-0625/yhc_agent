@@ -2,8 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   ConfirmVideoTaskStageRequestSchema,
+  ReopenAssetMatchingRequestSchema,
   RollbackVideoTaskStageRequestSchema,
   type ConfirmVideoTaskStageRequest,
+  type ReopenAssetMatchingRequest,
   type RollbackVideoTaskStageRequest,
   type VideoTaskStage,
 } from "@firefly/schemas";
@@ -32,6 +34,10 @@ const StageRollbacksPath = new RegExp(
   `^${StageRouteBase}/stages/${StagePath}/rollbacks$`,
   "u",
 );
+const AssetMatchingReopenPath = new RegExp(
+  `^${StageRouteBase}/stages/(asset_matching)/reopen$`,
+  "u",
+);
 
 interface StageScopedRoute {
   projectId: string;
@@ -43,7 +49,8 @@ export type VideoTaskStageRouteMatch =
   | ({ kind: "versions" } & StageScopedRoute)
   | ({ kind: "audit" } & Omit<StageScopedRoute, "stage">)
   | ({ kind: "confirmations" } & StageScopedRoute)
-  | ({ kind: "rollbacks" } & StageScopedRoute);
+  | ({ kind: "rollbacks" } & StageScopedRoute)
+  | ({ kind: "reopen" } & StageScopedRoute);
 
 function scopedMatch(
   pathname: string,
@@ -74,6 +81,8 @@ export function matchVideoTaskStagePath(
 
   const rollbacks = scopedMatch(pathname, StageRollbacksPath);
   if (rollbacks) return { kind: "rollbacks", ...rollbacks };
+  const reopen = scopedMatch(pathname, AssetMatchingReopenPath);
+  if (reopen) return { kind: "reopen", ...reopen };
   return undefined;
 }
 
@@ -154,6 +163,24 @@ export async function handleVideoTaskStageRoute(
         route.projectId,
         route.videoTaskId,
         route.stage,
+        input,
+        session.scope,
+      ),
+    );
+    return true;
+  }
+
+  if (request.method === "POST" && route.kind === "reopen") {
+    const input = validateBody<ReopenAssetMatchingRequest>(
+      ReopenAssetMatchingRequestSchema,
+      await readJson(request),
+    );
+    sendJson(
+      response,
+      200,
+      await runtime.reopenAssetMatching(
+        route.projectId,
+        route.videoTaskId,
         input,
         session.scope,
       ),

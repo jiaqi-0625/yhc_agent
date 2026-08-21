@@ -5,8 +5,26 @@ import type {
   ProductionProviderScope,
 } from "./production-provider.ts";
 
+/** Provider-independent product model identifier. */
 export const SEEDANCE_2_5_MODEL = "seedance-2.5" as const;
 export type SeedanceVideoGenerationModel = typeof SEEDANCE_2_5_MODEL;
+
+export type VideoGenerationReference =
+  | {
+      readonly type: "image_url";
+      readonly url: string;
+      readonly role: "reference_image";
+    }
+  | {
+      readonly type: "video_url";
+      readonly url: string;
+      readonly role: "reference_video";
+    }
+  | {
+      readonly type: "audio_url";
+      readonly url: string;
+      readonly role: "reference_audio";
+    };
 
 /** Provider request contains production input only; authority and billing stay outside this DTO. */
 export interface VideoGenerationRequest {
@@ -15,8 +33,11 @@ export interface VideoGenerationRequest {
   readonly assetSnapshotId: string;
   readonly storyboardArtifactVersionId: string;
   readonly prompt: string;
+  readonly references?: readonly VideoGenerationReference[];
+  readonly generateAudio?: boolean;
   readonly aspectRatio: string;
   readonly durationSeconds: number;
+  readonly watermark?: boolean;
 }
 
 /** Internal artifact handle returned to persistence; never expose provider download URLs here. */
@@ -43,7 +64,7 @@ export interface VideoGenerationJob {
 }
 
 /**
- * Reserved video-generation port for the future Seedance 2.5 adapter.
+ * Video-generation port implemented by the dedicated Volcengine Ark adapter.
  *
  * This interface does not authorize execution. The application service must
  * enforce task ownership, revision, account run lock, budget, and approval

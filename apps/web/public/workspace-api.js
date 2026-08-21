@@ -1,4 +1,4 @@
-import { api } from "./api-client.js";
+import { ApiError, api, authenticatedFetch } from "./api-client.js";
 
 function jsonOptions(method, body) {
   return {
@@ -11,6 +11,35 @@ function jsonOptions(method, body) {
 export const workspaceApi = {
   getOwnBudget: function () { return api("/v1/workspace/me/budget"); },
   getProductionStatus: function () { return api("/v1/workspace/me/production-status"); },
+  getVideoGenerationEstimate: function (projectId, videoTaskId) {
+    return api("/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-generations/estimate");
+  },
+  getLatestVideoGeneration: function (projectId, videoTaskId) {
+    return api("/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-generations");
+  },
+  startVideoGeneration: function (projectId, videoTaskId, input) {
+    return api("/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-generations", jsonOptions("POST", input));
+  },
+  getVideoGeneration: function (projectId, videoTaskId, generationId) {
+    return api("/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-generations/" + encodeURIComponent(generationId));
+  },
+  composeVideoGeneration: function (projectId, videoTaskId, input) {
+    return api("/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) + "/video-generations/composition", jsonOptions("POST", input));
+  },
+  getVideoGenerationMedia: async function (mediaUrl) {
+    const response = await authenticatedFetch(mediaUrl);
+    if (!response.ok) {
+      let payload;
+      try { payload = await response.json(); } catch {}
+      throw new ApiError(payload, response.status);
+    }
+    return response.blob();
+  },
   listAdminBrands: function () { return api("/v1/admin/brands"); },
   getProjectCreationOptions: function () { return api("/v1/workspace/project-creation/options"); },
   getProjectAssetPackage: function (vehicleId) {
@@ -92,6 +121,14 @@ export const workspaceApi = {
       "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
       "/video-tasks/" + encodeURIComponent(videoTaskId) +
       "/stages/" + encodeURIComponent(stage) + "/rollbacks",
+      jsonOptions("POST", input),
+    );
+  },
+  reopenAssetMatching: function (projectId, videoTaskId, input) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/asset_matching/reopen",
       jsonOptions("POST", input),
     );
   },

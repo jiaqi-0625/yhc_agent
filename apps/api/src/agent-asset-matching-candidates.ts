@@ -147,7 +147,9 @@ export function createAgentAssetMatchingCandidateReader(
       const companyReferences = pool.assets.filter(
         (reference): reference is CompanyAssetReference =>
           reference.source === "company_catalog" &&
-          (reference.category === "person" || reference.category === "scene"),
+          (reference.category === "vehicle" ||
+            reference.category === "person" ||
+            reference.category === "scene"),
       );
       if (companyReferences.some(
         (reference) => reference.sourceProvider !== options.companyAssets.providerId,

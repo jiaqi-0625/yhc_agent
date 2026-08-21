@@ -227,13 +227,16 @@ function recordAppliedMigrations(
 test("migration loader reads the versioned Workspace V2 schema with a stable checksum", async () => {
   const loaded = await loadDatabaseMigrations();
 
-  assert.equal(loaded.length, 1);
+  assert.equal(loaded.length, 2);
   assert.equal(loaded[0]?.version, 1);
   assert.equal(loaded[0]?.name, "workspace_v2");
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE workspace_admin_states/);
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE video_task_aggregates/);
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE temporary_asset_project_states/);
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE account_run_lock_states/);
+  assert.equal(loaded[1]?.version, 2);
+  assert.equal(loaded[1]?.name, "video_generation_jobs");
+  assert.match(loaded[1]?.sql ?? "", /CREATE TABLE video_generation_jobs/);
   assert.match(loaded[0]?.sql ?? "", /jsonb_typeof\(aggregate\) = 'object'\) IS TRUE/u);
   assert.match(loaded[0]?.sql ?? "", /FOREIGN KEY \(tenant_id, project_id\)/u);
   assert.equal(loaded[0]?.checksum, computeMigrationChecksum(loaded[0]?.sql ?? ""));
