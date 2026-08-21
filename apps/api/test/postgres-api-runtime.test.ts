@@ -2,19 +2,14 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import test from "node:test";
 
+import type { TaskContext } from "@firefly/schemas";
+
 import type { PostgresDatabaseConfig } from "../src/database-config.ts";
 import { LocalBusinessRuntime } from "../src/business-runtime.ts";
 import type {
   PostgresQueryable,
   PostgresTransactionProvider,
 } from "../src/postgres-contract.ts";
-import type {
-  CreateMediaReadAccessInput,
-  MediaObjectHead,
-  MediaObjectReadAccess,
-  MediaObjectStorage,
-  PutMediaObjectInput,
-} from "../src/media-object-storage.ts";
 import {
   createPostgresApiRuntime,
   PostgresProjectAssetCoordinator,
@@ -66,37 +61,6 @@ class ReadinessDatabase implements PostgresApiDatabase {
     operation: (transaction: PostgresApiDatabase) => Promise<Result>,
   ): Promise<Result> {
     return operation(this);
-  }
-}
-
-class LifecycleMediaObjectStorage implements MediaObjectStorage {
-  readonly providerId = "s3" as const;
-  readonly bucketName = "firefly-lifecycle-media";
-  pingCount = 0;
-  closeCount = 0;
-  failPing = false;
-
-  async ping(): Promise<void> {
-    this.pingCount += 1;
-    if (this.failPing) throw new Error("secret object storage endpoint");
-  }
-
-  async close(): Promise<void> {
-    this.closeCount += 1;
-  }
-
-  async putObject(_input: PutMediaObjectInput): Promise<MediaObjectHead> {
-    throw new Error("Lifecycle fixture does not upload objects.");
-  }
-
-  async headObject(): Promise<MediaObjectHead> {
-    throw new Error("Lifecycle fixture does not inspect objects.");
-  }
-
-  async createReadAccess(
-    _input: CreateMediaReadAccessInput,
-  ): Promise<MediaObjectReadAccess> {
-    throw new Error("Lifecycle fixture does not sign objects.");
   }
 }
 
@@ -162,53 +126,44 @@ test("postgres composition injects one database coordinator into every asset mut
   assert.ok(runtime.taskContexts);
   assert.equal(typeof runtime.resolveWorkStatus, "function");
   assert.equal(typeof runtime.resolveVehicleService, "function");
-  await runtime.close();
-});
+  assert.equal(typeof runtime.resolveStrategyDraftReader, "function");
 
-test("postgres composition enables media readiness and closes database and object storage", async () => {
-  const database = new ReadinessDatabase();
-  const objectStorage = new LifecycleMediaObjectStorage();
-  const runtime = await createPostgresApiRuntime(config, {
-    database,
-    migrations: [],
-    mediaObjectStorage: objectStorage,
-  });
-  assert.ok(runtime.mediaArtifacts);
+  const strategyContext = {
+    batchProject: { id: "project_strategy_reader" },
+    videoTask: { id: "task_strategy_reader", currentStage: "strategy" },
+  } as unknown as TaskContext;
+  const strategyScope = {
+    actorId: "account_creator_a",
+    tenantId: "tenant_firefly",
+    projectId: "project_strategy_reader",
+    videoTaskId: "task_strategy_reader",
+  };
   assert.equal(
-    (runtime.videoTaskStages as unknown as { mediaArtifacts: unknown }).mediaArtifacts,
-    runtime.mediaArtifacts,
+    runtime.resolveStrategyDraftReader(strategyContext, strategyScope)?.videoTaskId,
+    "task_strategy_reader",
   );
-  assert.equal(objectStorage.pingCount, 1);
-  await runtime.readiness();
-  assert.equal(objectStorage.pingCount, 2);
-  await runtime.close();
-  assert.equal(database.closeCount, 1);
-  assert.equal(objectStorage.closeCount, 1);
-});
-
-test("postgres composition disables media routes by default and drains storage on readiness failure", async () => {
-  const disabledDatabase = new ReadinessDatabase();
-  const disabled = await createPostgresApiRuntime(config, {
-    database: disabledDatabase,
-    migrations: [],
-    environment: { OBJECT_STORAGE_BACKEND: "disabled" },
-  });
-  assert.equal(disabled.mediaArtifacts, undefined);
-  await disabled.close();
-
-  const failingDatabase = new ReadinessDatabase();
-  const failingStorage = new LifecycleMediaObjectStorage();
-  failingStorage.failPing = true;
-  await assert.rejects(
-    createPostgresApiRuntime(config, {
-      database: failingDatabase,
-      migrations: [],
-      mediaObjectStorage: failingStorage,
+  assert.equal(
+    runtime.resolveStrategyDraftReader({
+      ...strategyContext,
+      videoTask: { ...strategyContext.videoTask, currentStage: "script" },
+    }, strategyScope)?.videoTaskId,
+    "task_strategy_reader",
+  );
+  assert.equal(
+    runtime.resolveStrategyDraftReader({
+      ...strategyContext,
+      videoTask: { ...strategyContext.videoTask, currentStage: "asset_matching" },
+    }, strategyScope),
+    undefined,
+  );
+  assert.throws(
+    () => runtime.resolveStrategyDraftReader(strategyContext, {
+      ...strategyScope,
+      projectId: "project_other",
     }),
-    /secret object storage endpoint/u,
+    /strategy draft/iu,
   );
-  assert.equal(failingDatabase.closeCount, 1);
-  assert.equal(failingStorage.closeCount, 1);
+  await runtime.close();
 });
 
 test("postgres project asset coordinator holds same-project operations exclusively", async () => {

@@ -2,8 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import {
   ConfirmVideoTaskStageRequestSchema,
+  ReopenAssetMatchingRequestSchema,
   RollbackVideoTaskStageRequestSchema,
   type ConfirmVideoTaskStageRequest,
+  type ReopenAssetMatchingRequest,
   type RollbackVideoTaskStageRequest,
   type VideoTaskStage,
 } from "@firefly/schemas";
@@ -11,10 +13,8 @@ import {
 import { BusinessRuntimeError } from "./business-runtime.ts";
 import { readJson, sendJson, validateBody } from "./http-boundary.ts";
 import type { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
-import type { StartVideoProductionInput, VideoProductionRuntime } from "./video-production-runtime.ts";
 import { resolveWorkspaceSession } from "./workspace-session-routes.ts";
 import type { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
-import { Type } from "typebox";
 
 const IdentifierPath = "([A-Za-z0-9_-]{1,128})";
 const StagePath = "(strategy|script|asset_matching|storyboard|video_preview|delivery)";
@@ -34,20 +34,10 @@ const StageRollbacksPath = new RegExp(
   `^${StageRouteBase}/stages/${StagePath}/rollbacks$`,
   "u",
 );
-const StageSimulationsPath = new RegExp(
-  `^${StageRouteBase}/stages/${StagePath}/development-simulation$`,
+const AssetMatchingReopenPath = new RegExp(
+  `^${StageRouteBase}/stages/(asset_matching)/reopen$`,
   "u",
 );
-const VideoProductionPath = new RegExp(`^${StageRouteBase}/video-production$`, "u");
-const VideoProductionEstimatePath = new RegExp(
-  `^${StageRouteBase}/video-production/estimate$`,
-  "u",
-);
-
-const StartVideoProductionInputSchema = Type.Object({
-  requestId: Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
-  expectedTaskRevision: Type.Integer({ minimum: 0 }),
-}, { additionalProperties: false });
 
 interface StageScopedRoute {
   projectId: string;
@@ -59,9 +49,8 @@ export type VideoTaskStageRouteMatch =
   | ({ kind: "versions" } & StageScopedRoute)
   | ({ kind: "audit" } & Omit<StageScopedRoute, "stage">)
   | ({ kind: "confirmations" } & StageScopedRoute)
-  | ({ kind: "development_simulation" } & StageScopedRoute)
-  | ({ kind: "video_production" | "video_production_estimate" } & Omit<StageScopedRoute, "stage">)
-  | ({ kind: "rollbacks" } & StageScopedRoute);
+  | ({ kind: "rollbacks" } & StageScopedRoute)
+  | ({ kind: "reopen" } & StageScopedRoute);
 
 function scopedMatch(
   pathname: string,
@@ -79,14 +68,6 @@ function scopedMatch(
 export function matchVideoTaskStagePath(
   pathname: string,
 ): VideoTaskStageRouteMatch | undefined {
-  const productionEstimate = VideoProductionEstimatePath.exec(pathname);
-  if (productionEstimate?.[1] && productionEstimate[2]) {
-    return { kind: "video_production_estimate", projectId: productionEstimate[1], videoTaskId: productionEstimate[2] };
-  }
-  const production = VideoProductionPath.exec(pathname);
-  if (production?.[1] && production[2]) {
-    return { kind: "video_production", projectId: production[1], videoTaskId: production[2] };
-  }
   const versions = scopedMatch(pathname, StageVersionsPath);
   if (versions) return { kind: "versions", ...versions };
 
@@ -98,11 +79,10 @@ export function matchVideoTaskStagePath(
   const confirmations = scopedMatch(pathname, StageConfirmationsPath);
   if (confirmations) return { kind: "confirmations", ...confirmations };
 
-  const simulation = scopedMatch(pathname, StageSimulationsPath);
-  if (simulation) return { kind: "development_simulation", ...simulation };
-
   const rollbacks = scopedMatch(pathname, StageRollbacksPath);
   if (rollbacks) return { kind: "rollbacks", ...rollbacks };
+  const reopen = scopedMatch(pathname, AssetMatchingReopenPath);
+  if (reopen) return { kind: "reopen", ...reopen };
   return undefined;
 }
 
@@ -123,55 +103,11 @@ export async function handleVideoTaskStageRoute(
   url: URL,
   runtime: VideoTaskStageRuntime,
   sessions: WorkspaceSessionRuntime,
-  developmentSimulationEnabled = false,
-  videoProduction?: VideoProductionRuntime,
 ): Promise<boolean> {
   const route = matchVideoTaskStagePath(url.pathname);
   if (!route) return false;
   assertNoQuery(url);
   const session = await resolveWorkspaceSession(request, sessions);
-
-  if (request.method === "GET" && route.kind === "video_production_estimate") {
-    if (videoProduction === undefined) return false;
-    sendJson(response, 200, await videoProduction.estimate(route.projectId, route.videoTaskId, session.scope));
-    return true;
-  }
-
-  if (request.method === "GET" && route.kind === "video_production") {
-    if (videoProduction === undefined) return false;
-    sendJson(response, 200, await videoProduction.status(route.projectId, route.videoTaskId, session.scope));
-    return true;
-  }
-
-  if (request.method === "POST" && route.kind === "video_production") {
-    if (videoProduction === undefined) return false;
-    const input = validateBody<StartVideoProductionInput>(
-      StartVideoProductionInputSchema,
-      await readJson(request),
-    );
-    sendJson(response, 200, await videoProduction.start(
-      route.projectId,
-      route.videoTaskId,
-      input,
-      session.scope,
-    ));
-    return true;
-  }
-
-  if (request.method === "POST" && route.kind === "development_simulation") {
-    if (!developmentSimulationEnabled) return false;
-    sendJson(
-      response,
-      200,
-      await runtime.prepareDevelopmentSimulation(
-        route.projectId,
-        route.videoTaskId,
-        route.stage,
-        session.scope,
-      ),
-    );
-    return true;
-  }
 
   if (request.method === "GET" && route.kind === "versions") {
     sendJson(
@@ -227,6 +163,24 @@ export async function handleVideoTaskStageRoute(
         route.projectId,
         route.videoTaskId,
         route.stage,
+        input,
+        session.scope,
+      ),
+    );
+    return true;
+  }
+
+  if (request.method === "POST" && route.kind === "reopen") {
+    const input = validateBody<ReopenAssetMatchingRequest>(
+      ReopenAssetMatchingRequestSchema,
+      await readJson(request),
+    );
+    sendJson(
+      response,
+      200,
+      await runtime.reopenAssetMatching(
+        route.projectId,
+        route.videoTaskId,
         input,
         session.scope,
       ),

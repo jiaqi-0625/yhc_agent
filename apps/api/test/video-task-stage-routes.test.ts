@@ -10,6 +10,7 @@ import type {
   BatchProject,
   ConfirmVideoTaskStageRequest,
   ProjectAssetPool,
+  ReopenAssetMatchingRequest,
   RollbackVideoTaskStageRequest,
   VideoTaskStage,
 } from "@firefly/schemas";
@@ -81,6 +82,13 @@ type RuntimeCall =
       videoTaskId: string;
       stage: VideoTaskStage;
       input: RollbackVideoTaskStageRequest;
+      scope: WorkspaceSessionScope;
+    }
+  | {
+      operation: "reopen";
+      projectId: string;
+      videoTaskId: string;
+      input: ReopenAssetMatchingRequest;
       scope: WorkspaceSessionScope;
     };
 
@@ -165,6 +173,21 @@ async function routeFixture(): Promise<RouteFixture> {
         scope: structuredClone(scope),
       });
       return { operation: "rollback", stage, requestId: input.requestId };
+    },
+    async reopenAssetMatching(
+      requestedProjectId: string,
+      requestedVideoTaskId: string,
+      input: ReopenAssetMatchingRequest,
+      scope: WorkspaceSessionScope,
+    ) {
+      calls.push({
+        operation: "reopen",
+        projectId: requestedProjectId,
+        videoTaskId: requestedVideoTaskId,
+        input: structuredClone(input),
+        scope: structuredClone(scope),
+      });
+      return { operation: "reopen", requestId: input.requestId };
     },
   } as unknown as Parameters<typeof handleVideoTaskStageRoute>[3];
 
@@ -495,7 +518,7 @@ function jsonAuthorization(token: string): {
   return { ...authorization(token), "content-type": "application/json" };
 }
 
-test("stage route matcher keeps the four production paths and the explicit development simulation path", () => {
+test("stage route matcher accepts frozen stage paths and the asset matching reopen path", () => {
   for (const stage of stages) {
     assert.deepEqual(
       matchVideoTaskStagePath(`${basePath}/stages/${stage}/versions`),
@@ -509,15 +532,17 @@ test("stage route matcher keeps the four production paths and the explicit devel
       matchVideoTaskStagePath(`${basePath}/stages/${stage}/rollbacks`),
       { kind: "rollbacks", projectId, videoTaskId, stage },
     );
-    assert.deepEqual(
-      matchVideoTaskStagePath(`${basePath}/stages/${stage}/development-simulation`),
-      { kind: "development_simulation", projectId, videoTaskId, stage },
-    );
   }
   assert.deepEqual(matchVideoTaskStagePath(`${basePath}/stage-invalidations`), {
     kind: "audit",
     projectId,
     videoTaskId,
+  });
+  assert.deepEqual(matchVideoTaskStagePath(`${basePath}/stages/asset_matching/reopen`), {
+    kind: "reopen",
+    projectId,
+    videoTaskId,
+    stage: "asset_matching",
   });
 
   for (const pathname of [
@@ -526,6 +551,7 @@ test("stage route matcher keeps the four production paths and the explicit devel
     `${basePath}/stages/strategy/version`,
     `${basePath}/stage-invalidations/extra`,
     `${basePath}/stages/strategy/confirmations/`,
+    `${basePath}/stages/storyboard/reopen`,
   ]) {
     assert.equal(matchVideoTaskStagePath(pathname), undefined);
   }
@@ -590,6 +616,7 @@ test("stage writes validate strict bodies and forward only path scope plus sessi
   const assetConfirmationUrl =
     `${fixture.baseUrl}${basePath}/stages/asset_matching/confirmations`;
   const rollbackUrl = `${fixture.baseUrl}${basePath}/stages/strategy/rollbacks`;
+  const reopenUrl = `${fixture.baseUrl}${basePath}/stages/asset_matching/reopen`;
   const confirmInput = {
     requestId: "request_confirm_strategy",
     expectedTaskRevision: 7,
@@ -615,6 +642,11 @@ test("stage writes validate strict bodies and forward only path scope plus sessi
       }],
     },
   } satisfies ConfirmVideoTaskStageRequest;
+  const reopenInput = {
+    requestId: "request_reopen_asset_matching",
+    expectedTaskRevision: 10,
+    reason: "更换人物口播主播",
+  } satisfies ReopenAssetMatchingRequest;
 
   assert.equal((await fetch(confirmationUrl, {
     method: "POST",
@@ -659,7 +691,18 @@ test("stage writes validate strict bodies and forward only path scope plus sessi
     requestId: rollbackInput.requestId,
   });
 
-  assert.equal(fixture.calls.length, 3);
+  const reopened = await fetch(reopenUrl, {
+    method: "POST",
+    headers: jsonAuthorization(fixture.token),
+    body: JSON.stringify(reopenInput),
+  });
+  assert.equal(reopened.status, 200);
+  assert.deepEqual(await reopened.json(), {
+    operation: "reopen",
+    requestId: reopenInput.requestId,
+  });
+
+  assert.equal(fixture.calls.length, 4);
   const confirmCall = fixture.calls[0];
   assert.ok(confirmCall && confirmCall.operation === "confirm");
   assert.equal(confirmCall.projectId, projectId);
@@ -678,6 +721,10 @@ test("stage writes validate strict bodies and forward only path scope plus sessi
   assert.equal(rollbackCall.stage, "strategy");
   assert.deepEqual(rollbackCall.input, rollbackInput);
   assert.equal(rollbackCall.scope.actorAccountId, "account_creator_a");
+  const reopenCall = fixture.calls[3];
+  assert.ok(reopenCall && reopenCall.operation === "reopen");
+  assert.deepEqual(reopenCall.input, reopenInput);
+  assert.equal(reopenCall.scope.actorAccountId, "account_creator_a");
 
   const forgedConfirmationFields = [
     { actorAccountId: "account_attacker" },
@@ -712,14 +759,14 @@ test("stage writes validate strict bodies and forward only path scope plus sessi
     assert.equal(response.status, 400);
     assert.equal(((await response.json()) as { code: string }).code, "AIC-API-SCHEMA_INVALID");
   }
-  assert.equal(fixture.calls.length, 3);
+  assert.equal(fixture.calls.length, 4);
 
   assert.equal((await fetch(`${rollbackUrl}?stage=delivery`, {
     method: "POST",
     headers: jsonAuthorization(fixture.token),
     body: JSON.stringify(rollbackInput),
   })).status, 400);
-  assert.equal(fixture.calls.length, 3);
+  assert.equal(fixture.calls.length, 4);
 });
 
 test("real asset confirmation route maps stale pool and invalid exact selections without task writes", async (context) => {

@@ -26,6 +26,7 @@ import type {
 import type { VideoTaskProductionStore } from "./video-task-store.ts";
 import type { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
 import type { WorkspaceAdminState, WorkspaceAdminStore } from "./workspace-admin-store.ts";
+import { matchAssetsToConfirmedScript } from "./asset-script-matcher.ts";
 
 export interface AssetMatchingView {
   project: Pick<BatchProject, "id" | "brandId" | "vehicleId" | "name" | "aspectRatio">;
@@ -35,6 +36,7 @@ export interface AssetMatchingView {
   >;
   matchingReady: boolean;
   confirmationReady: boolean;
+  revisionReady: boolean;
   matchingLocked: boolean;
   gateMessage: string;
   poolRevision: number;
@@ -155,33 +157,62 @@ export class AssetMatchingRuntime {
     const snapshot = !mayUseLockedAssetSnapshot || record.videoTask.assetSnapshotId === undefined
       ? undefined
       : record.taskAssetSnapshots.find((item) => item.id === record.videoTask.assetSnapshotId);
-    const matchingReady = record.videoTask.status === "active" &&
+    const matchingStageAvailable = record.videoTask.status === "active" &&
       record.videoTask.currentStage === "asset_matching" &&
+      (record.videoTask.stageStatus === "in_progress" ||
+        record.videoTask.stageStatus === "awaiting_confirmation");
+    const matchingReady = matchingStageAvailable &&
+      record.videoTask.ownerAccountId === scope.actorAccountId;
+    const confirmationReady = matchingReady;
+    const revisionReady = snapshot !== undefined &&
+      record.videoTask.status === "active" &&
+      record.videoTask.currentStage === "storyboard" &&
       (record.videoTask.stageStatus === "in_progress" ||
         record.videoTask.stageStatus === "awaiting_confirmation") &&
       record.videoTask.ownerAccountId === scope.actorAccountId;
-    const confirmationReady = matchingReady;
-    const agentRecommendations = matchingReady ? [
-      ...pool.assets.filter((asset) => asset.category === "vehicle"),
-      ...["person", "scene"].flatMap((category) =>
-        [...catalogItems.values()]
-          .filter((item) => item.reference.category === category)
-          .slice(0, 1)
-          .map((item) => item.reference)
-      ),
-    ] : [];
+    const scriptContext = [
+      record.videoTask.scriptInput ?? "",
+      record.videoTask.theme,
+      record.videoTask.audience,
+    ].join("\n");
+    const temporaryCandidates = temporary
+      .filter((asset) => asset.validationStatus === "valid")
+      .map((asset) => ({
+        reference: {
+          assetId: asset.id,
+          version: asset.version,
+          category: asset.category,
+          source: "local_upload" as const,
+          batchProjectId: asset.batchProjectId,
+          checksumSha256: asset.checksumSha256,
+        },
+        displayName: asset.fileName,
+        description: asset.sourceDescription,
+        tags: ["本地上传", asset.rightsDeclaration],
+      }));
+    const scriptMatches = matchingStageAvailable
+      ? matchAssetsToConfirmedScript([...catalogItems.values(), ...temporaryCandidates], scriptContext)
+      : [];
+    const recommendationReasons = new Map(
+      scriptMatches.map((match) => [exactIdentity(match.reference), match.reason] as const),
+    );
+    const agentRecommendations = scriptMatches.map((match) => match.reference);
     const recommendedAssets = snapshot?.assets ?? agentRecommendations;
-    const selectedAssets = snapshot?.assets ?? (matchingReady
+    const selectedAssets = snapshot?.assets ?? (matchingStageAvailable
       ? recommendedAssets
       : pool.assets.filter((asset) => asset.category === "vehicle"));
     const selected = new Set(selectedAssets.map(exactIdentity));
     const recommended = new Set(recommendedAssets.map(exactIdentity));
     const gateMessage = snapshot
-      ? "素材版本已锁定，Agent 不会覆盖人工结果。"
-      : matchingReady
-        ? record.videoTask.stageStatus === "awaiting_confirmation"
-          ? "选材等待人工确认；确认后才会锁定最终素材版本。"
-          : "已根据确认的策略、脚本和素材描述词生成推荐；确认选择后将一次性锁定最终素材版本。"
+      ? revisionReady
+        ? "素材版本已锁定；如需更换，可重新配置并按已确认脚本重新匹配。"
+        : "素材版本已锁定，Agent 不会覆盖人工结果。"
+      : matchingStageAvailable
+        ? matchingReady
+          ? record.videoTask.stageStatus === "awaiting_confirmation"
+            ? "选材等待人工确认；确认后才会锁定最终素材版本。"
+            : "已根据确认的策略、脚本和素材描述词生成推荐；确认选择后将一次性锁定最终素材版本。"
+          : "当前账号不是任务负责人，可查看推荐但不能确认；请切换到负责人账号后操作。"
         : record.videoTask.currentStage === "strategy" || record.videoTask.currentStage === "script"
           ? "确认策略和脚本后，Agent 才会开始选材。"
           : "当前任务不在资产匹配阶段。";
@@ -207,6 +238,7 @@ export class AssetMatchingRuntime {
       },
       matchingReady,
       confirmationReady,
+      revisionReady,
       matchingLocked: snapshot !== undefined,
       gateMessage,
       poolRevision: pool.revision,
@@ -219,9 +251,10 @@ export class AssetMatchingRuntime {
         replacementAllowed: item.reference.category !== "vehicle",
         ...(recommended.has(exactIdentity(item.reference))
           ? {
-              recommendationReason: item.description
-                ? `匹配素材描述：${item.description}`
-                : "匹配已确认脚本的画面需要。",
+              recommendationReason: recommendationReasons.get(exactIdentity(item.reference)) ??
+                (item.description
+                  ? `匹配素材描述：${item.description}`
+                  : "匹配已确认脚本的画面需要。"),
             }
           : {}),
         })),
@@ -253,6 +286,10 @@ export class AssetMatchingRuntime {
     selectedAssets: readonly AssetReference[],
     session: Readonly<WorkspaceSessionScope>,
   ): Promise<AssetMatchingView> {
+    const prepared = await this.getView(projectId, videoTaskId, session);
+    const lockedVehicleSelection = prepared.selectedAssets.filter(
+      (asset) => asset.category === "vehicle",
+    );
     await this.stages.confirmStage(
       projectId,
       videoTaskId,
@@ -262,7 +299,10 @@ export class AssetMatchingRuntime {
         expectedTaskRevision,
         assetSelection: {
           expectedProjectAssetPoolRevision,
-          selectedAssets: structuredClone([...selectedAssets]),
+          selectedAssets: structuredClone([
+            ...lockedVehicleSelection,
+            ...selectedAssets,
+          ]),
         },
       },
       session,

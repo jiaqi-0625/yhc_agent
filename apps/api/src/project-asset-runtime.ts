@@ -345,12 +345,15 @@ export class ProjectAssetRuntime {
         }
         if (
           selectedAssets.some(
-            (asset) => asset.category !== "person" && asset.category !== "scene",
+            (asset) =>
+              asset.category !== "vehicle" &&
+              asset.category !== "person" &&
+              asset.category !== "scene",
           )
         ) {
           throw new ProjectAssetRuntimeError(
             "AIC-ASSET-SELECTION-INVALID",
-            "Task selection may only choose person and scene assets; vehicle and visual style assets are server-locked.",
+            "Task selection may only contain the server-recommended vehicle assets and the human-selected person or scene assets; visual style is server-locked.",
           );
         }
         const selectedIdentities = selectedAssets.map(exactAssetReferenceIdentity).sort((left, right) =>
@@ -372,11 +375,14 @@ export class ProjectAssetRuntime {
         const currentByIdentity = new Map(
           selectionPool.assets.map((asset) => [exactAssetReferenceIdentity(asset), asset] as const),
         );
+        const hasExplicitVehicleSelection = selectedAssets.some(
+          (asset) => asset.category === "vehicle",
+        );
         const fixedAssets = selectionPool.assets
           .filter(
             (asset) =>
-              asset.category === "vehicle" ||
-              (asset.category === "visual_style" && asset.assetId === project.visualStylePresetId),
+              (asset.category === "visual_style" && asset.assetId === project.visualStylePresetId) ||
+              (!hasExplicitVehicleSelection && asset.category === "vehicle"),
           )
           .sort((left, right) => exactAssetReferenceIdentity(left).localeCompare(
             exactAssetReferenceIdentity(right),

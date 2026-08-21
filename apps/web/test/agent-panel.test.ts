@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 // @ts-expect-error The browser module is intentionally plain JavaScript.
-import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, reloadAgentWorkspaceConversation, reloadAgentWorkspaceSession, resolveAgentPanelWidth, strategyApprovalContinuationCard, unavailableAgentTaskMessage } from "../public/agent-panel.js";
+import { agentActionAvailability, agentActionFailurePresentation, agentActionRequestBody, agentActionSuccessPresentation, agentActionTimelineEvent, agentBudgetPresentation, agentPanelWidthBounds, createAgentActionRequestId, createStableAgentActionRequestId, executeAgentActionCommand, extractAgentActionCard, parseAgentActionCard, resolveAgentPanelWidth, unavailableAgentTaskMessage } from "../public/agent-panel.js";
 
 const generationCard = {
   schemaVersion: 1,
@@ -15,6 +15,21 @@ const generationCard = {
   expectedRevision: 3,
   cost: { kind: "free" },
   payload: { schemaVersion: 1, audience: "家庭用户", theme: "周末出行" },
+};
+
+const scriptCard = {
+  schemaVersion: 1,
+  kind: "agent_action_card",
+  videoTaskId: "task_1",
+  action: "generate_script",
+  label: "生成脚本草稿",
+  summary: "依据已确认策略生成一条完整脚本。",
+  expectedRevision: 4,
+  cost: { kind: "free" },
+  payload: {
+    schemaVersion: 1,
+    script: "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+  },
 };
 
 test("Agent panel width preserves the desktop workspace minimums", () => {
@@ -106,6 +121,65 @@ test("Agent action cards require the exact frozen structure before rendering", (
   ]) {
     assert.equal(parseAgentActionCard(invalid), undefined);
   }
+});
+
+test("script generation cards and server receipts are strictly validated", () => {
+  assert.deepEqual(parseAgentActionCard(scriptCard), scriptCard);
+  assert.equal(parseAgentActionCard({
+    ...scriptCard,
+    payload: { ...scriptCard.payload, strategyDraftId: "forged" },
+  }), undefined);
+  const response = {
+    receipt: {
+      schemaVersion: 1,
+      id: "command_receipt_script_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      videoTaskId: "task_1",
+      actorAccountId: "account_creator_a",
+      requestId: "agent_action_script_1",
+      payloadHash: "a".repeat(64),
+      action: "generate_script",
+      expectedTaskRevision: 4,
+      resultingTaskRevision: 5,
+      cost: { kind: "free", amountMinor: 0, charged: false },
+      result: { kind: "script_generated", scriptContentHashSha256: "b".repeat(64) },
+      occurredAt: "2026-08-21T01:00:00.000Z",
+    },
+    replayed: false,
+    videoTask: {
+      id: "task_1",
+      tenantId: "tenant_1",
+      batchProjectId: "project_1",
+      revision: 5,
+    },
+  };
+  const presentation = agentActionSuccessPresentation(
+    scriptCard,
+    "agent_action_script_1",
+    "project_1",
+    "account_creator_a",
+    response,
+  );
+  assert.equal(presentation.status, "已生成");
+  assert.match(presentation.message, /脚本草稿已写入任务并等待负责人确认/u);
+  assert.equal(agentActionTimelineEvent(scriptCard, presentation).title, "脚本草稿已生成");
+  assert.throws(
+    () => agentActionSuccessPresentation(
+      scriptCard,
+      "agent_action_script_1",
+      "project_1",
+      "account_creator_a",
+      {
+        ...response,
+        receipt: {
+          ...response.receipt,
+          result: { kind: "script_generated", scriptContentHashSha256: "not-a-hash" },
+        },
+      },
+    ),
+    (error: unknown) => Boolean((error as { mayHaveExecuted?: boolean }).mayHaveExecuted),
+  );
 });
 
 test("Agent action execution sends only a request ID and the validated frozen card", () => {
@@ -386,57 +460,6 @@ test("Agent action command responses bind receipt metadata to the current accoun
   }
 });
 
-test("workspace conversation reload reads session context and transcript together", async () => {
-  const calls: string[] = [];
-  const session = { id: "agent_session_sync", taskContext: { videoTask: { id: "task_sync" } } };
-  const messages = [{ role: "assistant", content: "下一步内容" }];
-  const result = await reloadAgentWorkspaceConversation({
-    async getSession(sessionId: string, videoTaskId: string) {
-      calls.push(`session:${sessionId}:${videoTaskId}`);
-      return { session };
-    },
-    async getTranscript(sessionId: string, videoTaskId: string) {
-      calls.push(`transcript:${sessionId}:${videoTaskId}`);
-      return { messages };
-    },
-  }, "agent_session_sync", "task_sync");
-  assert.deepEqual(calls.sort(), [
-    "session:agent_session_sync:task_sync",
-    "transcript:agent_session_sync:task_sync",
-  ]);
-  assert.equal(result.session, session);
-  assert.equal(result.messages, messages);
-});
-
-test("workspace session reload avoids repainting an unchanged transcript", async () => {
-  let transcriptCalls = 0;
-  const session = { id: "agent_session_sync", taskContext: { videoTask: { id: "task_sync" } } };
-  const result = await reloadAgentWorkspaceSession({
-    getSession: async () => ({ session }),
-    getTranscript: async () => { transcriptCalls += 1; return { messages: [] }; },
-  }, "agent_session_sync", "task_sync");
-  assert.equal(result, session);
-  assert.equal(transcriptCalls, 0);
-});
-
-test("a server-visible strategy draft produces the next approval card without another user message", () => {
-  const task = {
-    id: "task_sync", revision: 2, currentStage: "strategy", stageStatus: "in_progress",
-  };
-  const card = strategyApprovalContinuationCard(task, {
-    activeStrategyDraft: { id: "strategy_draft_1" },
-  });
-  assert.equal(parseAgentActionCard(card)?.action, "request_strategy_approval");
-  assert.equal(card?.expectedRevision, 2);
-  assert.equal(strategyApprovalContinuationCard(task, {
-    activeStrategyDraft: { id: "strategy_draft_1" },
-    confirmationRequest: { id: "confirmation_request_1" },
-  }), null);
-  assert.equal(strategyApprovalContinuationCard({ ...task, currentStage: "script" }, {
-    activeStrategyDraft: { id: "strategy_draft_1" },
-  }), null);
-});
-
 test("application wiring keeps action commands task-scoped and disabled during Agent runs", async () => {
   const source = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
   const start = source.indexOf("function currentAgentActionContext()");
@@ -458,6 +481,11 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.doesNotMatch(commandWiring, /\/v1\/works\//u);
   assert.match(source, /state\.busy \|\| state\.workflowBusy, card\.dataset\.executionBlocked/u);
   assert.match(source, /appendActionProposal\(turn, proposal, event\.toolCallId\)/u);
+  assert.match(source, /proposal\.action === "generate_script"[\s\S]*"确认生成脚本"/u);
+  assert.match(
+    source,
+    /isProposalTool = tool\.toolName === "propose_strategy_generation"[\s\S]*tool\.toolName === "propose_script_generation"/u,
+  );
   assert.match(source, /appendActionProposal\(turn, event\.card, event\.eventId\)/u);
 
   const controlsStart = source.indexOf("function refreshAgentInteractionControls()");
@@ -472,8 +500,6 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(interactionWiring, /elements\.send\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.newSession\.disabled = interactionBusy/u);
   assert.match(interactionWiring, /elements\.sessionSelect\.disabled = interactionBusy/u);
-  assert.match(interactionWiring, /"正在准备任务会话"/u);
-  assert.match(interactionWiring, /"输入消息，与当前视频任务协作"/u);
   assert.equal(interactionWiring.match(/refreshAgentInteractionControls\(\);/gu)?.length, 2);
 
   const sendStart = source.indexOf("async function sendMessage(");
@@ -499,15 +525,7 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /state\.taskContext = null/u);
   assert.match(workspaceSync, /restoreSessionForCurrentWork\(scope\)/u);
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
-  assert.match(workspaceSync, /reloadAgentWorkspaceSession\(agentApi, sessionId, task\.id\)/u);
-  assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(task\)/u);
-  assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(selection\.task\)/u);
-  assert.match(source, /synchronizeAgentWorkflowContinuation\(body\.session\.taskContext\?\.videoTask\)/u);
-  assert.match(source, /appendWorkspaceTaskSyncEvent\(body\.session\.taskContext\?\.videoTask\)/u);
-  assert.match(source, /await synchronizeAgentWorkflowContinuation\(state\.taskContext\?\.videoTask\)/u);
-  assert.match(source, /无需再向 Agent 发送“已确认”/u);
-  assert.doesNotMatch(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);
-  assert.match(workspaceSync, /refreshed\.taskContext\.videoTask\.revision < task\.revision/u);
+  assert.match(workspaceSync, /body\.session\.taskContext\.videoTask\.revision < task\.revision/u);
   assert.match(source, /void synchronizeAgentWorkspaceSelection\(selection\)/u);
   assert.match(
     source,

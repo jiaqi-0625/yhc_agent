@@ -1,8 +1,10 @@
 import {
   createScopedStageSuggestionContextReader,
   createScopedTaskAssetSnapshotReader,
+  createArkSeedanceVideoGenerationProviderFromEnv,
   MockCompanyAssetProvider,
   type StageSuggestionContextReader,
+  type StrategyDraftReader,
   type TaskAssetSnapshotReader,
 } from "@firefly/tools";
 import type { AgentSessionScope } from "@firefly/agent";
@@ -10,7 +12,7 @@ import type { TaskContext } from "@firefly/schemas";
 
 import { AccountBudgetRuntime } from "./account-budget-runtime.ts";
 import { AccountRunLockRuntime } from "./account-run-lock-runtime.ts";
-import { ArkVideoGenerationProvider } from "./ark-video-generation-provider.ts";
+import { GeneratedVideoArtifactImporter } from "./generated-video-artifact-importer.ts";
 import {
   createAgentAssetMatchingCandidateReader,
   createCurrentProjectAssetPoolReader,
@@ -29,11 +31,6 @@ import {
 import { PostgresAccountBudgetStore } from "./postgres-account-budget-store.ts";
 import { PostgresAccountRunLockStore } from "./postgres-account-run-lock-store.ts";
 import { PostgresBatchProjectStore } from "./postgres-batch-project-store.ts";
-import { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
-import { HighCostOperationRuntime } from "./high-cost-operation-runtime.ts";
-import type { MediaObjectStorage } from "./media-object-storage.ts";
-import { parseObjectStorageConfig } from "./object-storage-config.ts";
-import { PostgresMediaArtifactStore } from "./postgres-media-artifact-store.ts";
 import type { PostgresTransactionProvider } from "./postgres-contract.ts";
 import {
   createPostgresDatabase,
@@ -41,9 +38,9 @@ import {
 import { PostgresTemporaryAssetStore } from "./postgres-temporary-asset-store.ts";
 import { PostgresVideoTaskProductionStore } from "./postgres-video-task-store.ts";
 import { PostgresVideoGenerationRequestStore } from "./postgres-video-generation-request-store.ts";
+import { PostgresVideoGenerationStore } from "./postgres-video-generation-store.ts";
 import { PostgresWorkspaceAdminStore } from "./postgres-workspace-admin-store.ts";
 import { PostgresWorkspaceSessionStore } from "./postgres-workspace-session-store.ts";
-import { createS3MediaObjectStorage } from "./s3-media-object-storage.ts";
 import {
   type ProjectAssetCoordinator,
 } from "./project-asset-coordinator.ts";
@@ -53,14 +50,11 @@ import { ProjectLibraryRuntime } from "./project-library-runtime.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
-import {
-  createConfiguredVideoPricingProvider,
-  VideoProductionRuntime,
-} from "./video-production-runtime.ts";
-import { parseVideoGenerationConfig } from "./video-generation-config.ts";
+import { VideoGenerationRuntime } from "./video-generation-runtime.ts";
 import { WorkspaceAdminRuntime } from "./workspace-admin-runtime.ts";
 import { WorkspaceSessionRuntime } from "./workspace-session-runtime.ts";
 import {
+  createWorkspaceStrategyDraftReader,
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -134,14 +128,14 @@ export interface PostgresApiRuntime {
   readonly projectCreation: ProjectCreationRuntime;
   readonly videoTasks: VideoTaskRuntime;
   readonly videoTaskStages: VideoTaskStageRuntime;
-  readonly mediaArtifacts: MediaArtifactRuntime | undefined;
-  readonly videoProduction: VideoProductionRuntime | undefined;
   readonly projectLibrary: ProjectLibraryRuntime;
   readonly agentActionCommands: AgentActionCommandRuntime;
   readonly projectAssets: ProjectAssetRuntime;
   readonly temporaryAssets: TemporaryAssetRuntime;
   readonly assetMatching: AssetMatchingRuntime;
   readonly accountRunLocks: AccountRunLockRuntime;
+  readonly videoGenerations?: VideoGenerationRuntime;
+  readonly videoGenerationArtifacts?: GeneratedVideoArtifactImporter;
   readonly assetCoordinator: PostgresProjectAssetCoordinator;
   readonly taskContexts: WorkspaceTaskContextResolver;
   readonly resolveWorkStatus: (
@@ -160,6 +154,10 @@ export interface PostgresApiRuntime {
     taskContext: Readonly<TaskContext>,
     sessionScope: Readonly<AgentSessionScope>,
   ) => StageSuggestionContextReader | undefined;
+  readonly resolveStrategyDraftReader: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => StrategyDraftReader | undefined;
   readiness(): Promise<void>;
   close(): Promise<void>;
 }
@@ -168,7 +166,6 @@ export interface CreatePostgresApiRuntimeOptions {
   readonly database?: PostgresApiDatabase;
   readonly migrations?: readonly DatabaseMigration[];
   readonly environment?: Readonly<Record<string, string | undefined>>;
-  readonly mediaObjectStorage?: MediaObjectStorage;
 }
 
 function unavailablePricingProvider() {
@@ -179,30 +176,37 @@ function unavailablePricingProvider() {
   };
 }
 
+function videoGenerationPricingProvider(environment: Readonly<Record<string, string | undefined>>) {
+  const amountMinor = Number.parseInt(environment.VIDEO_GENERATION_ESTIMATE_MINOR ?? "1000", 10);
+  if (!Number.isSafeInteger(amountMinor) || amountMinor < 1) {
+    throw new Error("VIDEO_GENERATION_ESTIMATE_MINOR must be a positive integer.");
+  }
+  return {
+    async estimate(_task: unknown, operation: string, estimatedAt: string) {
+      if (operation !== "video_generation") {
+        return unavailablePricingProvider().estimate();
+      }
+      return {
+        amountMinor,
+        currency: "CNY" as const,
+        pricingVersion: environment.VIDEO_GENERATION_PRICING_VERSION ?? "seedance_2_5_fixed_v1",
+        expiresAt: new Date(Date.parse(estimatedAt) + 10 * 60 * 1000).toISOString(),
+      };
+    },
+  };
+}
+
 export async function createPostgresApiRuntime(
   config: PostgresDatabaseConfig,
   options: Readonly<CreatePostgresApiRuntimeOptions> = {},
 ): Promise<PostgresApiRuntime> {
   const database: PostgresApiDatabase = options.database ?? createPostgresDatabase(config);
-  let mediaObjectStorage: MediaObjectStorage | undefined;
+  const environment = options.environment ?? process.env;
   try {
-    const objectStorageConfig = options.mediaObjectStorage === undefined
-      ? parseObjectStorageConfig(options.environment ?? process.env)
-      : undefined;
-    mediaObjectStorage = options.mediaObjectStorage ?? (
-      objectStorageConfig?.backend === "s3"
-        ? createS3MediaObjectStorage(objectStorageConfig)
-        : undefined
-    );
-    const videoGenerationConfig = parseVideoGenerationConfig(options.environment ?? process.env);
-    if (videoGenerationConfig.backend !== "disabled" && mediaObjectStorage === undefined) {
-      throw new Error("Real video generation requires private media object storage.");
-    }
     const migrations = options.migrations ?? await loadDatabaseMigrations();
     const readiness = async (): Promise<void> => {
       await database.ping();
       await verifyDatabaseSchema(database, migrations);
-      if (mediaObjectStorage !== undefined) await mediaObjectStorage.ping();
     };
     await readiness();
 
@@ -211,7 +215,6 @@ export async function createPostgresApiRuntime(
     const budgetStore = new PostgresAccountBudgetStore(database);
     const projectStore = new PostgresBatchProjectStore(database);
     const videoTaskStore = new PostgresVideoTaskProductionStore(database);
-    const mediaArtifactStore = new PostgresMediaArtifactStore(database);
     const videoGenerationRequestStore = new PostgresVideoGenerationRequestStore(database);
     const temporaryAssetStore = new PostgresTemporaryAssetStore(database);
     const runLockStore = new PostgresAccountRunLockStore(database);
@@ -220,12 +223,7 @@ export async function createPostgresApiRuntime(
     const assetCoordinator = new PostgresProjectAssetCoordinator(database);
 
     const workspaceSessions = new WorkspaceSessionRuntime(sessionStore, administrationStore);
-    const accountBudgets = new AccountBudgetRuntime(
-      budgetStore,
-      videoGenerationConfig.backend === "volcengine_ark"
-        ? createConfiguredVideoPricingProvider(videoGenerationConfig)
-        : unavailablePricingProvider(),
-    );
+    const accountBudgets = new AccountBudgetRuntime(budgetStore, videoGenerationPricingProvider(environment));
     const workspaceAdmin = new WorkspaceAdminRuntime(
       administrationStore,
       accountBudgets,
@@ -270,32 +268,6 @@ export async function createPostgresApiRuntime(
       temporaryAssetStore,
       assetCoordinator,
     );
-    const mediaArtifacts = mediaObjectStorage === undefined
-      ? undefined
-      : new MediaArtifactRuntime(
-          administrationStore,
-          projectStore,
-          videoTaskStore,
-          mediaArtifactStore,
-          mediaObjectStorage,
-        );
-    const accountRunLocks = new AccountRunLockRuntime(runLockStore);
-    const videoProduction = videoGenerationConfig.backend !== "volcengine_ark"
-      || mediaObjectStorage === undefined
-      || mediaArtifacts === undefined
-      ? undefined
-      : new VideoProductionRuntime(
-          administrationStore,
-          projectStore,
-          videoTaskStore,
-          mediaArtifactStore,
-          videoGenerationRequestStore,
-          mediaArtifacts,
-          mediaObjectStorage,
-          new HighCostOperationRuntime(accountRunLocks, accountBudgets),
-          new ArkVideoGenerationProvider(videoGenerationConfig),
-          videoGenerationConfig,
-        );
     const videoTaskStages = new VideoTaskStageRuntime(
       administrationStore,
       projectStore,
@@ -303,7 +275,6 @@ export async function createPostgresApiRuntime(
       undefined,
       undefined,
       projectAssets,
-      mediaArtifacts,
     );
     const assetMatching = new AssetMatchingRuntime(
       administrationStore,
@@ -322,6 +293,32 @@ export async function createPostgresApiRuntime(
       undefined,
       assetCoordinator,
     );
+    const accountRunLocks = new AccountRunLockRuntime(runLockStore);
+    const videoGenerationArtifacts = environment.ARK_API_KEY === undefined
+      ? undefined
+      : new GeneratedVideoArtifactImporter(
+          environment.GENERATED_VIDEO_DATA_DIRECTORY ?? ".data/generated-videos",
+          projectStore,
+          videoTaskStore,
+        );
+    const videoGenerations = videoGenerationArtifacts === undefined
+      ? undefined
+      : new VideoGenerationRuntime(
+          administrationStore,
+          projectStore,
+          videoTaskStore,
+          new PostgresVideoGenerationStore(database),
+          createArkSeedanceVideoGenerationProviderFromEnv(environment, {
+            artifactImporter: videoGenerationArtifacts,
+          }),
+          accountRunLocks,
+          accountBudgets,
+          videoGenerationArtifacts,
+          undefined,
+          undefined,
+          videoGenerationRequestStore,
+        );
+
     return Object.freeze({
       database,
       workspaceSessions,
@@ -329,14 +326,14 @@ export async function createPostgresApiRuntime(
       projectCreation,
       videoTasks,
       videoTaskStages,
-      mediaArtifacts,
-      videoProduction,
       projectLibrary,
       agentActionCommands,
       projectAssets,
       temporaryAssets,
       assetMatching,
       accountRunLocks,
+      ...(videoGenerations === undefined ? {} : { videoGenerations }),
+      ...(videoGenerationArtifacts === undefined ? {} : { videoGenerationArtifacts }),
       assetCoordinator,
       taskContexts,
       resolveWorkStatus: (
@@ -409,23 +406,17 @@ export async function createPostgresApiRuntime(
                 }),
           })
         : undefined,
+      resolveStrategyDraftReader: (
+        taskContext: Readonly<TaskContext>,
+        sessionScope: Readonly<AgentSessionScope>,
+      ) => ["strategy", "script"].includes(taskContext.videoTask.currentStage)
+        ? createWorkspaceStrategyDraftReader(videoTaskStore, taskContext, sessionScope)
+        : undefined,
       readiness,
-      close: async () => {
-        const results = await Promise.allSettled([
-          database.close(),
-          mediaObjectStorage?.close() ?? Promise.resolve(),
-        ]);
-        const failure = results.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (failure !== undefined) throw failure.reason;
-      },
+      close: () => database.close(),
     });
   } catch (error) {
-    await Promise.allSettled([
-      database.close(),
-      mediaObjectStorage?.close() ?? Promise.resolve(),
-    ]);
+    await database.close().catch(() => undefined);
     throw error;
   }
 }

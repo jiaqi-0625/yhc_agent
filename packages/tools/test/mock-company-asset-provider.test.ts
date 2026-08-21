@@ -18,6 +18,31 @@ const e5Scope: CompanyAssetProviderScope = {
   allowedVehicleIds: ["vehicle_e5"],
 };
 
+const c10Scope: CompanyAssetProviderScope = {
+  tenantId: "tenant_firefly",
+  actorAccountId: "account_creator",
+  allowedBrandIds: ["brand_leapmotor_demo"],
+  allowedVehicleIds: ["vehicle_leapmotor_c10_demo"],
+};
+
+test("C10 shared bundle exposes all verified media records in its vehicle scope", async () => {
+  const provider = new MockCompanyAssetProvider();
+  const page = await provider.searchAssets(
+    { categories: ["vehicle"], vehicleId: "vehicle_leapmotor_c10_demo", limit: 100 },
+    c10Scope,
+  );
+  assert.equal(page.items.length, 55);
+  assert.equal(page.nextCursor, undefined);
+  assert.deepEqual(
+    [page.items[0]?.reference.assetId, page.items.at(-1)?.reference.assetId],
+    ["asset_leapmotor_c10_0001", "asset_leapmotor_c10_0055"],
+  );
+  assert.ok(page.items.every(
+    (item) => item.preview.thumbnailUrl?.includes("/versions/1/thumbnail") === true,
+  ));
+  assert.ok(page.items.every((item) => item.description?.includes("不构成官方车型事实")));
+});
+
 test("mock catalog exposes all four public asset categories within server scope", async () => {
   const provider = new MockCompanyAssetProvider();
   const page = await provider.searchAssets({ limit: 100 }, e5Scope);

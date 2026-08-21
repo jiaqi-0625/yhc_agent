@@ -56,7 +56,11 @@ function fileBase64(file) {
 function errorText(error) {
   if (error?.status === 401) return "账号会话已失效";
   if (error?.status === 403) return "当前账号无操作权限";
-  if (error?.status === 409) return "任务或素材已更新，请刷新后重试";
+  if (error?.status === 409) {
+    return error instanceof Error && error.message
+      ? error.message
+      : "任务或素材已更新，请刷新后重试";
+  }
   return error instanceof Error && error.message ? error.message : "操作失败，请重试";
 }
 
@@ -73,6 +77,7 @@ export function createAssetMatchingPanel(options) {
   let requestSequence = 0;
   let previewGeneration = 0;
   const previewCache = new Map();
+  const confirmLabel = elements.confirm.textContent || "确认选择";
 
   function releasePreviewCache() {
     previewGeneration += 1;
@@ -245,8 +250,13 @@ export function createAssetMatchingPanel(options) {
   function render() {
     const available = Boolean(view);
     elements.uploadOpen.disabled = busy || !available;
-    elements.confirm.disabled = busy || !view?.confirmationReady || view?.matchingLocked ||
-      selectedReferences().length === 0;
+    const canConfirm = Boolean(view?.confirmationReady) && !view?.matchingLocked &&
+      selectedReferences().length > 0;
+    const canReconfigure = Boolean(view?.revisionReady) && Boolean(view?.matchingLocked);
+    elements.confirm.disabled = busy || (!canConfirm && !canReconfigure);
+    elements.confirm.textContent = busy
+      ? (canReconfigure ? "正在重新配置…" : "正在确认…")
+      : canReconfigure ? "重新配置资产" : confirmLabel;
     elements.gate.textContent = view?.gateMessage || (taskId ? "正在读取素材" : "请选择视频任务");
     elements.notice.className = "asset-matching-notice " +
       (view?.matchingLocked ? "locked" : view?.confirmationReady ? "ready" : "neutral");
@@ -290,7 +300,32 @@ export function createAssetMatchingPanel(options) {
   }
 
   async function confirmSelection() {
-    if (!view?.confirmationReady || view.matchingLocked || busy) return;
+    if (busy) return;
+    if (view?.revisionReady && view.matchingLocked) {
+      const accepted = window.confirm(
+        "重新配置资产会保留旧版本，但当前分镜将失效，任务会返回资产匹配阶段并按已确认脚本重新推荐。是否继续？",
+      );
+      if (!accepted) return;
+      busy = true;
+      setError("");
+      render();
+      try {
+        const result = await options.api.reopenAssetMatching(projectId, taskId, {
+          requestId: createConfirmationRequestId().replace("asset_confirmation_", "asset_reopen_"),
+          expectedTaskRevision: view.videoTask.revision,
+          reason: "更换人物口播资产并按已确认脚本重新匹配",
+        });
+        options.onTaskUpdated?.(result.videoTask, projectId);
+        await load();
+      } catch (error) {
+        setError(errorText(error));
+      } finally {
+        busy = false;
+        render();
+      }
+      return;
+    }
+    if (!view?.confirmationReady || view.matchingLocked) return;
     busy = true;
     setError("");
     render();
@@ -306,7 +341,7 @@ export function createAssetMatchingPanel(options) {
       });
       confirmationRequestId = null;
       manualSelection = new Set(view.selectedAssets.map(assetReferenceIdentity));
-      options.onTaskUpdated?.(view.videoTask);
+      options.onTaskUpdated?.(view.videoTask, projectId);
     } catch (error) {
       setError(errorText(error));
     } finally {
@@ -398,6 +433,7 @@ export function createAssetMatchingPanel(options) {
       if (nextKey === contextKey) return;
       contextKey = nextKey;
       releasePreviewCache();
+      category = "all";
       confirmationRequestId = null;
       void load();
     },

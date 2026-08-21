@@ -43,8 +43,27 @@ test("policy exposes stage suggestion reads in script, asset matching, storyboar
   if (!decision.allowed) assert.equal(decision.code, "AIC-WORKFLOW-TOOL_NOT_ALLOWED");
 });
 
+test("policy exposes the current strategy draft during review and script generation", () => {
+  for (const status of ["strategy_draft", "awaiting_strategy_approval", "strategy_approved", "script_draft"] as const) {
+    assert.deepEqual(
+      evaluateToolPolicy({ toolName: "get_current_strategy_draft", status, scope }),
+      { allowed: true, risk: "read" },
+    );
+  }
+  const decision = evaluateToolPolicy({
+    toolName: "get_current_strategy_draft",
+    status: "awaiting_script_approval",
+    scope,
+  });
+  assert.equal(decision.allowed, false);
+});
+
 test("policy allows non-mutating action proposals but rejects model-callable state changes", () => {
   assert.deepEqual(evaluateToolPolicy({ toolName: "propose_strategy_generation", status: "created", scope }), {
+    allowed: true,
+    risk: "proposal",
+  });
+  assert.deepEqual(evaluateToolPolicy({ toolName: "propose_script_generation", status: "script_draft", scope }), {
     allowed: true,
     risk: "proposal",
   });

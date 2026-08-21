@@ -300,7 +300,18 @@ test("asset-matching runtime is a thin proxy over canonical stage confirmation",
     source: "company_catalog",
     sourceProvider: "mock_company_assets",
   }];
-  const canonicalView = { matchingLocked: true } as AssetMatchingView;
+  const lockedVehicle = {
+    assetId: "asset_vehicle_script_match",
+    version: 2,
+    category: "vehicle" as const,
+    source: "company_catalog" as const,
+    sourceProvider: "mock_company_assets",
+    vehicleId: "vehicle_e5",
+  };
+  const canonicalView = {
+    matchingLocked: true,
+    selectedAssets: [lockedVehicle],
+  } as AssetMatchingView;
   const viewCalls: Array<{ projectId: string; videoTaskId: string }> = [];
   runtime.getView = async (requestedProjectId, requestedVideoTaskId) => {
     viewCalls.push({
@@ -330,15 +341,18 @@ test("asset-matching runtime is a thin proxy over canonical stage confirmation",
       expectedTaskRevision: 11,
       assetSelection: {
         expectedProjectAssetPoolRevision: 7,
-        selectedAssets,
+        selectedAssets: [lockedVehicle, ...selectedAssets],
       },
     },
     scope,
   }]);
-  assert.deepEqual(viewCalls, [{ projectId, videoTaskId }]);
+  assert.deepEqual(viewCalls, [
+    { projectId, videoTaskId },
+    { projectId, videoTaskId },
+  ]);
 });
 
-test("asset-matching proxy cannot pre-lock when canonical confirmation is not ready", async () => {
+test("asset-matching proxy cannot lock when canonical confirmation is not ready", async () => {
   const notReady = new BusinessRuntimeError(
     "AIC-STAGE-CONFIRMATION_NOT_READY",
     "素材选材尚未进入待确认状态。",
@@ -360,7 +374,7 @@ test("asset-matching proxy cannot pre-lock when canonical confirmation is not re
   );
   runtime.getView = async () => {
     viewCalls += 1;
-    return {} as AssetMatchingView;
+    return { selectedAssets: [] } as unknown as AssetMatchingView;
   };
 
   await assert.rejects(
@@ -380,5 +394,5 @@ test("asset-matching proxy cannot pre-lock when canonical confirmation is not re
     ),
     (error: unknown) => error === notReady,
   );
-  assert.equal(viewCalls, 0);
+  assert.equal(viewCalls, 1);
 });

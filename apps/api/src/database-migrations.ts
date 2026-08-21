@@ -333,7 +333,6 @@ const workspaceV2RequiredConstraints: readonly WorkspaceV2ConstraintRequirement[
   { tableName: "video_generation_requests", constraintName: "video_generation_requests_pkey", constraintType: "p", columns: ["generation_request_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "video_generation_requests", constraintName: "video_generation_requests_actor_request_key", constraintType: "u", columns: ["tenant_id", "batch_project_id", "video_task_id", "actor_account_id", "request_id"], referencedTableName: null, referencedColumns: null },
   { tableName: "video_generation_requests", constraintName: "video_generation_requests_task_fkey", constraintType: "f", columns: ["tenant_id", "batch_project_id", "video_task_id"], referencedTableName: "video_task_aggregates", referencedColumns: ["tenant_id", "project_id", "task_id"] },
-  { tableName: "video_generation_requests", constraintName: "video_generation_requests_media_fkey", constraintType: "f", columns: ["media_artifact_id"], referencedTableName: "media_artifacts", referencedColumns: ["artifact_id"] },
 ] satisfies readonly WorkspaceV2ConstraintRequirement[]).map((requirement) => Object.freeze({
   ...requirement,
   columns: Object.freeze(requirement.columns),

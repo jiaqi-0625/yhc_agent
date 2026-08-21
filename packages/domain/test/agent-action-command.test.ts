@@ -5,7 +5,10 @@ import type { BatchProject, ProjectAssetPool, VehicleSnapshot } from "@firefly/s
 
 import {
   AgentActionCommandError,
+  confirmVideoTaskStage,
   createVideoTask,
+  deriveStageConfirmationDependencies,
+  generateVideoTaskScript,
   generateVideoTaskStrategy,
   requestVideoTaskStrategyApproval,
   type AgentActionCommandContext,
@@ -267,6 +270,75 @@ test("approval request rejects invalid facts and non-owner commands", () => {
     }, project, pool, vehicleSnapshot, context("request_intruder", "c".repeat(64), {
       actorAccountId: "account_intruder",
     })),
+    AgentActionCommandError,
+  );
+});
+
+function scriptReadyRecord() {
+  const generated = generateVideoTaskStrategy(sourceRecord(), {
+    expectedTaskRevision: 1,
+    audience: "家庭用户",
+    theme: "周末出行",
+  }, project, pool, vehicleSnapshot, context("request_generate_script_setup", "a".repeat(64)));
+  const requested = requestVideoTaskStrategyApproval(
+    generated,
+    { expectedTaskRevision: 2 },
+    context("request_approve_script_setup", "b".repeat(64)),
+  );
+  const draft = requested.strategyDrafts[0]!;
+  return confirmVideoTaskStage(requested, {
+    expectedTaskRevision: 3,
+    stage: "strategy",
+    artifact: {
+      artifactId: draft.id,
+      schemaName: "video_task_strategy_draft",
+      schemaVersion: 1,
+      contentHashSha256: "c".repeat(64),
+    },
+    dependencies: deriveStageConfirmationDependencies(requested, "strategy"),
+  }, {
+    tenantId: project.tenantId,
+    batchProjectId: project.id,
+    actorAccountId: "account_owner",
+    occurredAt: "2026-08-19T10:10:00.000Z",
+    createId: (kind) => `${kind}_script_setup`,
+  });
+}
+
+test("script generation persists one validated draft and waits for explicit human confirmation", () => {
+  const source = scriptReadyRecord();
+  const result = generateVideoTaskScript(source, {
+    expectedTaskRevision: 4,
+    script: "  00–05s｜画面：车辆驶出社区。\r\n旁白：周末，从从容出发。  ",
+    scriptContentHashSha256: "d".repeat(64),
+  }, context("request_generate_script", "e".repeat(64)));
+
+  assert.equal(result.videoTask.currentStage, "script");
+  assert.equal(result.videoTask.stageStatus, "awaiting_confirmation");
+  assert.equal(result.videoTask.revision, 5);
+  assert.equal(
+    result.videoTask.scriptInput,
+    "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+  );
+  assert.equal(result.stageConfirmations.length, 1);
+  assert.equal(result.commandReceipts.at(-1)?.action, "generate_script");
+  assert.deepEqual(result.commandReceipts.at(-1)?.result, {
+    kind: "script_generated",
+    scriptContentHashSha256: "d".repeat(64),
+  });
+
+  const replay = generateVideoTaskScript(result, {
+    expectedTaskRevision: 4,
+    script: "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+    scriptContentHashSha256: "d".repeat(64),
+  }, context("request_generate_script", "e".repeat(64)));
+  assert.deepEqual(replay, result);
+  assert.throws(
+    () => generateVideoTaskScript(source, {
+      expectedTaskRevision: 4,
+      script: " ",
+      scriptContentHashSha256: "f".repeat(64),
+    }, context("request_invalid_script", "f".repeat(64))),
     AgentActionCommandError,
   );
 });

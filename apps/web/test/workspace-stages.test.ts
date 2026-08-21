@@ -4,31 +4,16 @@ import test from "node:test";
 import {
   confirmationAvailability,
   createWorkspaceStagesPanel,
+  expectedVideoShotCount,
+  latestVideoGenerationForShot,
+  remainingVideoShotIndices,
   rollbackImpact,
-  workspaceStageTaskStateKey,
+  simulatedStageActionCard,
   stagePosition,
   workspaceBudgetPresentation,
   workspaceProductionErrorText,
   workspaceRunLockPresentation,
 } from "../public/workspace-stages.js";
-
-test("workspace stage context changes when an Agent command advances task state", () => {
-  const before = workspaceStageTaskStateKey({
-    id: "task_sync",
-    revision: 2,
-    status: "active",
-    currentStage: "strategy",
-    stageStatus: "in_progress",
-  });
-  const after = workspaceStageTaskStateKey({
-    id: "task_sync",
-    revision: 3,
-    status: "active",
-    currentStage: "strategy",
-    stageStatus: "awaiting_confirmation",
-  });
-  assert.notEqual(after, before);
-});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -38,17 +23,9 @@ function deferred<T>() {
 
 function fakeRoot() {
   let confirmListener: (() => Promise<void>) | null = null;
-  let simulateListener: (() => Promise<void>) | null = null;
   return {
     innerHTML: "",
     querySelector(selector: string) {
-      if (selector === "[data-stage-simulate]") {
-        return {
-          addEventListener(_event: string, listener: () => Promise<void>) {
-            simulateListener = listener;
-          },
-        };
-      }
       if (selector !== "[data-stage-confirm]") return null;
       return {
         addEventListener(_event: string, listener: () => Promise<void>) {
@@ -61,129 +38,8 @@ function fakeRoot() {
       assert.ok(confirmListener, "confirmation listener must be rendered");
       return confirmListener();
     },
-    clickSimulate() {
-      assert.ok(simulateListener, "simulation listener must be rendered");
-      return simulateListener();
-    },
   };
 }
-
-test("script simulation remains visible when its task revision synchronizes back into the panel", async (context) => {
-  const browserGlobal = globalThis as typeof globalThis & { document?: unknown };
-  const originalDocument = browserGlobal.document;
-  browserGlobal.document = {
-    createElement() {
-      return {
-        className: "", innerHTML: "", open: false,
-        setAttribute() {}, querySelector() { return null; }, querySelectorAll() { return []; },
-        showModal() { this.open = true; }, close() { this.open = false; },
-      };
-    },
-    body: { append() {} },
-  };
-  context.after(() => {
-    if (originalDocument === undefined) delete browserGlobal.document;
-    else browserGlobal.document = originalDocument;
-  });
-  const roots = {
-    planning: fakeRoot(), storyboard: fakeRoot(), production: fakeRoot(), delivery: fakeRoot(),
-  };
-  let currentTask = {
-    id: "task_script", batchProjectId: "project_1", status: "active",
-    currentStage: "script", stageStatus: "in_progress", revision: 8,
-    ownedByCurrentAccount: true, theme: "智能通勤", audience: "城市家庭",
-    durationSeconds: 15, platformTags: ["信息流"],
-  };
-  let panel: ReturnType<typeof createWorkspaceStagesPanel>;
-  panel = createWorkspaceStagesPanel({
-    roots,
-    api: {
-      getStageVersions: async () => ({
-        videoTask: currentTask, activeArtifactVersionId: undefined, versions: [], invalidations: [],
-      }),
-      simulateStage: async () => {
-        currentTask = { ...currentTask, revision: 9, stageStatus: "awaiting_confirmation" };
-        return {
-          videoTask: currentTask,
-          artifact: {
-            artifactId: "development_script_1", schemaName: "development_simulated_script",
-            schemaVersion: 1, contentHashSha256: "a".repeat(64),
-          },
-        };
-      },
-    },
-    getCurrentAccountId: () => "account_creator_b",
-    onTaskUpdated: (updatedTask: typeof currentTask) => {
-      panel.setContext("project_1", { project: { id: "project_1" } }, updatedTask as never, "planning");
-    },
-  } as never);
-  panel.setContext("project_1", { project: { id: "project_1" } }, currentTask as never, "planning");
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.match(roots.planning.innerHTML, /策略确认后由 Agent 生成脚本/u);
-  await roots.planning.clickSimulate();
-  assert.match(roots.planning.innerHTML, /开场：以智能通勤建立画面/u);
-  assert.match(roots.planning.innerHTML, /产物待负责人确认/u);
-});
-
-test("strategy confirmation switches the same planning panel to script without a page reload", async (context) => {
-  const browserGlobal = globalThis as typeof globalThis & { document?: unknown };
-  const originalDocument = browserGlobal.document;
-  browserGlobal.document = {
-    createElement() {
-      return {
-        className: "", innerHTML: "", open: false,
-        setAttribute() {}, querySelector() { return null; }, querySelectorAll() { return []; },
-        showModal() { this.open = true; }, close() { this.open = false; },
-      };
-    },
-    body: { append() {} },
-  };
-  context.after(() => {
-    if (originalDocument === undefined) delete browserGlobal.document;
-    else browserGlobal.document = originalDocument;
-  });
-  const roots = {
-    planning: fakeRoot(), storyboard: fakeRoot(), production: fakeRoot(), delivery: fakeRoot(),
-  };
-  let currentTask = {
-    id: "task_strategy", batchProjectId: "project_1", status: "active",
-    currentStage: "strategy", stageStatus: "awaiting_confirmation", revision: 3,
-    ownedByCurrentAccount: true, theme: "智能通勤", audience: "城市家庭",
-    durationSeconds: 15, platformTags: ["信息流"],
-  };
-  let panel: ReturnType<typeof createWorkspaceStagesPanel>;
-  panel = createWorkspaceStagesPanel({
-    roots,
-    api: {
-      getStageVersions: async (_projectId: string, _taskId: string, stage: string) => ({
-        videoTask: currentTask,
-        activeArtifactVersionId: undefined,
-        versions: [], invalidations: [],
-        ...(stage === "strategy" ? {
-          activeStrategyDraft: {
-            id: "strategy_draft_1", validation: { valid: true }, audience: "城市家庭",
-            theme: "智能通勤", items: [],
-          },
-          confirmationRequest: { id: "confirmation_request_1" },
-        } : {}),
-      }),
-      confirmStage: async () => {
-        currentTask = { ...currentTask, revision: 4, currentStage: "script", stageStatus: "in_progress" };
-        return { videoTask: currentTask };
-      },
-    },
-    getCurrentAccountId: () => "account_creator_b",
-    onTaskUpdated: (updatedTask: typeof currentTask) => {
-      panel.setContext("project_1", { project: { id: "project_1" } }, updatedTask as never, "planning");
-    },
-  } as never);
-  panel.setContext("project_1", { project: { id: "project_1" } }, currentTask as never, "planning");
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.match(roots.planning.innerHTML, /<h2>营销策略<\/h2>/u);
-  await roots.planning.clickConfirm();
-  assert.match(roots.planning.innerHTML, /<h2>脚本<\/h2>/u);
-  assert.match(roots.planning.innerHTML, /策略确认后由 Agent 生成脚本/u);
-});
 
 const task = {
   id: "task_1",
@@ -214,6 +70,16 @@ test("non-strategy confirmation only uses a server-returned persisted artifact",
   } as never);
   assert.deepEqual(unavailable, { enabled: false, label: "等待产物入库" });
 
+  const generated = confirmationAvailability(task as never, "storyboard", {
+    generatedArtifact: {
+      artifactId: "ws503_storyboard_1",
+      schemaName: "ws503_simulated_storyboard",
+      schemaVersion: 1,
+      contentHashSha256: "b".repeat(64),
+    },
+  } as never);
+  assert.deepEqual(generated, { enabled: true, label: "确认方案并进入真实视频" });
+
   const artifact = {
     artifactId: "storyboard_draft_1",
     schemaName: "storyboard_draft",
@@ -226,14 +92,6 @@ test("non-strategy confirmation only uses a server-returned persisted artifact",
   } as never);
   assert.equal(available.enabled, true);
   assert.deepEqual(available.artifact, artifact);
-
-  const simulated = confirmationAvailability(task as never, "storyboard", {
-    activeArtifactVersionId: undefined,
-    versions: [],
-    simulatedArtifact: artifact,
-  } as never);
-  assert.equal(simulated.enabled, true);
-  assert.deepEqual(simulated.artifact, artifact);
 });
 
 test("strategy confirmation requires the persisted confirmation request", () => {
@@ -245,6 +103,48 @@ test("strategy confirmation requires the persisted confirmation request", () => 
     activeStrategyDraft: { id: "draft_1" },
     confirmationRequest: { id: "request_1" },
   } as never).enabled, true);
+});
+
+test("real video progress uses the supported multi-shot plan", () => {
+  assert.equal(expectedVideoShotCount(10), 3);
+  assert.equal(expectedVideoShotCount(15), 5);
+  assert.equal(expectedVideoShotCount(30), 6);
+  assert.equal(expectedVideoShotCount(20), 0);
+  assert.deepEqual(remainingVideoShotIndices(3, [
+    { shotIndex: 0, audioEnabled: true, status: "succeeded", output: { artifactId: "shot_1" } },
+    { shotIndex: 1, status: "failed" },
+  ]), [1, 2]);
+  assert.deepEqual(remainingVideoShotIndices(2, [
+    { shotIndex: 0, status: "succeeded", output: { artifactId: "legacy_silent_shot" } },
+    { shotIndex: 1, audioEnabled: true, status: "succeeded", output: { artifactId: "shot_with_audio" } },
+  ]), [0]);
+  assert.deepEqual(latestVideoGenerationForShot([
+    { id: "old", shotIndex: 0, status: "failed" },
+    { id: "new", shotIndex: 0, status: "succeeded" },
+    { id: "other", shotIndex: 1, status: "succeeded" },
+  ], 0), { id: "new", shotIndex: 0, status: "succeeded" });
+});
+
+test("simulated storyboard generation uses the frozen Agent action-card label", () => {
+  const card = simulatedStageActionCard("task_1", "storyboard", 10);
+  assert.equal(card.action, "generate_simulated_stage_artifact");
+  assert.equal(card.label, "生成当前阶段模拟产物");
+  assert.deepEqual(card.payload, { schemaVersion: 1, stage: "storyboard" });
+});
+
+test("a persisted generated script can be confirmed without a client artifact", () => {
+  const scriptTask = {
+    ...task,
+    currentStage: "script",
+    scriptInput: "00–05s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+  } as const;
+  assert.deepEqual(confirmationAvailability(scriptTask as never, "script", {
+    activeArtifactVersionId: undefined,
+    versions: [],
+  } as never), {
+    enabled: true,
+    label: "确认脚本",
+  });
 });
 
 test("production budget validates account scope and the balance identity", () => {
@@ -361,7 +261,6 @@ test("account changes invalidate in-flight production status and reload the same
   const confirmationCalls: string[] = [];
   const updatedTasks: string[] = [];
   const busyChanges: boolean[] = [];
-  let stageVersionCalls = 0;
   const budgetFor = (selectedAccountId: string, availableAmountMinor: number) => ({
     budget: {
       accountId: selectedAccountId,
@@ -377,7 +276,6 @@ test("account changes invalidate in-flight production status and reload the same
   });
   const api = {
     getStageVersions: async (_projectId: string, videoTaskId: string) => {
-      stageVersionCalls += 1;
       const selectedTask = videoTaskId === otherVideoTask.id ? otherVideoTask : videoTask;
       const versionId = videoTaskId + "_delivery_v1";
       return {
@@ -420,15 +318,6 @@ test("account changes invalidate in-flight production status and reload the same
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.match(roots.delivery.innerHTML, /¥222\.00/u);
   assert.match(roots.delivery.innerHTML, /运行槽可用/u);
-  const callsBeforeTaskUpdate = stageVersionCalls;
-  panel.setContext(
-    "project_1",
-    { project: { id: "project_1" } },
-    { ...videoTask, revision: videoTask.revision + 1, stageStatus: "confirmed" } as never,
-    "delivery",
-  );
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(stageVersionCalls, callsBeforeTaskUpdate + 6);
 
   oldBudget.resolve(budgetFor("account_creator_a", 11_100));
   oldRunLock.resolve({

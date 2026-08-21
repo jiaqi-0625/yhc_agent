@@ -38,17 +38,15 @@ import {
 } from "./business-agent-runtime.ts";
 import { BusinessRuntimeError, LocalBusinessRuntime } from "./business-runtime.ts";
 import { parsePostgresDatabaseConfig, type PostgresDatabaseConfig } from "./database-config.ts";
-import {
-  DevelopmentCompanyAssetMediaStore,
-  type DevelopmentCompanyAssetMediaReader,
-} from "./development-company-asset-media.ts";
 import { LOCAL_SCOPE } from "./golden-sample.ts";
 import { sendJson, sendRequestError } from "./http-boundary.ts";
+import type { GeneratedVideoArtifactImporter } from "./generated-video-artifact-importer.ts";
 import {
   handleMediaArtifactRoute,
   matchMediaArtifactAccessPath,
 } from "./media-artifact-routes.ts";
 import type { MediaArtifactRuntime } from "./media-artifact-runtime.ts";
+import { sendMockCompanyAssetMedia } from "./mock-company-asset-media.ts";
 import {
   createPostgresApiRuntime,
   type PostgresApiRuntime,
@@ -64,16 +62,19 @@ import { ProjectCreationRuntime } from "./project-creation-runtime.ts";
 import { handleVideoTaskRoute } from "./video-task-routes.ts";
 import { VideoTaskRuntime } from "./video-task-runtime.ts";
 import {
+  handleVideoGenerationRoute,
+  matchesVideoGenerationRoute,
+} from "./video-generation-routes.ts";
+import type { VideoGenerationRuntime } from "./video-generation-runtime.ts";
+import {
   handleVideoTaskStageRoute,
   matchVideoTaskStagePath,
 } from "./video-task-stage-routes.ts";
 import { VideoTaskStageRuntime } from "./video-task-stage-runtime.ts";
-import type { VideoProductionRuntime } from "./video-production-runtime.ts";
 import { LocalVideoTaskProductionStore } from "./video-task-store.ts";
 import { LocalTemporaryAssetStore } from "./temporary-asset-store.ts";
 import { TemporaryAssetRuntime } from "./temporary-asset-runtime.ts";
 import { sendWebAsset } from "./web-assets.ts";
-import { handleMockCompanyAssetMediaRoute } from "./mock-company-asset-routes.ts";
 import { handleWorkspaceAdminRoute } from "./workspace-admin-routes.ts";
 import {
   DEFAULT_ADMIN_BRANDS,
@@ -98,6 +99,7 @@ import {
   WorkspaceProductionStatusPath,
 } from "./workspace-production-status-routes.ts";
 import {
+  createWorkspaceStrategyDraftReader,
   createWorkspaceTaskVehicleService,
   readWorkspaceTaskPolicyStatus,
   WorkspaceTaskContextResolver,
@@ -143,20 +145,6 @@ function developmentAccountsAllowed(
   return environment.FIREFLY_ENABLE_DEVELOPMENT_ACCOUNTS === "true";
 }
 
-export function createDevelopmentCompanyAssetMediaStore(
-  host: string,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): DevelopmentCompanyAssetMediaStore | undefined {
-  if (environment.NODE_ENV === "production") return undefined;
-  const loopback = ["127.0.0.1", "::1", "localhost"].includes(host);
-  if (!loopback && environment.FIREFLY_ENABLE_DEVELOPMENT_ASSET_MEDIA !== "true") {
-    return undefined;
-  }
-  return new DevelopmentCompanyAssetMediaStore(
-    environment.MOCK_COMPANY_ASSET_MEDIA_DIRECTORY ?? ".data/mock-company-assets",
-  );
-}
-
 async function handleRequest(
   request: IncomingMessage,
   response: ServerResponse,
@@ -177,11 +165,12 @@ async function handleRequest(
   readiness: ApiReadinessProbe,
   assetMatching: AssetMatchingRuntime | undefined,
   accountRunLocks: AccountRunLockRuntime | undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined,
+  videoGenerations: VideoGenerationRuntime | undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined,
-  videoProduction: VideoProductionRuntime | undefined,
 ): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
+  if (request.method === "GET" && (await sendMockCompanyAssetMedia(response, url.pathname))) return;
   if (request.method === "GET" && (await sendWebAsset(response, url.pathname))) return;
   if (request.method === "GET" && url.pathname === "/health") {
     sendJson(response, 200, { status: "ok", service: "firefly-ad-agent-api", version });
@@ -217,6 +206,7 @@ async function handleRequest(
         "work_bound_agent",
         "task_context_v1",
         ...(projectLibrary === undefined ? [] : ["project_library_v1"]),
+        ...(videoGenerations === undefined ? [] : ["seedance_single_shot_generation_v1"]),
       ],
       domainTools: [
         "get_vehicle_snapshot",
@@ -243,16 +233,6 @@ async function handleRequest(
       url,
       workspaceSessions,
       developmentAccountsEnabled,
-    )
-  ) return;
-  if (
-    developmentCompanyAssetMedia !== undefined &&
-    await handleMockCompanyAssetMediaRoute(
-      request,
-      response,
-      url,
-      developmentCompanyAssetMedia,
-      workspaceSessions,
     )
   ) return;
   if (
@@ -299,8 +279,29 @@ async function handleRequest(
     )
   ) return;
   if (
-    mediaArtifacts === undefined &&
-    matchMediaArtifactAccessPath(url.pathname) !== undefined
+    (videoGenerations === undefined || videoArtifacts === undefined) &&
+    matchesVideoGenerationRoute(url.pathname)
+  ) {
+    throw new BusinessRuntimeError(
+      "AIC-VIDEO-GENERATION-RUNTIME-NOT-CONFIGURED",
+      "Real video generation is not configured on this server.",
+      503,
+    );
+  }
+  if (
+    videoGenerations !== undefined && videoArtifacts !== undefined &&
+    await handleVideoGenerationRoute(
+      request,
+      response,
+      url,
+      videoGenerations,
+      workspaceSessions,
+      videoArtifacts,
+    )
+  ) return;
+  if (
+    mediaArtifacts === undefined
+    && matchMediaArtifactAccessPath(url.pathname) !== undefined
   ) {
     throw new BusinessRuntimeError(
       "AIC-MEDIA-ARTIFACT-RUNTIME_NOT_CONFIGURED",
@@ -309,14 +310,8 @@ async function handleRequest(
     );
   }
   if (
-    mediaArtifacts !== undefined &&
-    await handleMediaArtifactRoute(
-      request,
-      response,
-      url,
-      mediaArtifacts,
-      workspaceSessions,
-    )
+    mediaArtifacts !== undefined
+    && await handleMediaArtifactRoute(request, response, url, mediaArtifacts, workspaceSessions)
   ) return;
   if (
     videoTaskStages === undefined &&
@@ -336,8 +331,6 @@ async function handleRequest(
       url,
       videoTaskStages,
       workspaceSessions,
-      developmentAccountsEnabled,
-      videoProduction,
     )
   ) return;
   if (
@@ -478,9 +471,10 @@ export function createApiServer(
   readiness: ApiReadinessProbe = alwaysReady,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
+  environment: ApiEnvironment = process.env,
+  videoGenerations: VideoGenerationRuntime | undefined = undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
-  videoProduction: VideoProductionRuntime | undefined = undefined,
 ): Server {
   if (
     legacyWritesDisabled &&
@@ -503,15 +497,16 @@ export function createApiServer(
       videoTaskStages !== undefined ||
       projectLibrary !== undefined ||
       accountRunLocks !== undefined ||
+      videoGenerations !== undefined ||
+      videoArtifacts !== undefined ||
       mediaArtifacts !== undefined
-      || videoProduction !== undefined
     )
   ) {
     throw new Error("A custom workspace runtime requires its matching session runtime.");
   }
   const adminStore = workspaceSessions === undefined
     ? new LocalWorkspaceAdminStore(
-        process.env.WORKSPACE_ADMIN_DATA_DIRECTORY ?? ".data/workspace-admin",
+        environment.WORKSPACE_ADMIN_DATA_DIRECTORY ?? ".data/workspace-admin",
         {
           brands: DEFAULT_ADMIN_BRANDS,
           vehicleVersions: DEFAULT_ADMIN_VEHICLES,
@@ -522,7 +517,7 @@ export function createApiServer(
     : undefined;
   const activeWorkspaceSessions = workspaceSessions ?? new WorkspaceSessionRuntime(
     new LocalWorkspaceSessionStore(
-      process.env.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
+      environment.WORKSPACE_SESSION_DATA_DIRECTORY ?? ".data/workspace-sessions",
     ),
     adminStore!,
   );
@@ -531,7 +526,7 @@ export function createApiServer(
     workspaceSessions === undefined
       ? new AccountRunLockRuntime(
           new LocalAccountRunLockStore(
-            process.env.ACCOUNT_RUN_LOCK_DATA_DIRECTORY ?? ".data/account-run-locks",
+            environment.ACCOUNT_RUN_LOCK_DATA_DIRECTORY ?? ".data/account-run-locks",
           ),
         )
       : undefined
@@ -540,7 +535,7 @@ export function createApiServer(
     adminStore,
     new AccountBudgetRuntime(
       new LocalAccountBudgetStore(
-        process.env.ACCOUNT_BUDGET_DATA_DIRECTORY ?? ".data/account-budgets",
+        environment.ACCOUNT_BUDGET_DATA_DIRECTORY ?? ".data/account-budgets",
       ),
       {
         async estimate() {
@@ -552,7 +547,7 @@ export function createApiServer(
     () => activeWorkspaceSessions.listDevelopmentAccounts(),
   ));
   const batchProjectStore = adminStore === undefined ? undefined : new LocalBatchProjectStore(
-    process.env.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
+    environment.BATCH_PROJECT_DATA_DIRECTORY ?? ".data/batch-projects",
   );
   const activeProjectCreation = projectCreation ?? (adminStore === undefined ? undefined : new ProjectCreationRuntime(
     adminStore,
@@ -560,10 +555,10 @@ export function createApiServer(
     companyAssetProvider,
   ));
   const videoTaskStore = adminStore === undefined ? undefined : new LocalVideoTaskProductionStore(
-    process.env.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
+    environment.VIDEO_TASK_DATA_DIRECTORY ?? ".data/video-tasks",
   );
   const temporaryAssetStore = adminStore === undefined ? undefined : new LocalTemporaryAssetStore(
-    process.env.TEMPORARY_ASSET_DATA_DIRECTORY ?? ".data/temporary-assets",
+    environment.TEMPORARY_ASSET_DATA_DIRECTORY ?? ".data/temporary-assets",
   );
   const activeVideoTasks = videoTasks ?? (adminStore === undefined ? undefined : new VideoTaskRuntime(
     adminStore,
@@ -656,7 +651,7 @@ export function createApiServer(
         });
   const activeRuntime = runtime ?? createBusinessAgentRuntime(
     business,
-    loadLocalAgentConfig(),
+    loadLocalAgentConfig(environment),
     {
       disableLegacyStrategyTools: legacyWritesDisabled,
       ...(legacyWritesDisabled
@@ -749,6 +744,16 @@ export function createApiServer(
                         }),
                   })
                 : undefined,
+            resolveStrategyDraftReader: videoTaskStore === undefined
+              ? () => undefined
+              : (taskContext, sessionScope) =>
+                  ["strategy", "script"].includes(taskContext.videoTask.currentStage)
+                    ? createWorkspaceStrategyDraftReader(
+                        videoTaskStore,
+                        taskContext,
+                        sessionScope,
+                      )
+                    : undefined,
           }
         : {}),
     },
@@ -776,9 +781,9 @@ export function createApiServer(
       readiness,
       activeAssetMatching,
       activeAccountRunLocks,
-      developmentCompanyAssetMedia,
+      videoGenerations,
+      videoArtifacts,
       mediaArtifacts,
-      videoProduction,
     ).catch((error: unknown) => {
       sendRequestError(response, error);
     });
@@ -806,9 +811,10 @@ export async function startApiServer(
   forceLegacyWritesDisabled = false,
   assetMatching: AssetMatchingRuntime | undefined = undefined,
   accountRunLocks: AccountRunLockRuntime | undefined = undefined,
-  developmentCompanyAssetMedia: DevelopmentCompanyAssetMediaReader | undefined = undefined,
+  environment: ApiEnvironment = process.env,
+  videoGenerations: VideoGenerationRuntime | undefined = undefined,
+  videoArtifacts: GeneratedVideoArtifactImporter | undefined = undefined,
   mediaArtifacts: MediaArtifactRuntime | undefined = undefined,
-  videoProduction: VideoProductionRuntime | undefined = undefined,
 ): Promise<Server> {
   const migrationState = new WorkspaceMigrationStateStore(migrationStateDirectory);
   const apiLease = await migrationState.acquireApiLease();
@@ -833,9 +839,10 @@ export async function startApiServer(
       readiness,
       assetMatching,
       accountRunLocks,
-      developmentCompanyAssetMedia,
+      environment,
+      videoGenerations,
+      videoArtifacts,
       mediaArtifacts,
-      videoProduction,
     );
     server.once("close", () => {
       void apiLease.release().catch(() => undefined);
@@ -954,18 +961,17 @@ export async function startConfiguredApiServer(
       undefined,
       migrationStateDirectory,
       undefined,
-      undefined,
+      alwaysReady,
       true,
       undefined,
       undefined,
-      createDevelopmentCompanyAssetMediaStore(host, environment),
+      environment,
     );
   }
 
-  const databaseConfig = parsePostgresDatabaseConfig(environment);
-  const postgres = options.createPostgresRuntime === undefined
-    ? await createPostgresApiRuntime(databaseConfig, { environment })
-    : await options.createPostgresRuntime(databaseConfig);
+  const postgres = await (options.createPostgresRuntime === undefined
+    ? createPostgresApiRuntime(parsePostgresDatabaseConfig(environment), { environment })
+    : options.createPostgresRuntime(parsePostgresDatabaseConfig(environment)));
   const business = options.business ?? new LocalBusinessRuntime();
   let server: Server | undefined;
   try {
@@ -978,6 +984,7 @@ export async function startConfiguredApiServer(
         resolveVehicleService: postgres.resolveVehicleService,
         resolveTaskAssetReader: postgres.resolveTaskAssetReader,
         resolveStageSuggestionReader: postgres.resolveStageSuggestionReader,
+        resolveStrategyDraftReader: postgres.resolveStrategyDraftReader,
       },
     );
     const resolvePostgresTaskContext: AgentTaskContextResolver = async (request, videoTaskId) => {
@@ -1013,9 +1020,9 @@ export async function startConfiguredApiServer(
       true,
       postgres.assetMatching,
       postgres.accountRunLocks,
-      createDevelopmentCompanyAssetMediaStore(host, environment),
-      postgres.mediaArtifacts,
-      postgres.videoProduction,
+      environment,
+      postgres.videoGenerations,
+      postgres.videoGenerationArtifacts,
     );
     attachPostgresLifecycle(
       server,

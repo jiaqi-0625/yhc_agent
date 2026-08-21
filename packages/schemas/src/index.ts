@@ -926,6 +926,7 @@ export type StageRollbackRecord = Static<typeof StageRollbackRecordSchema>;
 export const StageArtifactInvalidationReasonSchema = Type.Union([
   Type.Literal("upstream_rollback"),
   Type.Literal("upstream_invalidation"),
+  Type.Literal("asset_selection_revision"),
 ]);
 export type StageArtifactInvalidationReason = Static<typeof StageArtifactInvalidationReasonSchema>;
 
@@ -943,6 +944,16 @@ export const StageArtifactInvalidationCauseSchema = Type.Union([
       kind: Type.Literal("upstream_invalidation"),
       reasonCode: Type.Literal("upstream_invalidation"),
       invalidationId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("manual_revision"),
+      reasonCode: Type.Literal("asset_selection_revision"),
+      requestId: Identifier,
+      requestedBy: Identifier,
+      expectedTaskRevision: Type.Integer({ minimum: 1 }),
     },
     { additionalProperties: false },
   ),
@@ -997,6 +1008,16 @@ export const RollbackVideoTaskStageRequestSchema = Type.Object(
 );
 export type RollbackVideoTaskStageRequest = Static<typeof RollbackVideoTaskStageRequestSchema>;
 
+export const ReopenAssetMatchingRequestSchema = Type.Object(
+  {
+    requestId: Identifier,
+    expectedTaskRevision: Type.Integer({ minimum: 1 }),
+    reason: Type.String({ minLength: 1, maxLength: 2000 }),
+  },
+  { additionalProperties: false },
+);
+export type ReopenAssetMatchingRequest = Static<typeof ReopenAssetMatchingRequestSchema>;
+
 export const StageConfirmedMutationResultSchema = Type.Object(
   {
     kind: Type.Literal("stage_confirmed"),
@@ -1019,9 +1040,20 @@ export const StageRolledBackMutationResultSchema = Type.Object(
 );
 export type StageRolledBackMutationResult = Static<typeof StageRolledBackMutationResultSchema>;
 
+export const StageReopenedMutationResultSchema = Type.Object(
+  {
+    kind: Type.Literal("stage_reopened"),
+    stage: Type.Literal("asset_matching"),
+    invalidationIds: Type.Array(Identifier, { minItems: 1, maxItems: 500, uniqueItems: true }),
+  },
+  { additionalProperties: false },
+);
+export type StageReopenedMutationResult = Static<typeof StageReopenedMutationResultSchema>;
+
 export const StageMutationResultSchema = Type.Union([
   StageConfirmedMutationResultSchema,
   StageRolledBackMutationResultSchema,
+  StageReopenedMutationResultSchema,
 ]);
 export type StageMutationResult = Static<typeof StageMutationResultSchema>;
 
@@ -1059,9 +1091,20 @@ export const RollbackStageMutationReceiptSchema = Type.Object(
 );
 export type RollbackStageMutationReceipt = Static<typeof RollbackStageMutationReceiptSchema>;
 
+export const ReopenStageMutationReceiptSchema = Type.Object(
+  {
+    ...StageMutationReceiptBaseFields,
+    action: Type.Literal("reopen_stage"),
+    result: StageReopenedMutationResultSchema,
+  },
+  { additionalProperties: false },
+);
+export type ReopenStageMutationReceipt = Static<typeof ReopenStageMutationReceiptSchema>;
+
 export const StageMutationReceiptSchema = Type.Union([
   ConfirmStageMutationReceiptSchema,
   RollbackStageMutationReceiptSchema,
+  ReopenStageMutationReceiptSchema,
 ]);
 export type StageMutationReceipt = Static<typeof StageMutationReceiptSchema>;
 
@@ -1088,6 +1131,17 @@ export const RollbackVideoTaskStageResponseSchema = Type.Object(
   { additionalProperties: false },
 );
 export type RollbackVideoTaskStageResponse = Static<typeof RollbackVideoTaskStageResponseSchema>;
+
+export const ReopenAssetMatchingResponseSchema = Type.Object(
+  {
+    replayed: Type.Boolean(),
+    receipt: ReopenStageMutationReceiptSchema,
+    videoTask: VideoTaskSchema,
+    invalidations: Type.Array(StageArtifactInvalidationSchema, { minItems: 1, maxItems: 500 }),
+  },
+  { additionalProperties: false },
+);
+export type ReopenAssetMatchingResponse = Static<typeof ReopenAssetMatchingResponseSchema>;
 
 export const VideoTaskStageAuditResponseSchema = Type.Object(
   {
@@ -1268,6 +1322,14 @@ export const ProposeStrategyGenerationRequestSchema = Type.Object(
 );
 export type ProposeStrategyGenerationRequest = Static<typeof ProposeStrategyGenerationRequestSchema>;
 
+export const ProposeScriptGenerationRequestSchema = Type.Object(
+  {
+    script: Type.String({ minLength: 1, maxLength: 20000 }),
+  },
+  { additionalProperties: false },
+);
+export type ProposeScriptGenerationRequest = Static<typeof ProposeScriptGenerationRequestSchema>;
+
 export const ProposeStrategyApprovalRequestSchema = Type.Object({}, { additionalProperties: false });
 export type ProposeStrategyApprovalRequest = Static<typeof ProposeStrategyApprovalRequestSchema>;
 
@@ -1397,6 +1459,30 @@ export const RequestStrategyApprovalActionPayloadSchema = Type.Object(
 );
 export type RequestStrategyApprovalActionPayload = Static<typeof RequestStrategyApprovalActionPayloadSchema>;
 
+export const GenerateScriptActionPayloadSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    script: Type.String({ minLength: 1, maxLength: 20000 }),
+  },
+  { additionalProperties: false },
+);
+export type GenerateScriptActionPayload = Static<typeof GenerateScriptActionPayloadSchema>;
+
+export const GenerateSimulatedStageArtifactActionPayloadSchema = Type.Object(
+  {
+    schemaVersion: Type.Literal(1),
+    stage: Type.Union([
+      Type.Literal("storyboard"),
+      Type.Literal("video_preview"),
+      Type.Literal("delivery"),
+    ]),
+  },
+  { additionalProperties: false },
+);
+export type GenerateSimulatedStageArtifactActionPayload = Static<
+  typeof GenerateSimulatedStageArtifactActionPayloadSchema
+>;
+
 export const RollbackStageActionPayloadSchema = Type.Object(
   {
     schemaVersion: Type.Literal(1),
@@ -1429,6 +1515,24 @@ export const AgentActionCardSchema = Type.Union([
       action: Type.Literal("request_strategy_approval"),
       label: Type.Literal("提交卖点策略人工审批"),
       payload: RequestStrategyApprovalActionPayloadSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentActionCardFields,
+      action: Type.Literal("generate_script"),
+      label: Type.Literal("生成脚本草稿"),
+      payload: GenerateScriptActionPayloadSchema,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      ...AgentActionCardFields,
+      action: Type.Literal("generate_simulated_stage_artifact"),
+      label: Type.Literal("生成当前阶段模拟产物"),
+      payload: GenerateSimulatedStageArtifactActionPayloadSchema,
     },
     { additionalProperties: false },
   ),
@@ -1550,6 +1654,24 @@ export const VideoTaskStageVersionsResponseSchema = Type.Object(
     strategyDrafts: Type.Optional(Type.Array(VideoTaskStrategyDraftSchema)),
     activeStrategyDraft: Type.Optional(VideoTaskStrategyDraftSchema),
     confirmationRequest: Type.Optional(StageConfirmationRequestSchema),
+    generatedArtifact: Type.Optional(StageArtifactContentReferenceSchema),
+    scriptAdaptation: Type.Optional(Type.Object({
+      schemaVersion: Type.Literal(1),
+      source: Type.Literal("selected_presenter"),
+      script: Type.String({ minLength: 1, maxLength: 20000 }),
+    }, { additionalProperties: false })),
+    storyboardPlan: Type.Optional(Type.Object({
+      schemaVersion: Type.Literal(1),
+      source: Type.Literal("confirmed_script"),
+      shots: Type.Array(Type.Object({
+        shotIndex: Type.Integer({ minimum: 0, maximum: 20 }),
+        startSeconds: Type.Integer({ minimum: 0, maximum: 600 }),
+        endSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+        durationSeconds: Type.Integer({ minimum: 1, maximum: 600 }),
+        purpose: Type.String({ minLength: 1, maxLength: 200 }),
+        scriptExcerpt: Type.String({ minLength: 1, maxLength: 2000 }),
+      }, { additionalProperties: false }), { minItems: 1, maxItems: 21 }),
+    }, { additionalProperties: false })),
   },
   { additionalProperties: false },
 );
@@ -1558,6 +1680,8 @@ export type VideoTaskStageVersionsResponse = Static<typeof VideoTaskStageVersion
 export const AgentActionCommandActionSchema = Type.Union([
   Type.Literal("generate_strategy"),
   Type.Literal("request_strategy_approval"),
+  Type.Literal("generate_script"),
+  Type.Literal("generate_simulated_stage_artifact"),
   Type.Literal("rollback_stage"),
 ]);
 export type AgentActionCommandAction = Static<typeof AgentActionCommandActionSchema>;
@@ -1575,6 +1699,25 @@ export const AgentActionCommandResultSchema = Type.Union([
       kind: Type.Literal("strategy_confirmation_requested"),
       strategyDraftId: Identifier,
       stageConfirmationRequestId: Identifier,
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("script_generated"),
+      scriptContentHashSha256: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
+    },
+    { additionalProperties: false },
+  ),
+  Type.Object(
+    {
+      kind: Type.Literal("simulated_stage_artifact_generated"),
+      stage: Type.Union([
+        Type.Literal("storyboard"),
+        Type.Literal("video_preview"),
+        Type.Literal("delivery"),
+      ]),
+      artifactContentHashSha256: Type.String({ pattern: "^[A-Fa-f0-9]{64}$" }),
     },
     { additionalProperties: false },
   ),

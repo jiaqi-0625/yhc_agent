@@ -328,7 +328,6 @@ const workspaceV2ConstraintExpectations = [
   ["video_generation_requests_pkey", "p", "generation_request_id", null, null],
   ["video_generation_requests_actor_request_key", "u", "tenant_id,batch_project_id,video_task_id,actor_account_id,request_id", null, null],
   ["video_generation_requests_task_fkey", "f", "tenant_id,batch_project_id,video_task_id", "video_task_aggregates", "tenant_id,project_id,task_id"],
-  ["video_generation_requests_media_fkey", "f", "media_artifact_id", "media_artifacts", "artifact_id"],
 ] as const;
 
 function recordAppliedMigrations(
@@ -343,7 +342,7 @@ function recordAppliedMigrations(
 test("migration loader reads the append-only Workspace V2 schemas with stable checksums", async () => {
   const loaded = await loadDatabaseMigrations();
 
-  assert.equal(loaded.length, 4);
+  assert.equal(loaded.length, 5);
   assert.equal(loaded[0]?.version, 1);
   assert.equal(loaded[0]?.name, "workspace_v2");
   assert.match(loaded[0]?.sql ?? "", /CREATE TABLE workspace_admin_states/);
@@ -354,34 +353,38 @@ test("migration loader reads the append-only Workspace V2 schemas with stable ch
   assert.match(loaded[0]?.sql ?? "", /FOREIGN KEY \(tenant_id, project_id\)/u);
   assert.equal(loaded[0]?.checksum, computeMigrationChecksum(loaded[0]?.sql ?? ""));
   assert.equal(loaded[1]?.version, 2);
-  assert.equal(loaded[1]?.name, "media_artifacts");
-  assert.match(loaded[1]?.sql ?? "", /CREATE TABLE media_artifacts/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_locator_key\s+UNIQUE/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_task_fkey/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_object_key_check/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_stage_role_check/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_version_size_check/u);
-  assert.match(loaded[1]?.sql ?? "", /CONSTRAINT media_artifacts_hash_check/u);
-  assert.match(loaded[1]?.sql ?? "", /octet_length\(storage_object_key\).*1024/su);
-  assert.match(loaded[1]?.sql ?? "", /string_to_array\(storage_object_key, '\/'\)/u);
-  assert.match(loaded[1]?.sql ?? "", /artifact - ARRAY\[/u);
-  assert.doesNotMatch(loaded[1]?.sql ?? "", /CREATE TABLE video_task_aggregates/u);
+  assert.equal(loaded[1]?.name, "video_generation_jobs");
+  assert.match(loaded[1]?.sql ?? "", /CREATE TABLE video_generation_jobs/u);
   assert.equal(loaded[1]?.checksum, computeMigrationChecksum(loaded[1]?.sql ?? ""));
   assert.equal(loaded[2]?.version, 3);
-  assert.equal(loaded[2]?.name, "vehicle_catalog");
-  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_models/u);
-  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_variants/u);
-  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE vehicle_fact_versions/u);
-  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE video_task_vehicle_snapshots/u);
-  assert.match(loaded[2]?.sql ?? "", /facts_text text NOT NULL/u);
+  assert.equal(loaded[2]?.name, "media_artifacts");
+  assert.match(loaded[2]?.sql ?? "", /CREATE TABLE media_artifacts/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_object_locator_key\s+UNIQUE/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_task_fkey/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_object_key_check/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_stage_role_check/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_version_size_check/u);
+  assert.match(loaded[2]?.sql ?? "", /CONSTRAINT media_artifacts_hash_check/u);
+  assert.match(loaded[2]?.sql ?? "", /octet_length\(storage_object_key\).*1024/su);
+  assert.match(loaded[2]?.sql ?? "", /string_to_array\(storage_object_key, '\/'\)/u);
+  assert.match(loaded[2]?.sql ?? "", /artifact - ARRAY\[/u);
+  assert.doesNotMatch(loaded[2]?.sql ?? "", /CREATE TABLE video_task_aggregates/u);
   assert.equal(loaded[2]?.checksum, computeMigrationChecksum(loaded[2]?.sql ?? ""));
   assert.equal(loaded[3]?.version, 4);
-  assert.equal(loaded[3]?.name, "video_generation_requests");
-  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE video_generation_requests/u);
-  assert.match(loaded[3]?.sql ?? "", /prompt_text text NOT NULL/u);
-  assert.match(loaded[3]?.sql ?? "", /video_generation_requests_reject_update/u);
-  assert.match(loaded[3]?.sql ?? "", /video_generation_requests_reject_delete/u);
+  assert.equal(loaded[3]?.name, "vehicle_catalog");
+  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE vehicle_models/u);
+  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE vehicle_variants/u);
+  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE vehicle_fact_versions/u);
+  assert.match(loaded[3]?.sql ?? "", /CREATE TABLE video_task_vehicle_snapshots/u);
+  assert.match(loaded[3]?.sql ?? "", /facts_text text NOT NULL/u);
   assert.equal(loaded[3]?.checksum, computeMigrationChecksum(loaded[3]?.sql ?? ""));
+  assert.equal(loaded[4]?.version, 5);
+  assert.equal(loaded[4]?.name, "video_generation_requests");
+  assert.match(loaded[4]?.sql ?? "", /CREATE TABLE video_generation_requests/u);
+  assert.match(loaded[4]?.sql ?? "", /prompt_text text NOT NULL/u);
+  assert.match(loaded[4]?.sql ?? "", /video_generation_requests_reject_update/u);
+  assert.match(loaded[4]?.sql ?? "", /video_generation_requests_reject_delete/u);
+  assert.equal(loaded[4]?.checksum, computeMigrationChecksum(loaded[4]?.sql ?? ""));
 });
 test("migration runner serializes, applies, records, and idempotently skips migrations", async () => {
   const database = new MigrationDatabase();

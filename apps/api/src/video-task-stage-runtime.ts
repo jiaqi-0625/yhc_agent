@@ -8,6 +8,7 @@ import {
   deriveStageConfirmationDependencies,
   lockVideoTaskAssetSnapshot,
   nextVideoTaskWorkflowState,
+  reopenAssetMatching,
   rollbackVideoTaskStage,
   StageConfirmationDeniedError,
   validateStrategy,
@@ -19,6 +20,8 @@ import type {
   BatchProject,
   ConfirmVideoTaskStageRequest,
   ConfirmVideoTaskStageResponse,
+  ReopenAssetMatchingRequest,
+  ReopenAssetMatchingResponse,
   RollbackVideoTaskStageRequest,
   RollbackVideoTaskStageResponse,
   StageArtifactContentReference,
@@ -30,7 +33,7 @@ import type {
 
 import type { BatchProjectStore } from "./batch-project-store.ts";
 import { BusinessRuntimeError } from "./business-runtime.ts";
-import type { StageMediaArtifactVerifier } from "./media-artifact-runtime.ts";
+import { presenterProductionScript, storyboardScriptPlan } from "./storyboard-script-plan.ts";
 import type {
   ProjectAssetRuntime,
   TaskAssetSelectionResolver,
@@ -142,6 +145,21 @@ function rollbackPayloadHash(
   });
 }
 
+function reopenAssetMatchingPayloadHash(
+  projectId: string,
+  videoTaskId: string,
+  input: Readonly<ReopenAssetMatchingRequest>,
+): string {
+  return sha256({
+    projectId,
+    videoTaskId,
+    stage: "asset_matching",
+    action: "reopen_stage",
+    expectedTaskRevision: input.expectedTaskRevision,
+    reason: input.reason,
+  });
+}
+
 function sameArtifactReference(
   left: Readonly<StageArtifactContentReference>,
   right: Readonly<StageArtifactContentReference>,
@@ -163,7 +181,6 @@ export class VideoTaskStageRuntime {
     private readonly createId: (kind: StageRuntimeIdKind) => string =
       (kind) => `${kind}_${randomUUID()}`,
     private readonly projectAssets?: ProjectAssetRuntime,
-    private readonly mediaArtifacts?: StageMediaArtifactVerifier,
   ) {}
 
   #currentScope(
@@ -274,6 +291,20 @@ export class VideoTaskStageRuntime {
       : [...record.stageConfirmationRequests].reverse().find(
           (request) => request.strategyDraftId === activeStrategyDraft.id,
         );
+    const generatedArtifact = stage === "storyboard" || stage === "video_preview" || stage === "delivery"
+      ? this.#simulatedStageArtifact(record, stage, undefined)
+      : undefined;
+    const selectedAssetSnapshot = record.taskAssetSnapshots.find(
+      (snapshot) => snapshot.id === record.videoTask.assetSnapshotId,
+    );
+    const presenterSelected = selectedAssetSnapshot?.assets.some(
+      (asset) => asset.category === "person",
+    ) === true;
+    const productionPlan = record.videoTask.scriptInput
+      ? storyboardScriptPlan(record.videoTask.scriptInput, record.videoTask.durationSeconds, {
+          presenterNarration: presenterSelected,
+        })
+      : undefined;
     return {
       videoTask: structuredClone(record.videoTask),
       ...(activeArtifactVersionId === undefined ? {} : { activeArtifactVersionId }),
@@ -307,93 +338,28 @@ export class VideoTaskStageRuntime {
       ...(confirmationRequest === undefined
         ? {}
         : { confirmationRequest: structuredClone(confirmationRequest) }),
+      ...(generatedArtifact === undefined
+        ? {}
+        : { generatedArtifact: structuredClone(generatedArtifact) }),
+      ...(stage === "script" && presenterSelected && productionPlan !== undefined
+        ? {
+            scriptAdaptation: {
+              schemaVersion: 1 as const,
+              source: "selected_presenter" as const,
+              script: presenterProductionScript(productionPlan),
+            },
+          }
+        : {}),
+      ...(stage === "storyboard" && record.videoTask.scriptInput
+        ? {
+            storyboardPlan: {
+              schemaVersion: 1 as const,
+              source: "confirmed_script" as const,
+              shots: productionPlan!.map((shot) => ({ ...shot })),
+            },
+          }
+        : {}),
     };
-  }
-
-  async prepareDevelopmentSimulation(
-    projectId: string,
-    videoTaskId: string,
-    stage: VideoTaskStage,
-    session: Readonly<WorkspaceSessionScope>,
-  ): Promise<{
-    readonly videoTask: VideoTaskProductionRecord["videoTask"];
-    readonly artifact: StageArtifactContentReference;
-    readonly simulated: true;
-  }> {
-    if (["strategy", "asset_matching"].includes(stage)) {
-      throw runtimeError(
-        "AIC-DEVELOPMENT-SIMULATION-STAGE_INVALID",
-        "Strategy and asset matching must use their existing server-authoritative flows.",
-        409,
-      );
-    }
-    return this.administration.withSnapshot(session.tenantId, async (state) => {
-      const scope = this.#currentScope(session, state);
-      this.#assertCreator(scope);
-      const project = await this.#project(scope.tenantId, projectId);
-      assertCanViewBatchProject(scope, project);
-      const occurredAt = this.now();
-      const record = await this.tasks.transact(videoTaskId, async (current) => {
-        if (!current) {
-          throw runtimeError("AIC-STAGE-TASK_NOT_FOUND", `Video task '${videoTaskId}' was not found.`, 404);
-        }
-        this.#assertTaskBelongsToProject(current, project, videoTaskId);
-        assertCanViewVideoTask(scope, project, current.videoTask);
-        assertCanOperateVideoTask(scope, project, current.videoTask);
-        if (
-          current.videoTask.status !== "active" ||
-          current.videoTask.currentStage !== stage ||
-          !["in_progress", "awaiting_confirmation"].includes(current.videoTask.stageStatus)
-        ) {
-          throw runtimeError(
-            "AIC-DEVELOPMENT-SIMULATION-STATE_INVALID",
-            "Only the current active stage can receive a simulated artifact.",
-            409,
-          );
-        }
-        if (current.videoTask.stageStatus === "awaiting_confirmation") {
-          return structuredClone(current);
-        }
-        const workflow = nextVideoTaskWorkflowState({
-          taskStatus: current.videoTask.status,
-          currentStage: current.videoTask.currentStage,
-          stageStatus: current.videoTask.stageStatus,
-        }, {
-          type: "stage_confirmation_requested",
-          stage,
-        });
-        return {
-          ...structuredClone(current),
-          videoTask: {
-            ...structuredClone(current.videoTask),
-            status: workflow.taskStatus,
-            currentStage: workflow.currentStage,
-            stageStatus: workflow.stageStatus,
-            revision: current.videoTask.revision + 1,
-            updatedAt: occurredAt,
-            updatedBy: scope.actorAccountId,
-          },
-        };
-      });
-      const artifactSeed = {
-        schemaVersion: 1,
-        kind: "development_stage_simulation",
-        tenantId: record.videoTask.tenantId,
-        batchProjectId: record.videoTask.batchProjectId,
-        videoTaskId: record.videoTask.id,
-        stage,
-      };
-      return {
-        videoTask: structuredClone(record.videoTask),
-        artifact: {
-          artifactId: `development_simulation_${sha256(artifactSeed).slice(0, 48)}`,
-          schemaName: `development_simulated_${stage}`,
-          schemaVersion: 1,
-          contentHashSha256: sha256(artifactSeed),
-        },
-        simulated: true,
-      };
-    });
   }
 
   async getStageAudit(
@@ -466,6 +432,59 @@ export class VideoTaskStageRuntime {
       );
     }
     return derived;
+  }
+
+  #scriptArtifact(
+    record: Readonly<VideoTaskProductionRecord>,
+    proposed: Readonly<StageArtifactContentReference> | undefined,
+  ): StageArtifactContentReference | undefined {
+    if (proposed !== undefined) return structuredClone(proposed);
+    const script = record.videoTask.scriptInput;
+    if (script === undefined || record.videoTask.currentStage !== "script") return undefined;
+    const contentHashSha256 = createHash("sha256").update(script).digest("hex");
+    const generated = [...record.commandReceipts].reverse().find(
+      (receipt) =>
+        receipt.action === "generate_script" &&
+        receipt.result.kind === "script_generated" &&
+        receipt.result.scriptContentHashSha256 === contentHashSha256 &&
+        receipt.resultingTaskRevision <= record.videoTask.revision,
+    );
+    if (generated === undefined) {
+      throw runtimeError(
+        "AIC-STAGE-SCRIPT_DRAFT_NOT_FOUND",
+        "The task has no server-persisted generated script awaiting human confirmation.",
+        409,
+      );
+    }
+    return {
+      artifactId: `script_draft_${contentHashSha256.slice(0, 48)}`,
+      schemaName: "video_task_script_draft",
+      schemaVersion: 1,
+      contentHashSha256,
+    };
+  }
+
+  #simulatedStageArtifact(
+    record: Readonly<VideoTaskProductionRecord>,
+    stage: Extract<VideoTaskStage, "storyboard" | "video_preview" | "delivery">,
+    proposed: Readonly<StageArtifactContentReference> | undefined,
+  ): StageArtifactContentReference | undefined {
+    if (proposed !== undefined) return structuredClone(proposed);
+    const generated = [...record.commandReceipts].reverse().find(
+      (receipt) =>
+        receipt.action === "generate_simulated_stage_artifact" &&
+        receipt.result.kind === "simulated_stage_artifact_generated" &&
+        receipt.result.stage === stage &&
+        receipt.resultingTaskRevision <= record.videoTask.revision,
+    );
+    if (generated?.result.kind !== "simulated_stage_artifact_generated") return undefined;
+    const contentHashSha256 = generated.result.artifactContentHashSha256;
+    return {
+      artifactId: `ws503_${stage}_${contentHashSha256.slice(0, 40)}`,
+      schemaName: `ws503_simulated_${stage}`,
+      schemaVersion: 1,
+      contentHashSha256,
+    };
   }
 
   #receiptCollision(
@@ -647,7 +666,11 @@ export class VideoTaskStageRuntime {
         } else {
           artifact = stage === "strategy"
             ? this.#strategyArtifact(current, input.artifact)
-            : input.artifact;
+            : stage === "script"
+              ? this.#scriptArtifact(current, input.artifact)
+              : stage === "storyboard" || stage === "video_preview" || stage === "delivery"
+                ? this.#simulatedStageArtifact(current, stage, input.artifact)
+                : input.artifact;
         }
         if (artifact === undefined) {
           throw runtimeError(
@@ -655,18 +678,6 @@ export class VideoTaskStageRuntime {
             "A non-strategy stage confirmation requires a persisted artifact reference.",
             409,
           );
-        }
-        if (
-          this.mediaArtifacts !== undefined
-          && (stage === "video_preview" || stage === "delivery")
-        ) {
-          await this.mediaArtifacts.verifyStageArtifact({
-            tenantId: scope.tenantId,
-            batchProjectId: project.id,
-            videoTaskId,
-            stage,
-            artifact,
-          });
         }
         const confirmed = confirmVideoTaskStage(
           confirmationRecord,
@@ -875,6 +886,114 @@ export class VideoTaskStageRuntime {
       receipt: structuredClone(receipt),
       videoTask: structuredClone(record.videoTask),
       rollback: structuredClone(rollback),
+      invalidations,
+    };
+  }
+
+  async reopenAssetMatching(
+    projectId: string,
+    videoTaskId: string,
+    input: Readonly<ReopenAssetMatchingRequest>,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<ReopenAssetMatchingResponse> {
+    this.#assertCreator(session);
+    if (!this.projectAssets) {
+      throw runtimeError("AIC-ASSET-MATCHING-UNAVAILABLE", "资产匹配服务当前不可用。", 503);
+    }
+    const payloadHash = reopenAssetMatchingPayloadHash(projectId, videoTaskId, input);
+    let replayed = false;
+    const execute = () => this.administration.withSnapshot(session.tenantId, async (state) => {
+      const scope = this.#currentScope(session, state);
+      this.#assertCreator(scope);
+      const project = await this.#project(scope.tenantId, projectId);
+      assertCanViewBatchProject(scope, project);
+      return this.tasks.transact(videoTaskId, (current) => {
+        if (!current) {
+          throw runtimeError("AIC-STAGE-TASK_NOT_FOUND", `Video task '${videoTaskId}' was not found.`, 404);
+        }
+        this.#assertTaskBelongsToProject(current, project, videoTaskId);
+        assertCanViewVideoTask(scope, project, current.videoTask);
+        const existing = this.#stageReceipt(current, scope.actorAccountId, input.requestId);
+        if (existing) {
+          if (
+            existing.action !== "reopen_stage" ||
+            existing.result.stage !== "asset_matching" ||
+            existing.payloadHash !== payloadHash
+          ) {
+            throw runtimeError(
+              "AIC-STAGE-IDEMPOTENCY_CONFLICT",
+              "The stage request ID was already used with different business input.",
+              409,
+            );
+          }
+          replayed = true;
+          return structuredClone(current);
+        }
+        if (this.#receiptCollision(current, scope.actorAccountId, input.requestId)) {
+          throw runtimeError(
+            "AIC-STAGE-IDEMPOTENCY_CONFLICT",
+            "The stage request ID was already used by another task command.",
+            409,
+          );
+        }
+        if (project.status !== "active") {
+          throw runtimeError(
+            "AIC-STAGE-PROJECT_INACTIVE",
+            "Asset matching can only be revised in an active batch project.",
+            409,
+          );
+        }
+        assertCanOperateVideoTask(scope, project, current.videoTask);
+        const occurredAt = this.now();
+        const reopened = reopenAssetMatching(current, input, {
+          tenantId: scope.tenantId,
+          batchProjectId: project.id,
+          actorAccountId: scope.actorAccountId,
+          occurredAt,
+          createInvalidationId: () => this.createId("invalidation"),
+        });
+        const newInvalidations = reopened.stageArtifactInvalidations.slice(
+          current.stageArtifactInvalidations.length,
+        );
+        const receipt: StageMutationReceipt = {
+          schemaVersion: 1,
+          id: this.createId("stage_mutation_receipt"),
+          tenantId: current.videoTask.tenantId,
+          batchProjectId: current.videoTask.batchProjectId,
+          videoTaskId: current.videoTask.id,
+          actorAccountId: scope.actorAccountId,
+          requestId: input.requestId,
+          payloadHash,
+          action: "reopen_stage",
+          expectedTaskRevision: input.expectedTaskRevision,
+          resultingTaskRevision: reopened.videoTask.revision,
+          result: {
+            kind: "stage_reopened",
+            stage: "asset_matching",
+            invalidationIds: newInvalidations.map(({ id }) => id),
+          },
+          occurredAt,
+        };
+        return {
+          ...reopened,
+          stageMutationReceipts: [...structuredClone(reopened.stageMutationReceipts), receipt],
+        };
+      });
+    });
+    const record = await this.projectAssets.coordinateTaskAssetSelection(projectId, execute);
+    const receipt = this.#stageReceipt(record, session.actorAccountId, input.requestId);
+    if (!receipt || receipt.action !== "reopen_stage") {
+      throw new Error("Asset matching reopen did not persist its idempotency receipt.");
+    }
+    const invalidations = receipt.result.invalidationIds.map((id) => {
+      const invalidation = record.stageArtifactInvalidations.find((candidate) => candidate.id === id);
+      if (!invalidation) throw new Error("Asset matching reopen receipt points to a missing invalidation.");
+      return structuredClone(invalidation);
+    });
+    return {
+      replayed,
+      receipt: structuredClone(receipt),
+      videoTask: structuredClone(record.videoTask),
       invalidations,
     };
   }

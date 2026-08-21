@@ -12,6 +12,7 @@ import type { TaskContext } from "@firefly/schemas";
 import type { WorkStatus } from "@firefly/schemas";
 import type {
   StageSuggestionContextReader,
+  StrategyDraftReader,
   TaskAssetSnapshotReader,
   VehicleServicePort,
 } from "@firefly/tools";
@@ -53,6 +54,10 @@ export interface BusinessAgentRuntimeOptions {
     taskContext: Readonly<TaskContext>,
     sessionScope: Readonly<AgentSessionScope>,
   ) => StageSuggestionContextReader | undefined;
+  resolveStrategyDraftReader?: (
+    taskContext: Readonly<TaskContext>,
+    sessionScope: Readonly<AgentSessionScope>,
+  ) => StrategyDraftReader | undefined;
 }
 
 export function createBusinessAgentRuntime(
@@ -82,6 +87,10 @@ export function createBusinessAgentRuntime(
         context.sessionScope,
       );
       const stageSuggestionReader = options.resolveStageSuggestionReader?.(
+        context.taskContext,
+        context.sessionScope,
+      );
+      const strategyDraftReader = options.resolveStrategyDraftReader?.(
         context.taskContext,
         context.sessionScope,
       );
@@ -120,10 +129,19 @@ export function createBusinessAgentRuntime(
                 videoTaskId: context.taskContext.videoTask.id,
                 currentRevision: () => context.taskContext.videoTask.revision,
               },
+              ...(context.taskContext.videoTask.currentStage === "script"
+                ? {
+                    scriptProposal: {
+                      videoTaskId: context.taskContext.videoTask.id,
+                      currentRevision: () => context.taskContext.videoTask.revision,
+                    },
+                  }
+                : {}),
             }
           : { strategyService: business.bindStrategyWorkflow(context.taskContext.videoTask.id) }),
         ...(taskAssetReader === undefined ? {} : { taskAssetReader }),
         ...(stageSuggestionReader === undefined ? {} : { stageSuggestionReader }),
+        ...(strategyDraftReader === undefined ? {} : { strategyDraftReader }),
       });
     },
     options.disableLegacyStrategyTools

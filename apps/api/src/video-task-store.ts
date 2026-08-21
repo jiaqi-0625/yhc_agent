@@ -550,7 +550,7 @@ export function validateRecord(
       ) {
         throw new Error("Persisted video task has an invalid rollback invalidation cause.");
       }
-    } else {
+    } else if (invalidation.cause.kind === "upstream_invalidation") {
       const upstream = invalidationsById.get(invalidation.cause.invalidationId);
       if (
         upstream === undefined ||
@@ -558,6 +558,12 @@ export function validateRecord(
       ) {
         throw new Error("Persisted video task has an invalid upstream invalidation cause.");
       }
+    } else if (
+      invalidation.stage !== "asset_matching" ||
+      dependency.stage !== "script" ||
+      invalidation.cause.expectedTaskRevision > record.videoTask.revision
+    ) {
+      throw new Error("Persisted video task has an invalid manual revision cause.");
     }
   }
   const rollbackRootByInvalidationId = new Map<string, string>();
@@ -577,6 +583,15 @@ export function validateRecord(
     }
     if (visited.has(current.id)) {
       throw new Error("Persisted video task has a cyclic artifact invalidation graph.");
+    }
+    if (current.cause.kind === "manual_revision") {
+      if (
+        current.stage !== "asset_matching" ||
+        current.cause.reasonCode !== "asset_selection_revision"
+      ) {
+        throw new Error("Persisted video task has an invalid manual revision root.");
+      }
+      continue;
     }
     if (!rollbacksById.has(current.cause.rollbackId)) {
       throw new Error("Persisted video task has an invalid rollback invalidation cause.");
@@ -739,6 +754,18 @@ export function validateRecord(
       referencedConfirmationRequestIds.add(request.id);
       continue;
     }
+    if (receipt.action === "generate_script") {
+      if (receipt.result.kind !== "script_generated") {
+        throw new Error("Persisted video task has an invalid script command receipt.");
+      }
+      continue;
+    }
+    if (receipt.action === "generate_simulated_stage_artifact") {
+      if (receipt.result.kind !== "simulated_stage_artifact_generated") {
+        throw new Error("Persisted video task has an invalid simulated artifact command receipt.");
+      }
+      continue;
+    }
     if (receipt.result.kind !== "stage_rolled_back") {
       throw new Error("Persisted video task has an invalid rollback command receipt.");
     }
@@ -799,6 +826,23 @@ export function validateRecord(
       }
       referencedStageConfirmationIds.add(confirmation.id);
       referencedStageArtifactIds.add(artifact.id);
+      continue;
+    }
+
+    if (receipt.action === "reopen_stage") {
+      const invalidations = receipt.result.invalidationIds.map((id) => invalidationsById.get(id));
+      const root = invalidations.find((item) => item?.cause.kind === "manual_revision");
+      if (
+        receipt.result.stage !== "asset_matching" ||
+        invalidations.some((item) => item === undefined) ||
+        root?.cause.kind !== "manual_revision" ||
+        root.cause.requestId !== receipt.requestId ||
+        root.cause.requestedBy !== receipt.actorAccountId ||
+        root.cause.expectedTaskRevision !== receipt.expectedTaskRevision ||
+        root.occurredAt !== receipt.occurredAt
+      ) {
+        throw new Error("Persisted video task has an invalid stage reopen receipt graph.");
+      }
       continue;
     }
 
@@ -997,6 +1041,19 @@ export function validateVideoTaskTransition(
         throw new Error(
           "A video task transaction stage confirmation receipt has an invalid revision.",
         );
+      }
+      continue;
+    }
+    if (receipt.action === "reopen_stage") {
+      if (
+        receipt.result.stage !== "asset_matching" ||
+        receipt.expectedTaskRevision !== current.videoTask.revision ||
+        receipt.resultingTaskRevision !== next.videoTask.revision ||
+        receipt.result.invalidationIds.some(
+          (id) => !newInvalidations.some((invalidation) => invalidation.id === id),
+        )
+      ) {
+        throw new Error("A video task transaction stage reopen receipt is invalid.");
       }
       continue;
     }

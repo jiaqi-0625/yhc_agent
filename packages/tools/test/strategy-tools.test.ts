@@ -5,6 +5,7 @@ import { Value } from "typebox/value";
 
 import {
   createStrategyProposalTools,
+  createStrategyDraftTools,
   createStrategyTools,
   type StrategyWorkflowPort,
 } from "../src/index.ts";
@@ -107,4 +108,56 @@ test("V2 strategy proposal tools need only the server-bound task revision", asyn
   assert.equal(approval.details.action, "request_strategy_approval");
   assert.equal(approval.details.expectedRevision, 7);
   assert.equal(revisionReads, 2);
+});
+
+test("current strategy draft tool returns only the task-scoped persisted draft view", async () => {
+  const [tool] = createStrategyDraftTools({
+    videoTaskId: "video_task_v2_strategy_001",
+    async read() {
+      return {
+        schemaVersion: 1,
+        kind: "current_strategy_draft",
+        videoTaskId: "video_task_v2_strategy_001",
+        taskRevision: 8,
+        vehicleSnapshotId: "vehicle_snapshot_c10_v3",
+        draft: {
+          schemaVersion: 1,
+          id: "strategy_draft_c10_v1",
+          videoTaskId: "video_task_v2_strategy_001",
+          vehicleSnapshotId: "vehicle_snapshot_c10_v3",
+          version: 1,
+          status: "draft",
+          audience: "城市家庭",
+          theme: "通勤与周末出行",
+          items: [{
+            id: "strategy_item_c10_1",
+            claimId: "claim_c10_space",
+            kind: "fixed",
+            title: "舒适空间",
+            statement: "提供舒适乘坐空间。",
+            rationale: "匹配家庭出行场景。",
+            order: 1,
+            locked: false,
+          }],
+          validation: { valid: true, issues: [] },
+        },
+        readBoundary: {
+          taskScoped: true,
+          immutableVehicleFacts: true,
+          mayMutateDraft: false,
+          mayRequestApproval: false,
+          mayApprove: false,
+        },
+      };
+    },
+  });
+  assert.ok(tool);
+  assert.equal(tool.name, "get_current_strategy_draft");
+  const result = await tool.execute("call_read_strategy", {});
+  assert.equal(result.details.taskRevision, 8);
+  assert.equal(result.details.draft.items[0]?.claimId, "claim_c10_space");
+  assert.equal("tenantId" in result.details.draft, false);
+  assert.equal("createdBy" in result.details.draft, false);
+  assert.equal("generation" in result.details.draft, false);
+  assert.equal("createdAt" in result.details.draft, false);
 });

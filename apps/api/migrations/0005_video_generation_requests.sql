@@ -40,11 +40,6 @@ CREATE TABLE video_generation_requests (
     FOREIGN KEY (tenant_id, batch_project_id, video_task_id)
     REFERENCES video_task_aggregates (tenant_id, project_id, task_id)
     ON DELETE RESTRICT,
-  CONSTRAINT video_generation_requests_media_fkey
-    FOREIGN KEY (media_artifact_id)
-    REFERENCES media_artifacts (artifact_id)
-    ON DELETE RESTRICT,
-
   CONSTRAINT video_generation_requests_identifier_check CHECK (
     generation_request_id ~ '^[A-Za-z0-9_-]{1,128}$'
     AND tenant_id ~ '^[A-Za-z0-9_-]{1,128}$'

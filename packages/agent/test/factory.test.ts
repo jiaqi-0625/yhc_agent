@@ -126,7 +126,7 @@ test("business assembly adds strategy tools without exposing an approval decisio
   );
 });
 
-test("V2 task-bound assembly adds only strategy proposal tools from the server context", async () => {
+test("V2 task-bound assembly adds strategy draft read and proposal tools from server context", async () => {
   const taskContext = taskContextWithoutAssetSnapshot();
   let revisionReads = 0;
   const strategyProposal = {
@@ -136,6 +136,10 @@ test("V2 task-bound assembly adds only strategy proposal tools from the server c
       return taskContext.videoTask.revision;
     },
   };
+  const strategyDraftReader = {
+    videoTaskId: taskContext.videoTask.id,
+    async read() { throw new Error("not called"); },
+  };
   const agent = createAdvertisingAgent({
     model,
     streamFn,
@@ -144,16 +148,32 @@ test("V2 task-bound assembly adds only strategy proposal tools from the server c
     getWorkStatus: () => "strategy_draft",
     vehicleService: new InMemoryVehicleService([]),
     strategyProposal,
+    strategyDraftReader,
   });
   const toolNames = agent.state.tools.map((tool) => tool.name);
   assert.deepEqual(toolNames, [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
+    "get_current_strategy_draft",
     "propose_strategy_generation",
     "propose_strategy_approval",
   ]);
   assert.equal(toolNames.includes("validate_strategy"), false);
   assert.doesNotMatch(toolNames.join(","), /approve_strategy|generate_strategy|request_strategy_approval/u);
+
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "strategy_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      strategyProposal,
+      strategyDraftReader: { ...strategyDraftReader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
 
   const generation = agent.state.tools.find((tool) => tool.name === "propose_strategy_generation");
   assert.ok(generation);
@@ -290,11 +310,16 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
     getWorkStatus: () => "script_draft",
     vehicleService: new InMemoryVehicleService([]),
     stageSuggestionReader: reader,
+    scriptProposal: {
+      videoTaskId: taskContext.videoTask.id,
+      currentRevision: () => taskContext.videoTask.revision,
+    },
   });
   assert.deepEqual(agent.state.tools.map((tool) => tool.name), [
     "get_vehicle_snapshot",
     "validate_vehicle_claims",
     "get_current_stage_suggestion_context",
+    "propose_script_generation",
   ]);
   assert.match(agent.state.systemPrompt, /脚本、资产匹配、分镜或交付阶段建议前/u);
   assert.match(agent.state.systemPrompt, /已确认上游产物精确版本/u);
@@ -305,7 +330,8 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
   assert.match(agent.state.systemPrompt, /本地候选必须提示人工复核来源和使用权/u);
   assert.match(agent.state.systemPrompt, /资产匹配可返回带描述词的精确版本人物\/场景候选并提出推荐/u);
   assert.match(agent.state.systemPrompt, /不得持久化选择或确认阶段/u);
-  assert.match(agent.state.systemPrompt, /不得声称已生成、持久化、确认、导出或发布/u);
+  assert.match(agent.state.systemPrompt, /不得声称已经生成、持久化、确认、导出或发布/u);
+  assert.match(agent.state.systemPrompt, /脚本生成必须经操作卡片人工点击/u);
   assert.throws(
     () => createAdvertisingAgent({
       model,
@@ -315,6 +341,21 @@ test("task-bound assembly adds stage suggestions only for the matching server-bo
       getWorkStatus: () => "script_draft",
       vehicleService: new InMemoryVehicleService([]),
       stageSuggestionReader: { ...reader, videoTaskId: "task_other" },
+    }),
+    /scope does not match/u,
+  );
+  assert.throws(
+    () => createAdvertisingAgent({
+      model,
+      streamFn,
+      scope,
+      taskContext,
+      getWorkStatus: () => "script_draft",
+      vehicleService: new InMemoryVehicleService([]),
+      scriptProposal: {
+        videoTaskId: "task_other",
+        currentRevision: () => taskContext.videoTask.revision,
+      },
     }),
     /scope does not match/u,
   );

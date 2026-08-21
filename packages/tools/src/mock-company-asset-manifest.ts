@@ -16,7 +16,7 @@ export const LEAPMOTOR_C10_MOCK_ASSET_BINDING = Object.freeze({
   vehicleId: "vehicle_leapmotor_c10_demo",
 });
 
-export type MockCompanyAssetImageMediaType = "image/jpeg" | "image/webp";
+export type MockCompanyAssetImageMediaType = "image/jpeg" | "image/webp" | "image/png";
 
 export interface MockCompanyAssetMediaManifestEntry {
   readonly bundleId: string;
@@ -25,6 +25,25 @@ export interface MockCompanyAssetMediaManifestEntry {
   readonly vehicleId: string;
   readonly assetId: string;
   readonly version: number;
+  readonly displayName: string;
+  readonly visualDescription: string;
+  readonly tags: readonly string[];
+  readonly mediaType: MockCompanyAssetImageMediaType;
+  readonly width: number;
+  readonly height: number;
+  readonly byteSize: number;
+  readonly checksumSha256: string;
+  readonly relativePath: string;
+  readonly updatedAt: string;
+}
+
+export interface MockCompanyReusableAssetMediaManifestEntry {
+  readonly bundleId: string;
+  readonly tenantId: string;
+  readonly brandId: string;
+  readonly assetId: string;
+  readonly version: number;
+  readonly category: "person" | "scene";
   readonly displayName: string;
   readonly visualDescription: string;
   readonly tags: readonly string[];
@@ -176,6 +195,43 @@ function manifestEntry(row: ManifestRow): MockCompanyAssetMediaManifestEntry {
 export const mockCompanyAssetMediaManifest: readonly MockCompanyAssetMediaManifestEntry[] =
   Object.freeze(rows.map(manifestEntry));
 
+export const mockCompanyReusableAssetMediaManifest: readonly MockCompanyReusableAssetMediaManifestEntry[] =
+  Object.freeze([{
+    bundleId: LEAPMOTOR_C10_MOCK_ASSET_BUNDLE_ID,
+    tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
+    brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
+    assetId: "asset_leapmotor_c10_family_group",
+    version: 1,
+    category: "person",
+    displayName: "C10 家庭三人组",
+    visualDescription: "年轻父母和一名儿童组成的一家三口，正在清晨出发前整理露营装备，人物关系和互动自然。",
+    tags: Object.freeze(["family", "parents", "child", "camping", "warm"]),
+    mediaType: "image/png",
+    width: 1024,
+    height: 1792,
+    byteSize: 2537336,
+    checksumSha256: "33cdb9fb2096d44dbf6e73d2c1be63ba3c62b1ceba35dfeff111bfc037eadd6f",
+    relativePath: "leapmotor-c10/v1/scenes/family-departure.png",
+    updatedAt: "2026-08-21T00:00:00.000Z",
+  }, {
+    bundleId: LEAPMOTOR_C10_MOCK_ASSET_BUNDLE_ID,
+    tenantId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.tenantId,
+    brandId: LEAPMOTOR_C10_MOCK_ASSET_BINDING.brandId,
+    assetId: "asset_leapmotor_c10_family_departure_scene",
+    version: 1,
+    category: "scene",
+    displayName: "C10 家庭清晨出发场景",
+    visualDescription: "清晨社区道路旁，一家三口在打开的后备箱旁整理露营装备和行李，整体氛围温暖轻快。",
+    tags: Object.freeze(["family", "morning", "camping", "departure", "luggage", "trunk"]),
+    mediaType: "image/png",
+    width: 1024,
+    height: 1792,
+    byteSize: 2537336,
+    checksumSha256: "33cdb9fb2096d44dbf6e73d2c1be63ba3c62b1ceba35dfeff111bfc037eadd6f",
+    relativePath: "leapmotor-c10/v1/scenes/family-departure.png",
+    updatedAt: "2026-08-21T00:00:00.000Z",
+  }]);
+
 const describedAssetIds = Object.keys(mockCompanyAssetVisualDescriptions);
 const manifestAssetIds = new Set(mockCompanyAssetMediaManifest.map((entry) => entry.assetId));
 if (
@@ -186,18 +242,20 @@ if (
 }
 
 const manifestByVersionedAssetId = new Map(
-  mockCompanyAssetMediaManifest.map((entry) => [`${entry.assetId}:${entry.version}`, entry]),
+  [...mockCompanyAssetMediaManifest, ...mockCompanyReusableAssetMediaManifest]
+    .map((entry) => [`${entry.assetId}:${entry.version}`, entry] as const),
 );
 
-if (manifestByVersionedAssetId.size !== mockCompanyAssetMediaManifest.length) {
+if (
+  manifestByVersionedAssetId.size !==
+    mockCompanyAssetMediaManifest.length + mockCompanyReusableAssetMediaManifest.length
+) {
   throw new Error("The mock company asset media manifest contains duplicate asset versions.");
 }
 
 export function findMockCompanyAssetMedia(
   assetId: string,
   version: number,
-): MockCompanyAssetMediaManifestEntry | undefined {
+): MockCompanyAssetMediaManifestEntry | MockCompanyReusableAssetMediaManifestEntry | undefined {
   return manifestByVersionedAssetId.get(`${assetId}:${version}`);
 }
-
-

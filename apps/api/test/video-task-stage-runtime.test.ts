@@ -31,10 +31,6 @@ import {
 } from "../src/batch-project-store.ts";
 import { BusinessRuntimeError } from "../src/business-runtime.ts";
 import {
-  MediaArtifactRuntimeError,
-  type StageMediaArtifactVerifier,
-} from "../src/media-artifact-runtime.ts";
-import {
   LocalProjectAssetCoordinator,
   type ProjectAssetCoordinator,
 } from "../src/project-asset-coordinator.ts";
@@ -316,6 +312,44 @@ function approvalCard(
   };
 }
 
+function scriptCard(
+  videoTaskId: string,
+  expectedRevision = 4,
+): Extract<AgentActionCard, { action: "generate_script" }> {
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId,
+    action: "generate_script",
+    label: "生成脚本草稿",
+    summary: "根据已确认策略生成一条脚本。",
+    expectedRevision,
+    cost: { kind: "free" },
+    payload: {
+      schemaVersion: 1,
+      script: "00–10s｜画面：车辆驶出社区。\n旁白：周末，从从容出发。",
+    },
+  };
+}
+
+function simulatedStageCard(
+  videoTaskId: string,
+  stage: "storyboard" | "video_preview" | "delivery",
+  expectedRevision: number,
+): Extract<AgentActionCard, { action: "generate_simulated_stage_artifact" }> {
+  return {
+    schemaVersion: 1,
+    kind: "agent_action_card",
+    videoTaskId,
+    action: "generate_simulated_stage_artifact",
+    label: "生成当前阶段模拟产物",
+    summary: "生成用于 WS-503 完整用户链路验收的当前阶段模拟产物。",
+    expectedRevision,
+    cost: { kind: "free" },
+    payload: { schemaVersion: 1, stage },
+  };
+}
+
 async function prepareStrategyApproval(value: Awaited<ReturnType<typeof fixture>>) {
   await value.commands.execute(project.id, value.taskId, {
     requestId: "command_generate_strategy",
@@ -326,6 +360,36 @@ async function prepareStrategyApproval(value: Awaited<ReturnType<typeof fixture>
     card: approvalCard(value.taskId),
   }, value.creator);
 }
+
+test("a real script command persists one draft before explicit stage confirmation", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+  const strategy = await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_confirm_strategy_for_script_generation",
+    expectedTaskRevision: 3,
+  }, value.creator);
+  assert.equal(strategy.videoTask.currentStage, "script");
+  assert.equal(strategy.videoTask.revision, 4);
+
+  const generated = await value.commands.execute(project.id, value.taskId, {
+    requestId: "command_generate_script",
+    card: scriptCard(value.taskId),
+  }, value.creator);
+  assert.equal(generated.videoTask.currentStage, "script");
+  assert.equal(generated.videoTask.stageStatus, "awaiting_confirmation");
+  assert.equal(generated.videoTask.revision, 5);
+  assert.equal(generated.receipt.result.kind, "script_generated");
+  assert.equal((await value.tasks.load(value.taskId))?.videoTask.scriptInput, scriptCard(value.taskId).payload.script);
+
+  const confirmed = await value.stages.confirmStage(project.id, value.taskId, "script", {
+    requestId: "request_confirm_generated_script",
+    expectedTaskRevision: 5,
+  }, value.creator);
+  assert.equal(confirmed.videoTask.currentStage, "asset_matching");
+  assert.equal(confirmed.videoTask.revision, 6);
+  assert.equal(confirmed.artifactVersion.content.schemaName, "video_task_script_draft");
+  assert.match(confirmed.artifactVersion.content.artifactId, /^script_draft_[a-f0-9]{48}$/u);
+});
 
 async function prepareAssetMatchingApproval(value: Awaited<ReturnType<typeof fixture>>) {
   await prepareStrategyApproval(value);
@@ -354,45 +418,6 @@ async function prepareAssetMatchingApproval(value: Awaited<ReturnType<typeof fix
   }, value.creator);
   return { strategy, script };
 }
-
-test("development simulation prepares a deterministic current-stage artifact without bypassing strategy or assets", async () => {
-  const value = await fixture();
-  await prepareStrategyApproval(value);
-  await value.stages.confirmStage(project.id, value.taskId, "strategy", {
-    requestId: "request_confirm_strategy_for_simulation",
-    expectedTaskRevision: 3,
-  }, value.creator);
-
-  const prepared = await value.stages.prepareDevelopmentSimulation(
-    project.id,
-    value.taskId,
-    "script",
-    value.creator,
-  );
-  assert.equal(prepared.videoTask.currentStage, "script");
-  assert.equal(prepared.videoTask.stageStatus, "awaiting_confirmation");
-  assert.equal(prepared.videoTask.revision, 5);
-  assert.match(prepared.artifact.artifactId, /^development_simulation_[0-9a-f]{48}$/u);
-  assert.equal(prepared.artifact.schemaName, "development_simulated_script");
-
-  const replay = await value.stages.prepareDevelopmentSimulation(
-    project.id,
-    value.taskId,
-    "script",
-    value.creator,
-  );
-  assert.equal(replay.videoTask.revision, prepared.videoTask.revision);
-  assert.deepEqual(replay.artifact, prepared.artifact);
-  await assert.rejects(
-    value.stages.prepareDevelopmentSimulation(
-      project.id,
-      value.taskId,
-      "asset_matching",
-      value.creator,
-    ),
-    hasBusinessCode("AIC-DEVELOPMENT-SIMULATION-STAGE_INVALID"),
-  );
-});
 
 function selectedReusableAssets(): AssetReference[] {
   return assetPool.assets
@@ -502,9 +527,12 @@ test("asset matching confirmation atomically locks the exact server-composed sna
   const value = await fixture();
   const upstream = await prepareAssetMatchingApproval(value);
   const editable = await value.tasks.load(value.taskId);
+  assert.ok(editable);
   assert.equal(editable?.videoTask.currentStage, "asset_matching");
   assert.equal(editable?.videoTask.stageStatus, "in_progress");
   assert.equal(editable?.videoTask.revision, 5);
+  editable.videoTask.scriptInput = "【0–5 秒】画面：后排空间。旁白：大五座空间。\n【5–10 秒】画面：内饰。旁白：舒适座舱。\n【10–15 秒】画面：车辆侧面。旁白：从容出发。\n【15–20 秒】画面：城市道路。旁白：稳定行驶。\n【20–25 秒】画面：车身细节。旁白：设计简洁。\n【25–30 秒】画面：整车定格。旁白：萤火 E5。";
+  await value.tasks.save(editable);
   const input = {
     requestId: "request_confirm_asset_matching",
     expectedTaskRevision: 5,
@@ -561,6 +589,25 @@ test("asset matching confirmation atomically locks the exact server-composed sna
     ],
   );
 
+  const adaptedScript = await value.stages.getStageVersions(
+    project.id,
+    value.taskId,
+    "script",
+    value.creator,
+  );
+  assert.equal(adaptedScript.scriptAdaptation?.source, "selected_presenter");
+  assert.match(adaptedScript.scriptAdaptation?.script ?? "", /已选主播正面出镜口播本段旁白/u);
+  assert.match(adaptedScript.scriptAdaptation?.script ?? "", /大五座/u);
+
+  const storyboard = await value.stages.getStageVersions(
+    project.id,
+    value.taskId,
+    "storyboard",
+    value.creator,
+  );
+  assert.ok(storyboard.storyboardPlan?.shots.every((shot) =>
+    /已选主播正面出镜口播本段旁白/u.test(shot.scriptExcerpt)));
+
   await value.projects.transactAssetPool(tenantId, project.id, (current) => ({
     ...structuredClone(current),
     revision: current.revision + 1,
@@ -576,6 +623,147 @@ test("asset matching confirmation atomically locks the exact server-composed sna
   assert.equal(replay.replayed, true);
   assert.deepEqual(replay.receipt, confirmed.receipt);
   assert.deepEqual(await value.tasks.load(value.taskId), persisted);
+});
+
+test("confirmed asset matching reopens before storyboard confirmation and reruns script matching", async () => {
+  const value = await fixture();
+  await prepareAssetMatchingApproval(value);
+  await value.stages.confirmStage(project.id, value.taskId, "asset_matching", {
+    requestId: "request_confirm_assets_before_revision",
+    expectedTaskRevision: 5,
+    assetSelection: {
+      expectedProjectAssetPoolRevision: 1,
+      selectedAssets: selectedReusableAssets(),
+    },
+  }, value.creator);
+  await value.commands.execute(
+    project.id,
+    value.taskId,
+    {
+      requestId: "request_generate_storyboard_before_asset_revision",
+      card: simulatedStageCard(value.taskId, "storyboard", 6),
+    },
+    value.creator,
+  );
+
+  const reopened = await value.stages.reopenAssetMatching(project.id, value.taskId, {
+    requestId: "request_reopen_assets_for_presenter",
+    expectedTaskRevision: 7,
+    reason: "更换人物口播主播并重新匹配",
+  }, value.creator);
+
+  assert.equal(reopened.replayed, false);
+  assert.equal(reopened.videoTask.currentStage, "asset_matching");
+  assert.equal(reopened.videoTask.stageStatus, "in_progress");
+  assert.equal(reopened.videoTask.assetSnapshotId, undefined);
+  assert.equal(reopened.videoTask.revision, 8);
+  assert.equal(reopened.receipt.action, "reopen_stage");
+  assert.equal(reopened.invalidations[0]?.stage, "asset_matching");
+  assert.equal(reopened.invalidations[0]?.cause.kind, "manual_revision");
+
+  const persisted = await value.tasks.load(value.taskId);
+  assert.ok(persisted);
+  assert.equal(persisted.activeStageArtifactVersionIds.asset_matching, undefined);
+  assert.equal(persisted.stageArtifactVersions.some(({ stage }) => stage === "asset_matching"), true);
+  const replay = await value.stages.reopenAssetMatching(project.id, value.taskId, {
+    requestId: "request_reopen_assets_for_presenter",
+    expectedTaskRevision: 7,
+    reason: "更换人物口播主播并重新匹配",
+  }, value.creator);
+  assert.equal(replay.replayed, true);
+  assert.deepEqual(replay.receipt, reopened.receipt);
+});
+
+test("WS-503 acceptance path reaches delivery through all six human confirmation gates", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+
+  const confirmations: StageConfirmation[] = [];
+  const strategy = await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_ws503_confirm_strategy",
+    expectedTaskRevision: 3,
+    comment: "人工确认策略。",
+  }, value.creator);
+  confirmations.push(strategy.confirmation);
+
+  await value.commands.execute(
+    project.id,
+    value.taskId,
+    { requestId: "request_ws503_generate_script", card: scriptCard(value.taskId, 4) },
+    value.creator,
+  );
+  const script = await value.stages.confirmStage(project.id, value.taskId, "script", {
+    requestId: "request_ws503_confirm_script",
+    expectedTaskRevision: 5,
+  }, value.creator);
+  confirmations.push(script.confirmation);
+
+  const assets = await value.stages.confirmStage(
+    project.id,
+    value.taskId,
+    "asset_matching",
+    {
+      requestId: "request_ws503_confirm_asset_matching",
+      expectedTaskRevision: 6,
+      assetSelection: {
+        expectedProjectAssetPoolRevision: 1,
+        selectedAssets: selectedReusableAssets(),
+      },
+      comment: "人工确认人物与场景素材。",
+    },
+    value.creator,
+  );
+  confirmations.push(assets.confirmation);
+
+  const submitSimulatedStage = async (
+    stage: "storyboard" | "video_preview" | "delivery",
+    expectedTaskRevision: number,
+  ) => {
+    await value.commands.execute(
+      project.id,
+      value.taskId,
+      {
+        requestId: `request_ws503_generate_${stage}`,
+        card: simulatedStageCard(value.taskId, stage, expectedTaskRevision),
+      },
+      value.creator,
+    );
+    const view = await value.stages.getStageVersions(project.id, value.taskId, stage, value.creator);
+    assert.ok(view.generatedArtifact);
+    return value.stages.confirmStage(project.id, value.taskId, stage, {
+      requestId: `request_ws503_confirm_${stage}`,
+      expectedTaskRevision: expectedTaskRevision + 1,
+      comment: "人工确认 WS-503 用户链路中的服务端模拟产物。",
+    }, value.creator);
+  };
+
+  const storyboard = await submitSimulatedStage("storyboard", 7);
+  confirmations.push(storyboard.confirmation);
+  const preview = await submitSimulatedStage("video_preview", 9);
+  confirmations.push(preview.confirmation);
+  const delivery = await submitSimulatedStage("delivery", 11);
+  confirmations.push(delivery.confirmation);
+
+  const completed = await value.tasks.load(value.taskId);
+  assert.ok(completed);
+  assert.equal(completed.videoTask.status, "completed");
+  assert.equal(completed.videoTask.currentStage, "delivery");
+  assert.equal(completed.videoTask.stageStatus, "confirmed");
+  assert.equal(completed.videoTask.revision, 13);
+  assert.deepEqual(
+    confirmations.map(({ stage, source }) => ({ stage, source })),
+    [
+      { stage: "strategy", source: "human_action" },
+      { stage: "script", source: "human_action" },
+      { stage: "asset_matching", source: "human_action" },
+      { stage: "storyboard", source: "human_action" },
+      { stage: "video_preview", source: "human_action" },
+      { stage: "delivery", source: "human_action" },
+    ],
+  );
+  assert.equal(completed.stageArtifactVersions.length, 6);
+  assert.equal(completed.stageConfirmations.length, 6);
+  assert.equal(completed.taskAssetSnapshots.length, 1);
 });
 
 test("a persisted awaiting asset selection remains confirmable through the canonical transaction", async () => {
@@ -1552,120 +1740,6 @@ test("rollback replay atomically persists recursive invalidations and stage audi
   );
   assert.equal(selectedHistory.activeStrategyDraft?.id, selectedDraft.id);
   assert.equal(selectedHistory.confirmationRequest?.strategyDraftId, selectedDraft.id);
-});
-
-test("video preview confirmation verifies registered media after replay checks and before mutation", async () => {
-  const value = await fixture();
-  await prepareRollbackGraph(value);
-  const current = await value.tasks.load(value.taskId);
-  assert.ok(current);
-  const vehicleSnapshotId = current.videoTask.vehicleSnapshotId;
-  assert.ok(vehicleSnapshotId);
-  const lockedAssetSnapshot: TaskAssetSnapshot = {
-    id: "task_asset_snapshot_media_verification",
-    tenantId,
-    batchProjectId: project.id,
-    videoTaskId: value.taskId,
-    version: 1,
-    sourceProjectAssetPoolRevision: assetPool.revision,
-    vehicleSnapshotId,
-    assets: structuredClone(assetPool.assets),
-    createdAt: "2026-08-19T16:34:30.000Z",
-    createdBy: value.creator.actorAccountId,
-  };
-  await value.tasks.save({
-    ...structuredClone(current),
-    videoTask: {
-      ...structuredClone(current.videoTask),
-      stageStatus: "awaiting_confirmation",
-      assetSnapshotId: lockedAssetSnapshot.id,
-    },
-    taskAssetSnapshots: [
-      ...structuredClone(current.taskAssetSnapshots),
-      lockedAssetSnapshot,
-    ],
-    stageArtifactVersions: current.stageArtifactVersions.map((version) =>
-      version.id === current.activeStageArtifactVersionIds.asset_matching
-        ? {
-            ...structuredClone(version),
-            dependencies: [
-              ...structuredClone(version.dependencies),
-              { kind: "asset_snapshot" as const, assetSnapshotId: lockedAssetSnapshot.id },
-            ],
-          }
-        : structuredClone(version)
-    ),
-  });
-
-  let shouldReject = true;
-  let verificationCount = 0;
-  const verifier: StageMediaArtifactVerifier = {
-    async verifyStageArtifact(input) {
-      verificationCount += 1;
-      assert.deepEqual(
-        [input.tenantId, input.batchProjectId, input.videoTaskId, input.stage],
-        [tenantId, project.id, value.taskId, "video_preview"],
-      );
-      if (shouldReject) {
-        throw new MediaArtifactRuntimeError(
-          "AIC-MEDIA-ARTIFACT-NOT_READY",
-          "The media artifact is not ready for this operation.",
-          409,
-        );
-      }
-    },
-  };
-  const stages = new VideoTaskStageRuntime(
-    value.administration,
-    value.projects,
-    value.tasks,
-    () => "2026-08-19T16:35:00.000Z",
-    (kind) => `${kind}_media_verification`,
-    undefined,
-    verifier,
-  );
-  const input = {
-    requestId: "request_confirm_registered_video_preview",
-    expectedTaskRevision: 8,
-    artifact: {
-      artifactId: "artifact_registered_video_preview",
-      schemaName: "media_artifact",
-      schemaVersion: 1,
-      contentHashSha256: "a".repeat(64),
-    },
-  } as const;
-
-  await assert.rejects(
-    stages.confirmStage(project.id, value.taskId, "video_preview", input, value.creator),
-    (error: unknown) =>
-      error instanceof MediaArtifactRuntimeError
-      && error.code === "AIC-MEDIA-ARTIFACT-NOT_READY",
-  );
-  assert.equal(verificationCount, 1);
-  assert.equal((await value.tasks.load(value.taskId))?.videoTask.revision, 8);
-
-  shouldReject = false;
-  const confirmed = await stages.confirmStage(
-    project.id,
-    value.taskId,
-    "video_preview",
-    input,
-    value.creator,
-  );
-  assert.equal(confirmed.replayed, false);
-  assert.equal(verificationCount, 2);
-
-  shouldReject = true;
-  const replay = await stages.confirmStage(
-    project.id,
-    value.taskId,
-    "video_preview",
-    input,
-    value.creator,
-  );
-  assert.equal(replay.replayed, true);
-  assert.deepEqual(replay.receipt, confirmed.receipt);
-  assert.equal(verificationCount, 2);
 });
 
 test("failed confirmation and rollback saves leave every stage audit unchanged", async () => {

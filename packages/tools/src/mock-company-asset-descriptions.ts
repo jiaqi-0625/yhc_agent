@@ -67,5 +67,3 @@ export function visualDescriptionForMockCompanyAsset(assetId: string): string {
   }
   return description;
 }
-
-

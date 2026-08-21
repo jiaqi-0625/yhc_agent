@@ -6,6 +6,7 @@ export * from "./asset-pool.ts";
 export * from "./policy.ts";
 export * from "./stage-confirmation.ts";
 export * from "./stage-rollback.ts";
+export * from "./asset-matching-revision.ts";
 export * from "./strategy.ts";
 export * from "./task-ownership.ts";
 export * from "./temporary-assets.ts";

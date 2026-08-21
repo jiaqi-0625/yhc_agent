@@ -296,8 +296,7 @@ test("asset confirmation refreshes the workspace task and Agent context", async 
   const callbackEnd = callbackSource.indexOf("\n  },\n});");
   assert.ok(panelStart >= 0 && start >= panelStart && callbackEnd > 0);
   const updateWiring = callbackSource.slice(0, callbackEnd);
-  assert.match(updateWiring, /task\.revision = updatedTask\.revision/u);
-  assert.match(updateWiring, /task\.currentStage = updatedTask\.currentStage/u);
+  assert.match(updateWiring, /Object\.assign\(task, updatedTask\)/u);
   assert.match(updateWiring, /workspaceFrame\.open\(updatedProjectId, updatedTask\.id/u);
   assert.match(updateWiring, /historyMode: "replace"/u);
 });
