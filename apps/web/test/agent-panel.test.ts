@@ -501,7 +501,9 @@ test("application wiring keeps action commands task-scoped and disabled during A
   assert.match(workspaceSync, /refreshAgentContextForWorkspaceTask\(selection\.task\)/u);
   assert.match(workspaceSync, /reloadAgentWorkspaceSession\(agentApi, sessionId, task\.id\)/u);
   assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(task\)/u);
+  assert.match(workspaceSync, /appendWorkspaceTaskSyncEvent\(selection\.task\)/u);
   assert.match(source, /synchronizeAgentWorkflowContinuation\(body\.session\.taskContext\?\.videoTask\)/u);
+  assert.match(source, /appendWorkspaceTaskSyncEvent\(body\.session\.taskContext\?\.videoTask\)/u);
   assert.match(source, /await synchronizeAgentWorkflowContinuation\(state\.taskContext\?\.videoTask\)/u);
   assert.match(source, /无需再向 Agent 发送“已确认”/u);
   assert.doesNotMatch(workspaceSync, /restoreTranscriptTimeline\(refreshed\.messages\)/u);

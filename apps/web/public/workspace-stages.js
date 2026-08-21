@@ -741,8 +741,10 @@ export function createWorkspaceStagesPanel(options) {
       project = nextProject || null;
       task = nextTask || null;
       visibleModule = nextVisibleModule;
+      if (visibleModule === "planning" && ["strategy", "script"].includes(task?.currentStage)) {
+        planningStage = task.currentStage;
+      }
       if (!visibleModule || !task || !contextAccountId || !contextChanged) return;
-      if (visibleModule === "planning") planningStage = ["strategy", "script"].includes(task.currentStage) ? task.currentStage : planningStage;
       void loadStage();
     },
     refresh: loadStage,

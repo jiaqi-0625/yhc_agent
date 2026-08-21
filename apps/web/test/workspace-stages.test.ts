@@ -125,6 +125,66 @@ test("script simulation remains visible when its task revision synchronizes back
   assert.match(roots.planning.innerHTML, /产物待负责人确认/u);
 });
 
+test("strategy confirmation switches the same planning panel to script without a page reload", async (context) => {
+  const browserGlobal = globalThis as typeof globalThis & { document?: unknown };
+  const originalDocument = browserGlobal.document;
+  browserGlobal.document = {
+    createElement() {
+      return {
+        className: "", innerHTML: "", open: false,
+        setAttribute() {}, querySelector() { return null; }, querySelectorAll() { return []; },
+        showModal() { this.open = true; }, close() { this.open = false; },
+      };
+    },
+    body: { append() {} },
+  };
+  context.after(() => {
+    if (originalDocument === undefined) delete browserGlobal.document;
+    else browserGlobal.document = originalDocument;
+  });
+  const roots = {
+    planning: fakeRoot(), storyboard: fakeRoot(), production: fakeRoot(), delivery: fakeRoot(),
+  };
+  let currentTask = {
+    id: "task_strategy", batchProjectId: "project_1", status: "active",
+    currentStage: "strategy", stageStatus: "awaiting_confirmation", revision: 3,
+    ownedByCurrentAccount: true, theme: "智能通勤", audience: "城市家庭",
+    durationSeconds: 15, platformTags: ["信息流"],
+  };
+  let panel: ReturnType<typeof createWorkspaceStagesPanel>;
+  panel = createWorkspaceStagesPanel({
+    roots,
+    api: {
+      getStageVersions: async (_projectId: string, _taskId: string, stage: string) => ({
+        videoTask: currentTask,
+        activeArtifactVersionId: undefined,
+        versions: [], invalidations: [],
+        ...(stage === "strategy" ? {
+          activeStrategyDraft: {
+            id: "strategy_draft_1", validation: { valid: true }, audience: "城市家庭",
+            theme: "智能通勤", items: [],
+          },
+          confirmationRequest: { id: "confirmation_request_1" },
+        } : {}),
+      }),
+      confirmStage: async () => {
+        currentTask = { ...currentTask, revision: 4, currentStage: "script", stageStatus: "in_progress" };
+        return { videoTask: currentTask };
+      },
+    },
+    getCurrentAccountId: () => "account_creator_b",
+    onTaskUpdated: (updatedTask: typeof currentTask) => {
+      panel.setContext("project_1", { project: { id: "project_1" } }, updatedTask as never, "planning");
+    },
+  } as never);
+  panel.setContext("project_1", { project: { id: "project_1" } }, currentTask as never, "planning");
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.match(roots.planning.innerHTML, /<h2>营销策略<\/h2>/u);
+  await roots.planning.clickConfirm();
+  assert.match(roots.planning.innerHTML, /<h2>脚本<\/h2>/u);
+  assert.match(roots.planning.innerHTML, /策略确认后由 Agent 生成脚本/u);
+});
+
 const task = {
   id: "task_1",
   status: "active",

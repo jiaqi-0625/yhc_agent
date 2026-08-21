@@ -14,7 +14,7 @@ import {
   reloadAgentWorkspaceSession,
   strategyApprovalContinuationCard,
   unavailableAgentTaskMessage,
-} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v4";
+} from "./agent-panel.js?build=ws502-v1-ag504-recovery-v1-ag405-v1-task-sync-v5";
 import { api, setWorkspaceSessionToken } from "./api-client.js";
 import { authApi } from "./auth-api.js";
 import { managementApi } from "./management-api.js?build=management-center-ws409-v3";
@@ -28,7 +28,7 @@ import {
 import { createProjectCreationWizard } from "./project-creation-wizard.js";
 import { workspaceApi } from "./workspace-api.js?build=workspace-cost-ws408-v2";
 import { assertWorkspaceAgentSession } from "./workspace-agent-context.js?build=ws501-v1";
-import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-task-sync-ws210-v2";
+import { createWorkspaceStagesPanel } from "./workspace-stages.js?build=workspace-cost-ws408-v2-task-sync-ws210-v3";
 import { createWorkspaceFrame } from "./workspace-frame.js?build=workspace-cost-ws408-v2-ws501-v1-ag504-recovery-v1";
 import {
   bindWorkspaceShell,
@@ -1142,6 +1142,7 @@ async function refreshAgentContextAfterCommand(sessionId, videoTaskId, expectedS
       || (Number.isSafeInteger(currentRevision) && refreshedRevision < currentRevision)
     ) return;
     updateSession(body.session);
+    appendWorkspaceTaskSyncEvent(body.session.taskContext?.videoTask);
     refreshActionProposalAvailability();
     await synchronizeAgentWorkflowContinuation(body.session.taskContext?.videoTask);
   } catch {}
@@ -1849,6 +1850,11 @@ async function restoreSession(scope = captureWorkspaceScope()) {
 async function synchronizeAgentWorkspaceSelection(selection) {
   const videoTaskId = selection.task?.id || null;
   if (videoTaskId === state.selectedVideoTaskId) {
+    if (
+      videoTaskId
+      && state.sessionId
+      && state.sessionVideoTaskId === videoTaskId
+    ) appendWorkspaceTaskSyncEvent(selection.task);
     if (
       videoTaskId &&
       state.sessionId &&
