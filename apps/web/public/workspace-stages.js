@@ -49,8 +49,9 @@ export function confirmationAvailability(task, stage, view) {
       : { enabled: false, label: "等待确认请求" };
   }
   const active = view?.versions?.find(function (item) { return item.id === view.activeArtifactVersionId; });
-  return active
-    ? { enabled: true, label: "确认本阶段", artifact: active.content }
+  const artifact = view?.simulatedArtifact || active?.content;
+  return artifact
+    ? { enabled: true, label: "确认本阶段", artifact: artifact }
     : { enabled: false, label: "等待产物入库" };
 }
 
@@ -307,6 +308,7 @@ export function createWorkspaceStagesPanel(options) {
   let budgetState = null;
   let runLockState = null;
   let adjustments = {};
+  let simulatedArtifact = null;
   let contextAccountId = null;
   let contextGeneration = 0;
   let busy = false;
@@ -328,6 +330,7 @@ export function createWorkspaceStagesPanel(options) {
     budgetState = null;
     runLockState = null;
     adjustments = {};
+    simulatedArtifact = null;
   }
 
   function clearRoots() {
@@ -375,7 +378,18 @@ export function createWorkspaceStagesPanel(options) {
     const root = roots[visibleModule];
     const stage = currentStage();
     if (!root || !stage || !task) return;
-    const availability = confirmationAvailability(task, stage, view);
+    const availability = confirmationAvailability(task, stage, {
+      ...view,
+      ...(simulatedArtifact ? { simulatedArtifact: simulatedArtifact } : {}),
+    });
+    const canSimulate = Boolean(
+      typeof options.api.simulateStage === "function" &&
+      task.ownedByCurrentAccount &&
+      task.status === "active" &&
+      task.currentStage === stage &&
+      ["script", "storyboard", "video_preview", "delivery"].includes(stage) &&
+      ["in_progress", "awaiting_confirmation"].includes(task.stageStatus),
+    );
     const body = stage === "strategy" ? strategyBody(task, view)
       : stage === "script" ? scriptBody(task, view)
       : stage === "storyboard" ? storyboardBody(task, view, assetView, adjustments)
@@ -383,7 +397,7 @@ export function createWorkspaceStagesPanel(options) {
       : deliveryBody(task, stageViews);
     root.innerHTML = `<div class="production-stage-shell">
       <header class="production-stage-header"><div><div class="production-stage-title"><h2>${stageLabels[stage]}</h2>${statusBadge(task, stage)}</div><p>${notice(stage)}</p></div>
-        <div class="production-stage-actions"><button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
+        <div class="production-stage-actions">${canSimulate ? `<button class="button secondary" type="button" data-stage-simulate ${busy ? "disabled" : ""}>${task.stageStatus === "awaiting_confirmation" ? "恢复模拟产物" : "生成模拟产物"}</button>` : ""}<button class="button secondary" type="button" data-stage-history ${view?.versions?.length ? "" : "disabled"}>历史版本${view?.versions?.length ? ` (${view.versions.length})` : ""}</button><button class="button primary" type="button" data-stage-confirm ${availability.enabled && !busy ? "" : "disabled"}>${availability.label}</button></div>
       </header>
       ${visibleModule === "planning" ? '<div class="planning-tabs" role="tablist" aria-label="策划阶段"><button type="button" role="tab" data-planning-stage="strategy">营销策略</button><button type="button" role="tab" data-planning-stage="script">脚本</button></div>' : ""}
       ${stagePath(task, stage)}
@@ -401,6 +415,7 @@ export function createWorkspaceStagesPanel(options) {
       });
     });
     root.querySelector("[data-stage-history]")?.addEventListener("click", showHistory);
+    root.querySelector("[data-stage-simulate]")?.addEventListener("click", simulateStage);
     root.querySelector("[data-stage-confirm]")?.addEventListener("click", confirmStage);
     root.querySelectorAll("[data-shot-adjust]").forEach(function (button) {
       button.addEventListener("click", function () { showAssetPicker(Number(button.dataset.shotIndex), button.dataset.shotAdjust); });
@@ -456,7 +471,10 @@ export function createWorkspaceStagesPanel(options) {
 
   async function confirmStage() {
     const stage = currentStage();
-    const availability = confirmationAvailability(task, stage, view);
+    const availability = confirmationAvailability(task, stage, {
+      ...view,
+      ...(simulatedArtifact ? { simulatedArtifact: simulatedArtifact } : {}),
+    });
     if (!availability.enabled || busy) return;
     const mutationContextGeneration = contextGeneration;
     const mutationProjectId = projectId;
@@ -476,6 +494,7 @@ export function createWorkspaceStagesPanel(options) {
         || mutationTaskId !== task?.id
       ) return;
       task = { ...task, ...result.videoTask };
+      simulatedArtifact = null;
       options.onTaskUpdated?.(result.videoTask);
       await loadStage();
     } catch (error) {
@@ -493,6 +512,24 @@ export function createWorkspaceStagesPanel(options) {
         setPanelBusy(false);
         render();
       }
+    }
+  }
+
+  async function simulateStage() {
+    const stage = currentStage();
+    if (!stage || busy || typeof options.api.simulateStage !== "function") return;
+    setPanelBusy(true);
+    render();
+    try {
+      const result = await options.api.simulateStage(projectId, task.id, stage);
+      task = { ...task, ...result.videoTask };
+      simulatedArtifact = result.artifact;
+      options.onTaskUpdated?.(result.videoTask);
+    } catch (error) {
+      showMessage(errorText(error));
+    } finally {
+      setPanelBusy(false);
+      render();
     }
   }
 

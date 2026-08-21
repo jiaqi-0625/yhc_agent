@@ -308,6 +308,7 @@ async function handleRequest(
       url,
       videoTaskStages,
       workspaceSessions,
+      developmentAccountsEnabled,
     )
   ) return;
   if (

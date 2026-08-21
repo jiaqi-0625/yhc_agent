@@ -81,6 +81,14 @@ export const workspaceApi = {
       jsonOptions("POST", input),
     );
   },
+  simulateStage: function (projectId, videoTaskId, stage) {
+    return api(
+      "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +
+      "/video-tasks/" + encodeURIComponent(videoTaskId) +
+      "/stages/" + encodeURIComponent(stage) + "/development-simulation",
+      { method: "POST" },
+    );
+  },
   rollbackStage: function (projectId, videoTaskId, stage, input) {
     return api(
       "/v1/workspace/batch-projects/" + encodeURIComponent(projectId) +

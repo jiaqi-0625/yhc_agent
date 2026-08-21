@@ -308,6 +308,92 @@ export class VideoTaskStageRuntime {
     };
   }
 
+  async prepareDevelopmentSimulation(
+    projectId: string,
+    videoTaskId: string,
+    stage: VideoTaskStage,
+    session: Readonly<WorkspaceSessionScope>,
+  ): Promise<{
+    readonly videoTask: VideoTaskProductionRecord["videoTask"];
+    readonly artifact: StageArtifactContentReference;
+    readonly simulated: true;
+  }> {
+    if (["strategy", "asset_matching"].includes(stage)) {
+      throw runtimeError(
+        "AIC-DEVELOPMENT-SIMULATION-STAGE_INVALID",
+        "Strategy and asset matching must use their existing server-authoritative flows.",
+        409,
+      );
+    }
+    return this.administration.withSnapshot(session.tenantId, async (state) => {
+      const scope = this.#currentScope(session, state);
+      this.#assertCreator(scope);
+      const project = await this.#project(scope.tenantId, projectId);
+      assertCanViewBatchProject(scope, project);
+      const occurredAt = this.now();
+      const record = await this.tasks.transact(videoTaskId, async (current) => {
+        if (!current) {
+          throw runtimeError("AIC-STAGE-TASK_NOT_FOUND", `Video task '${videoTaskId}' was not found.`, 404);
+        }
+        this.#assertTaskBelongsToProject(current, project, videoTaskId);
+        assertCanViewVideoTask(scope, project, current.videoTask);
+        assertCanOperateVideoTask(scope, project, current.videoTask);
+        if (
+          current.videoTask.status !== "active" ||
+          current.videoTask.currentStage !== stage ||
+          !["in_progress", "awaiting_confirmation"].includes(current.videoTask.stageStatus)
+        ) {
+          throw runtimeError(
+            "AIC-DEVELOPMENT-SIMULATION-STATE_INVALID",
+            "Only the current active stage can receive a simulated artifact.",
+            409,
+          );
+        }
+        if (current.videoTask.stageStatus === "awaiting_confirmation") {
+          return structuredClone(current);
+        }
+        const workflow = nextVideoTaskWorkflowState({
+          taskStatus: current.videoTask.status,
+          currentStage: current.videoTask.currentStage,
+          stageStatus: current.videoTask.stageStatus,
+        }, {
+          type: "stage_confirmation_requested",
+          stage,
+        });
+        return {
+          ...structuredClone(current),
+          videoTask: {
+            ...structuredClone(current.videoTask),
+            status: workflow.taskStatus,
+            currentStage: workflow.currentStage,
+            stageStatus: workflow.stageStatus,
+            revision: current.videoTask.revision + 1,
+            updatedAt: occurredAt,
+            updatedBy: scope.actorAccountId,
+          },
+        };
+      });
+      const artifactSeed = {
+        schemaVersion: 1,
+        kind: "development_stage_simulation",
+        tenantId: record.videoTask.tenantId,
+        batchProjectId: record.videoTask.batchProjectId,
+        videoTaskId: record.videoTask.id,
+        stage,
+      };
+      return {
+        videoTask: structuredClone(record.videoTask),
+        artifact: {
+          artifactId: `development_simulation_${sha256(artifactSeed).slice(0, 48)}`,
+          schemaName: `development_simulated_${stage}`,
+          schemaVersion: 1,
+          contentHashSha256: sha256(artifactSeed),
+        },
+        simulated: true,
+      };
+    });
+  }
+
   async getStageAudit(
     projectId: string,
     videoTaskId: string,

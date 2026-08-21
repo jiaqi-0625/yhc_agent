@@ -78,6 +78,14 @@ test("non-strategy confirmation only uses a server-returned persisted artifact",
   } as never);
   assert.equal(available.enabled, true);
   assert.deepEqual(available.artifact, artifact);
+
+  const simulated = confirmationAvailability(task as never, "storyboard", {
+    activeArtifactVersionId: undefined,
+    versions: [],
+    simulatedArtifact: artifact,
+  } as never);
+  assert.equal(simulated.enabled, true);
+  assert.deepEqual(simulated.artifact, artifact);
 });
 
 test("strategy confirmation requires the persisted confirmation request", () => {

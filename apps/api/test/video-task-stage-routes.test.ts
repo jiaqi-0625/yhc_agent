@@ -495,7 +495,7 @@ function jsonAuthorization(token: string): {
   return { ...authorization(token), "content-type": "application/json" };
 }
 
-test("stage route matcher accepts exactly the four frozen paths and all six stages", () => {
+test("stage route matcher keeps the four production paths and the explicit development simulation path", () => {
   for (const stage of stages) {
     assert.deepEqual(
       matchVideoTaskStagePath(`${basePath}/stages/${stage}/versions`),
@@ -508,6 +508,10 @@ test("stage route matcher accepts exactly the four frozen paths and all six stag
     assert.deepEqual(
       matchVideoTaskStagePath(`${basePath}/stages/${stage}/rollbacks`),
       { kind: "rollbacks", projectId, videoTaskId, stage },
+    );
+    assert.deepEqual(
+      matchVideoTaskStagePath(`${basePath}/stages/${stage}/development-simulation`),
+      { kind: "development_simulation", projectId, videoTaskId, stage },
     );
   }
   assert.deepEqual(matchVideoTaskStagePath(`${basePath}/stage-invalidations`), {

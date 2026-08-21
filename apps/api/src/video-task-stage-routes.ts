@@ -32,6 +32,10 @@ const StageRollbacksPath = new RegExp(
   `^${StageRouteBase}/stages/${StagePath}/rollbacks$`,
   "u",
 );
+const StageSimulationsPath = new RegExp(
+  `^${StageRouteBase}/stages/${StagePath}/development-simulation$`,
+  "u",
+);
 
 interface StageScopedRoute {
   projectId: string;
@@ -43,6 +47,7 @@ export type VideoTaskStageRouteMatch =
   | ({ kind: "versions" } & StageScopedRoute)
   | ({ kind: "audit" } & Omit<StageScopedRoute, "stage">)
   | ({ kind: "confirmations" } & StageScopedRoute)
+  | ({ kind: "development_simulation" } & StageScopedRoute)
   | ({ kind: "rollbacks" } & StageScopedRoute);
 
 function scopedMatch(
@@ -72,6 +77,9 @@ export function matchVideoTaskStagePath(
   const confirmations = scopedMatch(pathname, StageConfirmationsPath);
   if (confirmations) return { kind: "confirmations", ...confirmations };
 
+  const simulation = scopedMatch(pathname, StageSimulationsPath);
+  if (simulation) return { kind: "development_simulation", ...simulation };
+
   const rollbacks = scopedMatch(pathname, StageRollbacksPath);
   if (rollbacks) return { kind: "rollbacks", ...rollbacks };
   return undefined;
@@ -94,11 +102,27 @@ export async function handleVideoTaskStageRoute(
   url: URL,
   runtime: VideoTaskStageRuntime,
   sessions: WorkspaceSessionRuntime,
+  developmentSimulationEnabled = false,
 ): Promise<boolean> {
   const route = matchVideoTaskStagePath(url.pathname);
   if (!route) return false;
   assertNoQuery(url);
   const session = await resolveWorkspaceSession(request, sessions);
+
+  if (request.method === "POST" && route.kind === "development_simulation") {
+    if (!developmentSimulationEnabled) return false;
+    sendJson(
+      response,
+      200,
+      await runtime.prepareDevelopmentSimulation(
+        route.projectId,
+        route.videoTaskId,
+        route.stage,
+        session.scope,
+      ),
+    );
+    return true;
+  }
 
   if (request.method === "GET" && route.kind === "versions") {
     sendJson(

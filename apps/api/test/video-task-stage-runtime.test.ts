@@ -351,6 +351,45 @@ async function prepareAssetMatchingApproval(value: Awaited<ReturnType<typeof fix
   return { strategy, script };
 }
 
+test("development simulation prepares a deterministic current-stage artifact without bypassing strategy or assets", async () => {
+  const value = await fixture();
+  await prepareStrategyApproval(value);
+  await value.stages.confirmStage(project.id, value.taskId, "strategy", {
+    requestId: "request_confirm_strategy_for_simulation",
+    expectedTaskRevision: 3,
+  }, value.creator);
+
+  const prepared = await value.stages.prepareDevelopmentSimulation(
+    project.id,
+    value.taskId,
+    "script",
+    value.creator,
+  );
+  assert.equal(prepared.videoTask.currentStage, "script");
+  assert.equal(prepared.videoTask.stageStatus, "awaiting_confirmation");
+  assert.equal(prepared.videoTask.revision, 5);
+  assert.match(prepared.artifact.artifactId, /^development_simulation_[0-9a-f]{48}$/u);
+  assert.equal(prepared.artifact.schemaName, "development_simulated_script");
+
+  const replay = await value.stages.prepareDevelopmentSimulation(
+    project.id,
+    value.taskId,
+    "script",
+    value.creator,
+  );
+  assert.equal(replay.videoTask.revision, prepared.videoTask.revision);
+  assert.deepEqual(replay.artifact, prepared.artifact);
+  await assert.rejects(
+    value.stages.prepareDevelopmentSimulation(
+      project.id,
+      value.taskId,
+      "asset_matching",
+      value.creator,
+    ),
+    hasBusinessCode("AIC-DEVELOPMENT-SIMULATION-STAGE_INVALID"),
+  );
+});
+
 function selectedReusableAssets(): AssetReference[] {
   return assetPool.assets
     .filter((asset) => asset.category === "person" || asset.category === "scene")
